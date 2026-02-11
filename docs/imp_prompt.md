@@ -63,7 +63,8 @@ Implementation-time agents (Orchestrator, Risk, Logging) are workflow constructs
 ## 1. Spec Priority (The Spec Is Law)
 
 - The primary spec file (default: `specs.md`) is the **single source of truth** for behavior.
-- This repo (including `schwab/*`) is the ONLY source of truth. Do NOT browse the web, do NOT use external documentation, and do NOT “fill in” missing behavior from prior knowledge. If the repo docs conflict, stop and raise a `TODO(SPEC_CLARIFICATION)` per this section.
+- This repo (including `schwab/*`) is the ONLY source of truth. Do NOT browse the web, do NOT use external documentation, and do NOT “fill in” missing behavior from prior knowledge. If docs conflict: `specs.md` governs. Only raise `TODO(SPEC_CLARIFICATION)` when `specs.md` is silent and the conflict affects user-visible behavior or execution correctness.
+
 
 - If anything is unclear or missing:
   1. Stop work on that specific behavior.
