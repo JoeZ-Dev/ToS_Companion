@@ -647,6 +647,36 @@ Streaming:
 - If port 8765 is already in use by a non-app process, the app MUST fail loudly and instruct the user how to resolve (do NOT silently choose another port unless the spec explicitly permits it).
 - The app MUST explicitly define whether it auto-opens the browser for OAuth or requires manual user copy/paste. If not defined, add `TODO(SPEC_CLARIFICATION)`.
 
+OAuth Redirect (MVP — Final)
+
+- Local callback listener MUST use:
+  - Host: 127.0.0.1
+  - Port: dynamically selected free port
+  - Path: /callback
+
+Example redirect URI:
+http://127.0.0.1:{port}/callback
+
+OAuth UX (MVP — Final)
+
+- Default behavior: auto-open the system browser to the authorization URL.
+- UI MUST display:
+  - the authorization URL (read-only)
+  - a “Copy URL” button
+  - an “Open Browser” button (manual fallback)
+- If auto-open fails, the user MUST be able to complete OAuth via the manual buttons without restarting the app.
+
+Retry / Backoff Constants (MVP — Final)
+
+Unless a subsection specifies otherwise, REST retries and streaming reconnects use:
+
+- Backoff sequence (seconds): 1, 2, 4, 8 (cap at 8)
+- Jitter: ±30%
+- Attempts: after 8 consecutive failures, the app MUST enter a visible degraded state (banner) but MAY continue retrying at a fixed interval:
+  - retry interval after degrade: 30 seconds
+
+These constants are binding for MVP.
+
 ---
 
 ### 8.4 Auth & Vault State Machine *(MVP — Intent Lock)*
@@ -964,6 +994,14 @@ The AE-1.1 snapshot object passed to the LLM MUST include, at minimum:
 - `quote` object containing at least: `bid`, `ask`, `last`, `volume` (nullable allowed)
 - `bars_window` (bars context sufficient for 5m-only LLM context per §1 glossary; if the upstream AE uses a different name such as `bars_window_5m`, the app MUST map it into `bars_window` in the LLM payload)
 
+Deterministic AE→LLM Field Mapping (MVP — Final)
+
+If upstream AE snapshot uses different field names, the LLM payload MUST be normalized as follows:
+
+- `market_state` → `session_mode` (direct mapping of enum values)
+- `bars_window_5m` → `bars_window`
+- Any timestamps must remain UTC epoch ms as required by §11.1
+
 If AE-1.1 includes additional fields, they MUST match the AE contract and MUST NOT be invented by the app.
 
 If AE gating fails (`status!=ok` OR `data_quality!=ok`), the LLM MUST NOT be invoked.
@@ -1222,6 +1260,14 @@ The implementation MUST map responsibilities to these modules (names may vary; o
 **Rules:**
 - If the inbound stream message cannot be mapped/validated, treat as `DATA_INTEGRITY_ERROR`, fail loudly, and journal the event.
 - “No bar if no quote”: `BarAggregator10s` MUST NOT emit a bar for a 10s window if no canonical events arrived in that window.
+
+Streaming Field Normalization (MVP — Final)
+
+Schwab streaming payload field IDs/keys are normalized into the canonical quote event schema (§13.1) using a repo-local mapping file:
+
+- docs/schwab/stream_field_map.md
+
+This mapping file is authoritative. The implementation MUST NOT guess field meanings. If incoming stream fields differ, the mapping file MUST be updated and re-ingested before implementation changes proceed.
 
 ---
 
