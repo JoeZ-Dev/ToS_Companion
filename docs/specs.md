@@ -138,7 +138,7 @@ This glossary is intentionally capped (MVP) and is the canonical source of term 
 **ET usage**
 
 - ET is used for **session definitions and user-facing labels** only (e.g., NORMAL 09:30–16:00 ET; SEAMLESS 04:00–20:00 ET).
-- App access window is 06:00–20:00 ET. AE ‘current session’ may ingest from 04:00–20:00 ET for context; this does not change UI access/trading availability.
+- App access window is 04:00–20:00 ET. AE ‘current session’ may ingest from 04:00–20:00 ET for context; this does not change UI access/trading availability.
 
 **Cross-document alignment**
 
@@ -388,6 +388,22 @@ user_data_dir("MomentumTradingCompanion")/instances/<instance_id>/data.db
 OAuth multi-instance rule:
 
 - Only one instance runs interactive OAuth at a time (lock file).
+
+OAuth lock file location (MVP — Final):
+
+The lock file MUST be located at:
+
+platformdirs.user_runtime_dir("MomentumTradingCompanion")/oauth.lock
+
+The lock MUST be exclusive. If already locked, the app MUST refuse to start interactive OAuth and instruct the user to complete authentication in the existing instance.
+
+
+Single-DB Constraint (MVP):
+
+All persistent per-instance application data MUST reside inside the per-instance SQLite database (`data.db`) defined above.
+
+The implementation MUST NOT introduce additional databases (e.g., secondary SQLite files) unless explicitly defined in this spec via a versioned schema change.
+
 
 ### 7.2 SQLite Schema (Final)
 
@@ -978,12 +994,36 @@ All actions are advisory only.
 - `validity` flips between `VALID_FOR_TRADING` and `NOT_VALID_FOR_TRADING`
 - `setup_rating` changes by **2 or more** letter-notches (e.g., A → B-, B → C+)
 - `entry_price`, `stop_loss`, or `target_price` changes by **>= 0.5%** (absolute percent vs prior value)
-- Any new `reason_code` appears with “severity HIGH” semantics (implementation-defined mapping) OR `risk_reward` drops below 2.0 when previously >= 2.0
+- Any new `reason_code` appears with severity HIGH semantics as explicitly defined in §11.4.1 OR `risk_reward` drops below 2.0 when previously >= 2.0
 
 **Flash-worthy plan change (In Position):** Always Flash when:
 - `trade_management_action` changes to `EXIT_NOW` or `SCALE_OUT_50`
 - `action_urgency` becomes `HIGH`
 * High-visibility alerts SHOULD auto-clear on the next LLM update unless reasserted by a new HIGH-urgency action.
+
+### 11.4.1 Severity HIGH Mapping (Deterministic — MVP)
+
+The following reason codes are classified as severity HIGH and are Flash-worthy:
+
+- ENTRY_APPROACHING
+- STOP_THREAT
+- HALT_OR_REJECT
+- DISCONNECT
+- EXECUTION_FILL
+- RISK_BREACH
+
+Threshold semantics:
+
+- ENTRY_APPROACHING triggers when abs(last - entry_price) / entry_price <= 0.001 (0.10%).
+- STOP_THREAT triggers when stop_price is set AND abs(last - stop_price) / stop_price <= 0.001 (0.10%).
+- DISCONNECT triggers when stream gap > 5 seconds.
+- HALT_OR_REJECT emits immediately on halt detection or order rejection.
+- EXECUTION_FILL emits immediately on partial or full fill.
+- RISK_BREACH emits when:
+  - a configured max position size is exceeded, OR
+  - an invalid/impossible position state is detected (also classify as DATA_INTEGRITY_ERROR).
+
+No additional reason codes may be treated as severity HIGH unless explicitly added in a future version of this spec.
 
 ---
 
