@@ -46,6 +46,19 @@ under “Stack Notes” and continue implementation using the spec-defined stack
 - CI expectation: Linux test gate required + Windows build validation required.
 If any packaging/tooling choice is not explicitly specified in `specs.md`, add a `TODO(SPEC_CLARIFICATION)` and proceed with other work.
 
+Architectural Constraint (Critical):
+
+Do NOT introduce:
+- a runtime “agent framework”
+- message buses
+- orchestration layers
+- secondary persistence systems
+- additional service containers
+
+Implementation must follow the module boundaries defined in `specs.md §13` and use simple Python modules/classes.
+
+Implementation-time agents (Orchestrator, Risk, Logging) are workflow constructs defined in AGENT_PROTOCOL.md and MUST NOT become runtime architecture.
+
 --------------------------------------------------------------------------------
 ## 1. Spec Priority (The Spec Is Law)
 
@@ -61,6 +74,17 @@ If any packaging/tooling choice is not explicitly specified in `specs.md`, add a
   3. Proceed with other clearly specified tasks.
 
 Never add features, fields, or endpoints not explicitly required by the spec.
+
+The repository is the ONLY source of truth, including all Schwab documentation under `schwab/`.
+
+Do NOT:
+- browse the web,
+- use prior Schwab knowledge,
+- infer missing fields from external SDKs,
+- extend API contracts beyond what exists in-repo.
+
+If required data is missing from the repo, add TODO(SPEC_CLARIFICATION) and stop that feature.
+
 
 --------------------------------------------------------------------------------
 ## 2. Files as Memory & Bootstrap Rules
