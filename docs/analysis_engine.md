@@ -119,6 +119,9 @@ Emit a deterministic snapshot for the active symbol used by UI overlays and as t
 - `market_state` (`premarket|normal|afterhours`)
 - `status` (`ok|error`)
 - `data_quality` (`ok|partial|stale|no_data|error`)
+**Note (integration boundary):**
+AE-1.1 does NOT emit the following LLM-payload fields required by `specs.md §11.2.5`: `schema_version`, `session_mode`, and the `quote{bid,ask,last,volume}` object. These fields are deterministically added by the application during normalization per `specs.md §11.2.5`.
+
 
 If `data_quality != ok`:
 - `status` MAY remain `ok` if the snapshot is structurally valid.
@@ -182,6 +185,34 @@ Each event MUST include at minimum: `timestamp_ms` (int, UTC epoch milliseconds)
 - `signals` (qualitative flags):
   - breakout / pullback / continuation / failure flags
   - qualitative confidence: `low|medium|high` (no opaque numeric scores)
+
+**levels schema (MVP — Final):**
+- `levels`: array of objects, each:
+  - `price` (float)
+  - `kind` (str)  # e.g., "support", "resistance", "vwap_related" (AE-defined vocabulary)
+  - `tf_origin` (enum: `4h|1h|5m`)
+  - `strength` (enum: `low|medium|high`)
+  - `label` (str | null)
+
+**events schema (MVP — Final):**
+- `events`: object with keys:
+  - `rejection_events`: array[event]
+  - `largest_red_candle_events`: array[event]
+  - `largest_green_candle_events`: array[event]
+  - `volume_spike_events`: array[event]
+  - `max_adverse_excursion`: event | null
+  - `max_favorable_excursion`: event | null
+- `event` object required fields:
+  - `timestamp_ms` (int, UTC epoch ms)
+  - `time_to_move_seconds` (float | int)
+  - `volume_multiple` (float | int | null)
+  - `move_pct_from_level` (float | null)
+
+**signals schema (MVP — Final):**
+- `signals`: array of objects, each:
+  - `type` (enum: `breakout|pullback|continuation|failure`)
+  - `confidence` (enum: `low|medium|high`)
+  - `timestamp_ms` (int, UTC epoch ms)
 
 ### 2.4.5 Explicit Non-Responsibilities
 The Analysis Engine MUST NOT:
