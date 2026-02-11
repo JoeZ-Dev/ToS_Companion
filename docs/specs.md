@@ -608,7 +608,7 @@ This spec remains **schema/wrapper-agnostic**, but the implementation MUST satis
 
 REST:
 - **401/403** (auth invalid/expired): transition to `REAUTH_REQUIRED`, disable trading actions, and show persistent banner prompting Connect-to-Schwab.
-- **429** (rate limit): apply exponential backoff with jitter (implementation-defined), show a non-modal warning banner, and continue retrying for non-order endpoints. For **order endpoints**, do not blindly retry submits; surface error and require explicit user re-attempt.
+- **429** (rate limit): apply exponential backoff with jitter per “Retry / Backoff Constants (MVP — Final)”, show a non-modal warning banner, and continue retrying for non-order endpoints. For **order endpoints**, do not blindly retry submits; surface error and require explicit user re-attempt.
 - **5xx / timeouts / network errors**: retry with backoff for non-order endpoints; for order submit/replace/cancel, surface error and reconcile via status polling before allowing repeated attempts.
 
 Streaming:
@@ -633,7 +633,7 @@ Streaming:
   * EMM loops must stop and cancel remaining open quantity (per §9.3 and precedence §9.8).
 * Reconnect policy:
 
-  * Auto-reconnect with backoff (implementation-defined) until user exits.
+  * Auto-reconnect with backoff per “Retry / Backoff Constants (MVP — Final)” below until user exits.
   * After reconnect, re-subscribe to the active symbol and resume aggregation.
 
 **OAuth callback & multi-instance rule:**
@@ -643,19 +643,19 @@ Streaming:
 * If another instance is already running the interactive OAuth connect flow, additional instances must detect a lock (file lock) and instruct the user to complete auth in the first instance.
 
 **Callback implementation requirements (MVP):**
-- Redirect path MUST be explicitly defined (e.g., `http://127.0.0.1:8765/callback`). If not defined, add `TODO(SPEC_CLARIFICATION)` and do not assume.
+- Redirect URI MUST be: `http://127.0.0.1:8765/callback` (host 127.0.0.1, port 8765, path /callback).
 - If port 8765 is already in use by a non-app process, the app MUST fail loudly and instruct the user how to resolve (do NOT silently choose another port unless the spec explicitly permits it).
-- The app MUST explicitly define whether it auto-opens the browser for OAuth or requires manual user copy/paste. If not defined, add `TODO(SPEC_CLARIFICATION)`.
+- OAuth UX is defined below in “OAuth UX (MVP — Final)” and is binding for MVP.
 
 OAuth Redirect (MVP — Final)
 
 - Local callback listener MUST use:
   - Host: 127.0.0.1
-  - Port: dynamically selected free port
+  - Port: 8765 (fixed)
   - Path: /callback
 
 Example redirect URI:
-http://127.0.0.1:{port}/callback
+http://127.0.0.1:8765/callback
 
 OAuth UX (MVP — Final)
 
@@ -992,13 +992,14 @@ The AE-1.1 snapshot object passed to the LLM MUST include, at minimum:
 - `symbol` (string)
 - `session_mode` (`NORMAL|SEAMLESS`)
 - `quote` object containing at least: `bid`, `ask`, `last`, `volume` (nullable allowed)
+- `market_state` (`premarket|normal|afterhours`)
 - `bars_window` (bars context sufficient for 5m-only LLM context per §1 glossary; if the upstream AE uses a different name such as `bars_window_5m`, the app MUST map it into `bars_window` in the LLM payload)
 
 Deterministic AE→LLM Field Mapping (MVP — Final)
 
 If upstream AE snapshot uses different field names, the LLM payload MUST be normalized as follows:
 
-- `market_state` → `session_mode` (direct mapping of enum values)
+- `market_state` → `market_state` (direct mapping of enum values)
 - `bars_window_5m` → `bars_window`
 - Any timestamps must remain UTC epoch ms as required by §11.1
 
