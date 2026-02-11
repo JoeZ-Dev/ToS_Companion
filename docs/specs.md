@@ -925,7 +925,7 @@ No conversational memory is permitted.
 #### 11.2.2 Invocation Context
 
 * `invocation_type`: `TICKER_LOAD` | `MANUAL_RECALC`
-* `as_of_ts`
+* `as_of_ts_ms`
 
 #### 11.2.3 Position Context (only when in trade)
 
@@ -951,7 +951,7 @@ The AE-1.1 snapshot object passed to the LLM MUST include, at minimum:
 - `schema_version` (string)
 - `status` (`ok|error`)
 - `data_quality` (per glossary; used for gating)
-- `as_of_ts` (UTC ISO-8601 or UTC epoch ms — must match the AE contract)
+- `as_of_ts_ms` (UTC epoch milliseconds; MUST match §11.1 AE timestamp rule)
 - `symbol` (string)
 - `session_mode` (`NORMAL|SEAMLESS`)
 - `quote` object containing at least: `bid`, `ask`, `last`, `volume` (nullable allowed)
@@ -1105,7 +1105,7 @@ Threshold semantics:
 - HALT_OR_REJECT emits immediately on halt detection or order rejection.
 - EXECUTION_FILL emits immediately on partial or full fill.
 
-### RISK_BREACH Rule (MVP — Final)
+#### RISK_BREACH Rule (MVP — Final)
 
 This MVP does NOT enforce a maximum position size cap.
 
@@ -1197,7 +1197,7 @@ The implementation MUST map responsibilities to these modules (names may vary; o
 - any UI quote display state
 
 **Schema (required fields):**
-- `ts_utc`: string (UTC ISO-8601, source timestamp preferred; fallback allowed but must be labeled)
+- `ts_ms`: integer (UTC epoch milliseconds; normalized immediately upon ingest)
 - `symbol`: string
 - `bid`: float | null
 - `ask`: float | null
@@ -1346,6 +1346,21 @@ Shutdown:
 2. Cancel all armed synthetic triggers
 3. Flush DB writes
 4. Wait up to 3 seconds then exit
+
+Startup Trading Safety Gate (MVP — Final):
+
+Trading actions (submit/replace/cancel/flatten/arm trigger) MUST remain disabled until ALL of the following are true:
+
+- Auth state = TOKENS_VALID
+- Streaming state = CONNECTED
+- Quote freshness <= 5 seconds (not STALE)
+- Journal subsystem healthy (no verification_degraded state)
+- Broker reconciliation complete (working orders synchronized)
+
+Until these conditions are satisfied:
+- Order buttons MUST be disabled
+- Synthetic arming MUST be disabled
+- A visible banner MUST explain which prerequisite is unmet
 
 ---
 
