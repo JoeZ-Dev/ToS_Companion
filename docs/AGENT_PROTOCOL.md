@@ -62,4 +62,3 @@ The agent's implementation of any feature will follow this precise, iterative se
 7.  **Repeat:** Steps 4 and 5 are repeated until all behaviors for the feature are implemented.
 8.  **Step 6 (REFACTOR): Propose Improvements:** Once complete, the agent analyzes the code for refactoring opportunities. If any are found, the agent commits all work *before* refactoring, then proceeds with the improvements, running the test suite after to ensure no behavior was broken.
 
-This protocol ensures that the AmpUP V2 codebase is built in a verifiable, robust, and maintainable manner with a clean, atomic Git history.
