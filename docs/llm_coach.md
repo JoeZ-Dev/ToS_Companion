@@ -97,6 +97,15 @@ Risk / Data:
 * RR_BELOW_MINIMUM
 * DATA_STALE
 
+Execution / System (MVP addendum per specs.md §11.3.3):
+
+* ENTRY_APPROACHING
+* STOP_THREAT
+* HALT_OR_REJECT
+* DISCONNECT
+* EXECUTION_FILL
+* RISK_BREACH
+
 ---
 
 ## 7. Trade Management Behavior
