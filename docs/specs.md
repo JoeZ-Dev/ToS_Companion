@@ -617,6 +617,14 @@ Streaming:
 
 **Required streaming capabilities:**
 
+**Streaming credential acquisition (MVP — Final):**
+- `SchwabRestClient` MUST call `GET /trader/v1/userPreference` to obtain streaming connection fields (StreamerInfo) after OAuth completes (access token available).
+- `SchwabStreamClient` MUST reuse the latest StreamerInfo until one of:
+  - access token is refreshed, OR
+  - stream LOGIN/auth fails.
+  In either case, the app MUST re-fetch StreamerInfo before the next reconnect attempt.
+
+
 * Start a streaming session and subscribe to the active symbol for:
 
   * bid/ask/last price
