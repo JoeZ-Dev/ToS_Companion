@@ -329,6 +329,14 @@ Volume anomaly handling:
 - Negative delta → clamp to 0; log anomaly
 - Unreasonably large delta → cap at `max(250_000, 10 × median_delta_last_60s)`; log anomaly
 
+Warm-up behavior (MVP — Final):
+
+Volume anomaly capping uses the median of volume deltas observed over the last 60 seconds.
+
+- If fewer than 10 deltas exist in the 60s window, capping MUST be disabled (no cap applied).
+- Otherwise, compute the median over the available deltas in the 60s window.
+
+
 ### 5.5 Studies (Final)
 
 VWAP:
@@ -504,6 +512,13 @@ CREATE INDEX idx_trade_journal_symbol_ts
 -- persist_window_geometry ("0"/"1")
 -- persist_study_toggles ("0"/"1")
 ```
+### 7.2.1 Initial Schema Version (MVP — Final)
+
+On first run, the SQLite database MUST be created with:
+
+- `schema_version = 1`
+
+If migrations ever occur, they MUST increment `schema_version` monotonically by integer steps.
 
 ### 7.3 Trade Journaling (MVP, Final)
 
@@ -842,6 +857,14 @@ If any conflict exists, **this document (`specs.md §11`) takes precedence**.
 - Only contracted inputs may be sent; no account identifiers, balances, P&L, or execution reports.
 - Invocation is user-controlled; no autonomous transfer or execution.
 
+### 11.0.2 LLM Provider/Model Configuration (MVP — Final)
+
+MVP LLM Provider: OpenAI
+
+- API key is sourced from environment variable `OPENAI_API_KEY` (never stored in DB or logs).
+- The selected model identifier is stored in SQLite `app_state` (per-instance).
+- Default model identifier (MVP): `gpt-5.1-codex-max`
+- The user may change model identifier in Settings (string), but the app MUST validate it is non-empty before enabling LLM.
 
 ---
 
@@ -860,6 +883,17 @@ The LLM Coach is an advisory analysis component designed to evaluate live market
 * **Longs only**
 * Single-target analysis
 * Operates both pre-entry and in-position
+
+AE-1.1 Snapshot Timestamp Format (MVP — Final):
+
+All AE-1.1 snapshot timestamps MUST use UTC epoch milliseconds (`int`) consistently across:
+
+- `as_of_ts_ms`
+- quote timestamps
+- bar timestamps
+
+ISO-8601 timestamps are not permitted in AE-1.1 payloads for MVP.
+
 
 ---
 
@@ -1070,11 +1104,40 @@ Threshold semantics:
 - DISCONNECT triggers when stream gap > 5 seconds.
 - HALT_OR_REJECT emits immediately on halt detection or order rejection.
 - EXECUTION_FILL emits immediately on partial or full fill.
-- RISK_BREACH emits when:
-  - a configured max position size is exceeded, OR
-  - an invalid/impossible position state is detected (also classify as DATA_INTEGRITY_ERROR).
+
+### RISK_BREACH Rule (MVP — Final)
+
+This MVP does NOT enforce a maximum position size cap.
+
+`RISK_BREACH` is reserved for deterministic guardrail violations and invalid/impossible state detection.
+
+Emit `RISK_BREACH` (severity HIGH) when ANY of the following occurs:
+
+**Invalid/Impossible position state (also classify `DATA_INTEGRITY_ERROR`):**
+- `position_qty < 0` (long-only system)
+- `position_qty > 0` AND `avg_price` is null, NaN, infinite, or <= 0
+- Position symbol != active symbol
+- Broker reconciliation reports fills inconsistent with local `position_qty` beyond rounding tolerance
+- Any required numeric field used for execution becomes NaN/inf (price, qty, stop, target)
+
+**Guardrail violations (severity HIGH):**
+- The app attempts any SHORT action (sell-to-open / net short) in a long-only system
+- An order/intent would result in a net short position
+- Any execution action is attempted while in a degraded safety state where trading is disabled by spec (auth not OK, stream stale, journal unhealthy, reconciliation incomplete)
+
 
 No additional reason codes may be treated as severity HIGH unless explicitly added in a future version of this spec.
+
+Market Halt Detection (MVP — Final):
+
+HALT_OR_REJECT MUST be emitted immediately on:
+
+- Any broker order rejection / cancel-reject / replace-reject event (authoritative).
+
+Market halt detection from market data is OPTIONAL for MVP:
+
+- If Schwab stream/REST provides an explicit halt indicator for the symbol, the app MAY emit HALT_OR_REJECT based on that indicator.
+- If no explicit halt indicator exists in the Schwab data available to the app, the app MUST NOT attempt heuristic halt detection.
 
 ---
 
