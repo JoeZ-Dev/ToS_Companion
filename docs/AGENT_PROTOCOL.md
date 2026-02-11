@@ -62,3 +62,38 @@ The agent's implementation of any feature will follow this precise, iterative se
 7.  **Repeat:** Steps 4 and 5 are repeated until all behaviors for the feature are implemented.
 8.  **Step 6 (REFACTOR): Propose Improvements:** Once complete, the agent analyzes the code for refactoring opportunities. If any are found, the agent commits all work *before* refactoring, then proceeds with the improvements, running the test suite after to ensure no behavior was broken.
 
+---
+
+## 4. Implementation-Time Agent Roles (Workflow Structure Only)
+
+The following agents are workflow roles used during implementation. They are NOT runtime architecture and MUST NOT introduce new application-layer abstractions.
+
+### 4.1 Orchestrator Agent (Required)
+
+Responsibilities:
+- Owns execution checklist derived from `specs.md`.
+- Assigns scoped tasks to other agents.
+- Ensures agents do not modify files outside their task scope.
+- Ensures no cross-agent direct invocation occurs.
+
+Only the Orchestrator may invoke other agents.
+
+### 4.2 Risk Agent (Required)
+
+Responsibilities:
+- Prevents spec drift.
+- Blocks invention of:
+  - new database files
+  - new schema fields
+  - new endpoints
+  - new architectural layers
+- Verifies that any new field exists in `specs.md`.
+
+### 4.3 Logging Agent (Required)
+
+Responsibilities:
+- Ensures journaling occurs before execution where required by spec.
+- Ensures no secrets are logged.
+- Verifies error taxonomy compliance.
+
+These agents exist only for structured implementation workflow. They MUST NOT be implemented as runtime components inside the application unless `specs.md` explicitly defines them.
