@@ -1532,23 +1532,26 @@ This section does not alter the test list; it preserves authority to prevent tes
 
 This appendix defines the ONLY permitted mapping from Schwab streaming messages into the canonical quote event schema (§13.1).
 
+MVP NOTE — SPEC_BLOCKED UNTIL FIELD IDS CAPTURED
+- The Schwab QUOTE streaming field identifiers (keys/indices) for `ts_ms`, `symbol`, `bid`, `ask`, `last`, `bid_size`, `ask_size`, `last_size`, and `volume` MUST be captured from a live Schwab QUOTE subscription and recorded here **before** normalization is implemented.
+- No guessing or inference is permitted. Until this table is populated with real identifiers, streaming normalization and canonical quote emission (§13.1) remain SPEC_BLOCKED.
+
 Rules:
 - If an inbound stream message does not contain the fields required below, the message MUST be treated as `DATA_INTEGRITY_ERROR` and MUST NOT be partially guessed.
 - This appendix is the authoritative mapping table for MVP.
 
 ### D.1 Mapping Table (QUOTE service)
 
-| Canonical Field (§13.1) | Schwab Stream Source | Notes |
+| Canonical Field (§13.1) | Schwab QUOTE field id/key | Notes |
 |---|---|---|
-| ts_ms | <MUST DEFINE> | Must be UTC epoch ms; use trade ts preferred, else quote ts, else local ingest |
-| symbol | <MUST DEFINE> | |
-| bid | <MUST DEFINE> | |
-| ask | <MUST DEFINE> | |
-| last | <MUST DEFINE> | |
-| bid_size | <MUST DEFINE> | optional |
-| ask_size | <MUST DEFINE> | optional |
-| last_size | <MUST DEFINE> | optional |
-| volume | <MUST DEFINE> | cumulative or delta (see §5.4) |
+| ts_ms | TODO(SPEC_CLARIFICATION) | UTC epoch ms derived from Schwab timestamp field; trade ts preferred, else quote ts, else ingest |
+| symbol | TODO(SPEC_CLARIFICATION) | |
+| bid | TODO(SPEC_CLARIFICATION) | |
+| ask | TODO(SPEC_CLARIFICATION) | |
+| last | TODO(SPEC_CLARIFICATION) | |
+| bid_size | TODO(SPEC_CLARIFICATION) | optional |
+| ask_size | TODO(SPEC_CLARIFICATION) | optional |
+| last_size | TODO(SPEC_CLARIFICATION) | optional |
+| volume | TODO(SPEC_CLARIFICATION) | cumulative or delta (see §5.4) |
 
 **SPEC_CLARIFICATION REQUIRED (blocking):** Populate the Schwab stream field identifiers/keys used for QUOTE subscription fields so this mapping is fully deterministic.
-
