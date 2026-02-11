@@ -115,15 +115,17 @@ Emit a deterministic snapshot for the active symbol used by UI overlays and as t
 
 ### 2.4.2 Top-Level Schema (Required)
 - `symbol` (str)
-- `timestamp_utc` (str, ISO-8601)
+- `as_of_ts_ms` (int, UTC epoch milliseconds)
 - `market_state` (`premarket|normal|afterhours`)
 - `status` (`ok|error`)
 - `data_quality` (`ok|partial|stale|no_data|error`)
 
-If `data_quality != ok`, then:
-- `status` MUST be `error`
-- all computed fields MUST be null
-- downstream components (LLM Coach, overlays) MUST NOT run
+If `data_quality != ok`:
+- `status` MAY remain `ok` if the snapshot is structurally valid.
+- Computed fields SHOULD remain populated when deterministically computable.
+- `status` MUST be `error` only when the snapshot cannot be generated due to an internal exception or contract violation.
+- Downstream components (LLM Coach, overlays) MUST NOT run unless `status=ok` AND `data_quality=ok`.
+
 
 ### 2.4.3 Allowed Raw Bars (LLM Contract Alignment)
 - The snapshot MAY include multiple internal timeframes for calculation.
@@ -175,7 +177,7 @@ No 1m/10s/tick bars may be exposed as raw bar arrays.
   - `volume_spike_events`
   - `max_adverse_excursion`
   - `max_favorable_excursion`
-Each event MUST include at minimum: `timestamp_utc`, `move_pct_from_level` (if level-related), `time_to_move_seconds`, and `volume_multiple`.
+Each event MUST include at minimum: `timestamp_ms` (int, UTC epoch milliseconds), `move_pct_from_level` (if level-related), `time_to_move_seconds`, and `volume_multiple`.
 
 - `signals` (qualitative flags):
   - breakout / pullback / continuation / failure flags
