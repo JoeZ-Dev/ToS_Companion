@@ -13,7 +13,8 @@ This spec must be interpreted using **only** the following sources:
 
 1. `specs.md` (baseline v1.0 requirements, preserved herein)
 2. `analysis_engine.md` (AE-1.0 contract, authoritative for market profile generation)
-3. Schwab API supporting documents located under `schwab/`, including:
+3. `llm_coach.md` (LLM Coach behavior + prompt specification; MUST conform to `specs.md §11`)
+4. Schwab API supporting documents located under `schwab/`, including:
    - `Retail_Trader_API.md`
    - `Market_Data_API.md`
    - `OAuth_Authentication_Guide.md`
@@ -288,7 +289,8 @@ AE-1.1 (Live Analysis Snapshot) is used for live evaluation and LLM inputs.
 Cadence rules:
 
 - When `connection_state=CONNECTED`, recompute the AE-1.1 Live Analysis Snapshot on each completed 10-second bar.
-- When `connection_state!=CONNECTED` or data is `STALE`, AE-1.1 output may be produced but MUST reflect degraded `status` / `data_quality` and MUST gate the LLM OFF per §11.2.5 and §11.2.1.
+- When `connection_state!=CONNECTED` or data is `STALE`, AE-1.1 output may be produced but MUST reflect degraded `data_quality`. `status` MAY remain `ok` if the snapshot is structurally valid. The LLM MUST be gated OFF when `status!=ok` OR `data_quality!=ok` per §11.2.5 and §11.2.1.
+
 
 **Failure behavior**
 
@@ -902,7 +904,7 @@ ISO-8601 timestamps are not permitted in AE-1.1 payloads for MVP.
 Each invocation receives a complete, self-contained market snapshot.
 No conversational memory is permitted.
 
-**Canonical payload schema:** The canonical JSON object passed as the market snapshot is the Analysis Engine **Live Analysis Snapshot** contract defined in `analysis_engine.md §2.4 (AE-1.1)`. This §11.2 section is **semantic requirements and UI context**; it does not redefine the JSON schema.
+**Canonical payload schema:** The canonical JSON object passed as the market snapshot is the AE-1.1 LLM-input payload contract defined in `specs.md §11.2.5` (minimum required fields + timestamp rules). Upstream AE outputs (if any) MUST be deterministically mapped/normalized into this contract before invoking the LLM.
 
 
 #### 11.2.1 Market Snapshot
@@ -942,9 +944,14 @@ No conversational memory is permitted.
 * Skip refresh if prior call still running
 * **Manual Re-calc:** always allowed, but MAY be globally rate-limited to protect system stability.
 
+Manual LLM Re-calc Cooldown (MVP — Final):
+
+Manual LLM re-calc is limited to at most once every 10 seconds per instance per symbol.
+
+
 #### 11.2.5 AE-1.1 Live Snapshot — MVP Minimum Required Fields *(Clarification — Spec Factory tightening)*
 
-`analysis_engine.md §2.4 (AE-1.1)` remains the authoritative schema. This subsection adds an MVP “minimum required fields” guardrail so the implementation cannot silently omit or invent LLM input structure.
+`specs.md` is authoritative for the AE-1.1 snapshot payload actually passed to the LLM in MVP. If `analysis_engine.md` describes AE-1.1 fields differently, the application MUST map/normalize into the field names and timestamp rules defined in this subsection before invoking the LLM.
 
 The AE-1.1 snapshot object passed to the LLM MUST include, at minimum:
 
@@ -955,13 +962,13 @@ The AE-1.1 snapshot object passed to the LLM MUST include, at minimum:
 - `symbol` (string)
 - `session_mode` (`NORMAL|SEAMLESS`)
 - `quote` object containing at least: `bid`, `ask`, `last`, `volume` (nullable allowed)
-- `bars_window` / bars context sufficient for 5m-only LLM context (per §1 glossary note)
+- `bars_window` (bars context sufficient for 5m-only LLM context per §1 glossary; if the upstream AE uses a different name such as `bars_window_5m`, the app MUST map it into `bars_window` in the LLM payload)
 
 If AE-1.1 includes additional fields, they MUST match the AE contract and MUST NOT be invented by the app.
 
 If AE gating fails (`status!=ok` OR `data_quality!=ok`), the LLM MUST NOT be invoked.
 
-Field names in this subsection MUST exactly match the canonical AE-1.1 schema defined in `analysis_engine.md`; no renaming (e.g., `bars` vs `bars_window`) is permitted.
+Field names in the payload passed to the LLM MUST exactly match this §11.2.5 contract. Any upstream AE naming differences MUST be resolved via deterministic mapping before LLM invocation.
 
 ---
 
@@ -1034,16 +1041,19 @@ All actions are advisory only.
 
 #### 11.3.3 Reason Code Vocabulary (MVP — Authority Lock) *(Clarification — Spec Factory tightening)*
 
-The allowed `reason_codes` vocabulary is defined in `llm_coach.md` (glossary section).
+The allowed `reason_codes` vocabulary is defined by:
+
+1) `llm_coach.md` (glossary section), PLUS
+2) The MVP addendum list below (this section).
 
 Rules:
 
-- Every `reason_code` emitted by the LLM MUST exist in the `llm_coach.md` glossary.
-- If the LLM emits any `reason_code` not present in the glossary, the response MUST be treated as schema-invalid and journaled as `LLM_SCHEMA_INVALID`.
+- Every `reason_code` emitted by the LLM MUST exist in either:
+  - the `llm_coach.md` glossary, OR
+  - the MVP addendum list below.
+- If the LLM emits any `reason_code` not present in that union set, the response MUST be treated as schema-invalid and journaled as `LLM_SCHEMA_INVALID`.
 
-Minimum required glossary coverage (MVP):
-
-The `llm_coach.md` glossary MUST include, at minimum, these codes (used by §11.4.1 severity HIGH mapping):
+MVP addendum reason codes (authoritative in `specs.md` until `llm_coach.md` is updated to match):
 
 - ENTRY_APPROACHING
 - STOP_THREAT
