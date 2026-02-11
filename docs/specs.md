@@ -169,17 +169,15 @@ CI expectations:
 - Windows build validation required
 
 > This is architecture-level intent and constraints, not step-by-step instructions.
-## 2.2 Windows EXE Packaging Toolchain (MVP — Decision Required)
+## 2.2 Windows EXE Packaging Toolchain (MVP — Final)
 
-The spec requires a Windows EXE deliverable. The packaging toolchain MUST be explicitly chosen to avoid late-stage blockers (especially with PySide6 + Qt WebEngine + Plotly assets).
+The Windows EXE packaging toolchain is locked as:
 
-**DECISION REQUIRED (choose one and lock it):**
-- Option A: PyInstaller
-- Option B: Nuitka
-- Option C: Briefcase
+- PyInstaller
 
-**MVP default if no decision is locked:** `TODO(SPEC_CLARIFICATION)` (do NOT assume a toolchain).
+Rationale: MVP reliability for PySide6 + Qt WebEngine + Plotly assets.
 
+This decision is binding for MVP. Do NOT substitute Nuitka or Briefcase unless this spec is explicitly revised.
 
 ---
 
@@ -205,7 +203,7 @@ This prevents hidden behavior drift in agentic builds.
 - Indicators: `pandas`, `numpy` (optionally `pandas-ta`)
 - Storage: **SQLite (****sqlite3****, builtin)**
 - Paths: **platformdirs** (required)
-- Crypto: **cryptography** (Fernet)
+- Crypto: Windows DPAPI for Schwab tokens at rest (authoritative). `cryptography` (Fernet) is NOT required for MVP unless explicitly added for a non-token use case.
 
 **Portability rule:** Windows-only dependencies are prohibited unless isolated behind an interface. Hotkeys are the sole allowed exception.
 
@@ -280,8 +278,17 @@ This product depends on a deterministic, non-AI **Analysis Engine** defined in `
 
 **Invocation timing (explicit, non-invasive)**
 
-- AE runs **once per symbol** (as defined by AE-1.0). This spec does not require AE to run in real time.
+- AE-1.0 runs **once per symbol** (as defined by AE-1.0). AE-1.0 does not run in real time.
 - If the product needs a refreshed profile, it must run AE again explicitly (no silent refresh).
+
+### 5.0.1 Analysis Engine (AE-1.1) Live Snapshot Cadence *(Clarification — Spec Factory tightening)*
+
+AE-1.1 (Live Analysis Snapshot) is used for live evaluation and LLM inputs.
+
+Cadence rules:
+
+- When `connection_state=CONNECTED`, recompute the AE-1.1 Live Analysis Snapshot on each completed 10-second bar.
+- When `connection_state!=CONNECTED` or data is `STALE`, AE-1.1 output may be produced but MUST reflect degraded `status` / `data_quality` and MUST gate the LLM OFF per §11.2.5 and §11.2.1.
 
 **Failure behavior**
 
@@ -825,9 +832,12 @@ If any conflict exists, **this document (`specs.md §11`) takes precedence**.
 
 - LLM access MUST be via an adapter interface.
 - Exactly one provider/model is active at a time and declared via configuration.
-- Requests MUST be bounded (hard timeout, low/zero temperature, max tokens).
+- Requests MUST be bounded with fixed limits (MVP — Final):
+  - hard timeout: 10 seconds
+  - temperature: 0.2
+  - max output tokens: 800
 - Responses MUST validate against the authoritative schema.
-- Invalid responses MUST surface NOT_VALID and be journaled as `llm_invalid_schema`.
+- Invalid responses MUST surface NOT_VALID and be journaled as `LLM_SCHEMA_INVALID`.
 - No automatic retries unless explicitly user-initiated.
 - Only contracted inputs may be sent; no account identifiers, balances, P&L, or execution reports.
 - Invocation is user-controlled; no autonomous transfer or execution.
@@ -898,6 +908,27 @@ No conversational memory is permitted.
 * Skip refresh if prior call still running
 * **Manual Re-calc:** always allowed, but MAY be globally rate-limited to protect system stability.
 
+#### 11.2.5 AE-1.1 Live Snapshot — MVP Minimum Required Fields *(Clarification — Spec Factory tightening)*
+
+`analysis_engine.md §2.4 (AE-1.1)` remains the authoritative schema. This subsection adds an MVP “minimum required fields” guardrail so the implementation cannot silently omit or invent LLM input structure.
+
+The AE-1.1 snapshot object passed to the LLM MUST include, at minimum:
+
+- `schema_version` (string)
+- `status` (`ok|error`)
+- `data_quality` (per glossary; used for gating)
+- `as_of_ts` (UTC ISO-8601 or UTC epoch ms — must match the AE contract)
+- `symbol` (string)
+- `session_mode` (`NORMAL|SEAMLESS`)
+- `quote` object containing at least: `bid`, `ask`, `last`, `volume` (nullable allowed)
+- `bars_window` / bars context sufficient for 5m-only LLM context (per §1 glossary note)
+
+If AE-1.1 includes additional fields, they MUST match the AE contract and MUST NOT be invented by the app.
+
+If AE gating fails (`status!=ok` OR `data_quality!=ok`), the LLM MUST NOT be invoked.
+
+Field names in this subsection MUST exactly match the canonical AE-1.1 schema defined in `analysis_engine.md`; no renaming (e.g., `bars` vs `bars_window`) is permitted.
+
 ---
 
 ### 11.3 LLM Coach Output Schema (Authoritative)
@@ -966,6 +997,26 @@ Additional fields when `in_position=true`:
 * `management_summary`: ≤ 3 sentences
 
 All actions are advisory only.
+
+#### 11.3.3 Reason Code Vocabulary (MVP — Authority Lock) *(Clarification — Spec Factory tightening)*
+
+The allowed `reason_codes` vocabulary is defined in `llm_coach.md` (glossary section).
+
+Rules:
+
+- Every `reason_code` emitted by the LLM MUST exist in the `llm_coach.md` glossary.
+- If the LLM emits any `reason_code` not present in the glossary, the response MUST be treated as schema-invalid and journaled as `LLM_SCHEMA_INVALID`.
+
+Minimum required glossary coverage (MVP):
+
+The `llm_coach.md` glossary MUST include, at minimum, these codes (used by §11.4.1 severity HIGH mapping):
+
+- ENTRY_APPROACHING
+- STOP_THREAT
+- HALT_OR_REJECT
+- DISCONNECT
+- EXECUTION_FILL
+- RISK_BREACH
 
 ---
 
@@ -1115,6 +1166,10 @@ For journaling and logging consistency, surfaced errors SHOULD be classified int
 
 If an error does not fit a category, use `DATA_INTEGRITY_ERROR` as the safest default (fail loudly).
 
+Clarification (LLM Schema Validation):
+
+`LLM_SCHEMA_INVALID` events MUST be classified under `DATA_INTEGRITY_ERROR` for error taxonomy purposes, while retaining the specific journal event name `LLM_SCHEMA_INVALID`.
+
 ---
 
 Logging:
@@ -1165,12 +1220,14 @@ Do NOT log every incremental LLM response or streaming update.
 
 A recommendation is considered changed if any of the following fields differ from the last logged state:
 
-* `direction` (LONG / SHORT / NONE)
+* `validity`
+* `setup_rating`
 * `entry_price`
-* `stop_price`
+* `stop_loss`
 * `target_price`
-* `setup_validity_state`
-* `confidence_label` (if defined in LLM contract)
+* `risk_reward`
+* `reason_codes`
+
 
 Minor textual reasoning changes alone do NOT constitute a material change.
 
