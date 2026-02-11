@@ -1003,6 +1003,18 @@ The AE-1.1 snapshot object passed to the LLM MUST include, at minimum:
 - `market_state` (`premarket|normal|afterhours`)
 - `bars_window` (bars context sufficient for 5m-only LLM context per §1 glossary; if the upstream AE uses a different name such as `bars_window_5m`, the app MUST map it into `bars_window` in the LLM payload)
 
+Deterministic field producers (MVP — Final)
+
+The LLM payload in §11.2.5 is produced by the application by combining:
+- Upstream AE-1.1 snapshot fields (from `analysis_engine.md`), AND
+- Current application state and the latest canonical quote event (§13.1).
+
+Producers:
+- `schema_version`: constant string `"AE-1.1"` for MVP.
+- `session_mode`: the current Order Ticket “Session” selection (`NORMAL|SEAMLESS`). Default is `SEAMLESS` on ticker load.
+- `quote.{bid,ask,last,volume}`: sourced from the most recent canonical quote event (§13.1) at or before `as_of_ts_ms`. Nulls are allowed if the stream has not provided that field yet.
+- `bars_window`: sourced from upstream AE `bars_window_5m` and mapped into `bars_window` as specified below.
+
 Deterministic AE→LLM Field Mapping (MVP — Final)
 
 If upstream AE snapshot uses different field names, the LLM payload MUST be normalized as follows:
@@ -1272,11 +1284,11 @@ The implementation MUST map responsibilities to these modules (names may vary; o
 
 Streaming Field Normalization (MVP — Final)
 
-Schwab streaming payload field IDs/keys are normalized into the canonical quote event schema (§13.1) using a repo-local mapping file:
+Schwab streaming payload field IDs/keys are normalized into the canonical quote event schema (§13.1) using a repo-local mapping table embedded in this spec:
 
-- docs/schwab/stream_field_map.md
+- Appendix D — Schwab Stream Field Mapping (MVP — Final)
 
-This mapping file is authoritative. The implementation MUST NOT guess field meanings. If incoming stream fields differ, the mapping file MUST be updated and re-ingested before implementation changes proceed.
+This mapping table is authoritative. The implementation MUST NOT guess field meanings. If incoming stream fields differ, Appendix D MUST be updated in a versioned spec revision before implementation changes proceed.
 
 ---
 
@@ -1513,4 +1525,30 @@ This section does not alter the test list; it preserves authority to prevent tes
 ---
 
 **End of Specs v1.0**
+
+---
+
+## Appendix D — Schwab Stream Field Mapping (MVP — Final)
+
+This appendix defines the ONLY permitted mapping from Schwab streaming messages into the canonical quote event schema (§13.1).
+
+Rules:
+- If an inbound stream message does not contain the fields required below, the message MUST be treated as `DATA_INTEGRITY_ERROR` and MUST NOT be partially guessed.
+- This appendix is the authoritative mapping table for MVP.
+
+### D.1 Mapping Table (QUOTE service)
+
+| Canonical Field (§13.1) | Schwab Stream Source | Notes |
+|---|---|---|
+| ts_ms | <MUST DEFINE> | Must be UTC epoch ms; use trade ts preferred, else quote ts, else local ingest |
+| symbol | <MUST DEFINE> | |
+| bid | <MUST DEFINE> | |
+| ask | <MUST DEFINE> | |
+| last | <MUST DEFINE> | |
+| bid_size | <MUST DEFINE> | optional |
+| ask_size | <MUST DEFINE> | optional |
+| last_size | <MUST DEFINE> | optional |
+| volume | <MUST DEFINE> | cumulative or delta (see §5.4) |
+
+**SPEC_CLARIFICATION REQUIRED (blocking):** Populate the Schwab stream field identifiers/keys used for QUOTE subscription fields so this mapping is fully deterministic.
 
