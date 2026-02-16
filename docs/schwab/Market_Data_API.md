@@ -54,23 +54,23 @@ https://api.schwabapi.com/marketdata/v1
 
 | Name | Location | Required | Type | Description |
 |------|----------|----------|------|-------------|
-| `` |  |  |  |  |
-| `` |  |  |  |  |
-| `` |  |  |  |  |
-| `` |  |  |  |  |
-| `` |  |  |  |  |
-| `` |  |  |  |  |
-| `` |  |  |  |  |
-| `` |  |  |  |  |
-| `` |  |  |  |  |
-| `` |  |  |  |  |
-| `` |  |  |  |  |
-| `` |  |  |  |  |
-| `` |  |  |  |  |
-| `` |  |  |  |  |
-| `` |  |  |  |  |
-| `` |  |  |  |  |
-| `` |  |  |  |  |
+| `symbol` | query | ✓ | string | Enter one symbol |
+| `contractType` | query |  | string (`CALL`,`PUT`,`ALL`) | Contract type |
+| `strikeCount` | query |  | integer | Number of strikes above/below at-the-money |
+| `includeUnderlyingQuote` | query |  | boolean | Include underlying quote |
+| `strategy` | query |  | string (`SINGLE`,`ANALYTICAL`,`COVERED`,`VERTICAL`,`CALENDAR`,`STRANGLE`,`STRADDLE`,`BUTTERFLY`,`CONDOR`,`DIAGONAL`,`COLLAR`,`ROLL`) | Option strategy (ANALYTICAL enables theoretical inputs) |
+| `interval` | query |  | number (double) | Strike interval for spread strategies |
+| `strike` | query |  | number (double) | Strike price |
+| `range` | query |  | string | Range (ITM/NTM/OTM etc.) |
+| `fromDate` | query |  | string (date) | From date (yyyy-MM-dd) |
+| `toDate` | query |  | string (date) | To date (yyyy-MM-dd) |
+| `volatility` | query |  | number (double) | Volatility (ANALYTICAL only) |
+| `underlyingPrice` | query |  | number (double) | Underlying price (ANALYTICAL only) |
+| `interestRate` | query |  | number (double) | Interest rate (ANALYTICAL only) |
+| `daysToExpiration` | query |  | integer | Days to expiration (ANALYTICAL only) |
+| `expMonth` | query |  | string (JAN..DEC, ALL) | Expiration month |
+| `optionType` | query |  | string | Option type |
+| `entitlement` | query |  | string (`PN`,`NP`,`PP`) | Retail entitlement flag |
 
 **Responses:**
 
@@ -103,7 +103,7 @@ https://api.schwabapi.com/marketdata/v1
 
 | Name | Location | Required | Type | Description |
 |------|----------|----------|------|-------------|
-| `` |  |  |  |  |
+| `symbol` | query | ✓ | string | Enter one symbol |
 
 **Responses:**
 
@@ -136,8 +136,8 @@ https://api.schwabapi.com/marketdata/v1
 
 | Name | Location | Required | Type | Description |
 |------|----------|----------|------|-------------|
-| `` |  |  |  |  |
-| `` |  |  |  |  |
+| `markets` | query | ✓ | array | List of markets |
+| `date` | query |  | string (date) | YYYY-MM-DD; defaults to current day (up to +1 year) |
 
 **Responses:**
 
@@ -200,8 +200,8 @@ https://api.schwabapi.com/marketdata/v1
 
 | Name | Location | Required | Type | Description |
 |------|----------|----------|------|-------------|
-| `` |  |  |  |  |
-| `` |  |  |  |  |
+| `market_id` | path | ✓ | string (`equity`,`option`,`bond`,`future`,`forex`) | Market id |
+| `date` | query |  | string (date) | YYYY-MM-DD; defaults to current day (up to +1 year) |
 
 **Responses:**
 
@@ -231,8 +231,8 @@ https://api.schwabapi.com/marketdata/v1
 
 | Name | Location | Required | Type | Description |
 |------|----------|----------|------|-------------|
-| `` |  |  |  |  |
-| `` |  |  |  |  |
+| `symbol` | query | ✓ | string | Symbol of a security |
+| `projection` | query | ✓ | string (`symbol-search`,`symbol-regex`,`desc-search`,`desc-regex`,`search`,`fundamental`) | Search mode |
 
 **Responses:**
 
@@ -264,9 +264,9 @@ https://api.schwabapi.com/marketdata/v1
 
 | Name | Location | Required | Type | Description |
 |------|----------|----------|------|-------------|
-| `` |  |  |  |  |
-| `` |  |  |  |  |
-| `` |  |  |  |  |
+| `symbol_id` | path | ✓ | string (`$DJI`,`$COMPX`,`$SPX`,`NYSE`,`NASDAQ`,`OTCBB`,`INDEX_ALL`,`EQUITY_ALL`,`OPTION_ALL`,`OPTION_PUT`,`OPTION_CALL`) | Index symbol |
+| `sort` | query |  | string (`VOLUME`,`TRADES`,`PERCENT_CHANGE_UP`,`PERCENT_CHANGE_DOWN`) | Sort attribute |
+| `frequency` | query |  | integer (`0,1,5,10,30,60`) | Movers frequency bucket |
 
 **Responses:**
 
@@ -298,15 +298,15 @@ https://api.schwabapi.com/marketdata/v1
 
 | Name | Location | Required | Type | Description |
 |------|----------|----------|------|-------------|
-| `` |  |  |  |  |
-| `` |  |  |  |  |
-| `` |  |  |  |  |
-| `` |  |  |  |  |
-| `` |  |  |  |  |
-| `` |  |  |  |  |
-| `` |  |  |  |  |
-| `` |  |  |  |  |
-| `` |  |  |  |  |
+| `symbol` | query | ✓ | string | Equity symbol (e.g., AAPL) |
+| `periodType` | query |  | string | Chart period: `day`, `month`, `year`, `ytd` |
+| `period` | query |  | integer | Number of periods; valid values depend on `periodType` |
+| `frequencyType` | query |  | string | Time frequency; valid values depend on `periodType` |
+| `frequency` | query |  | integer | Frequency interval; valid values depend on `frequencyType` |
+| `startDate` | query |  | integer (ms epoch) | Start time; optional when using date-bounded form |
+| `endDate` | query |  | integer (ms epoch) | End time; optional when using date-bounded form |
+| `needExtendedHoursData` | query |  | boolean | Include extended-hours data |
+| `needPreviousClose` | query |  | boolean | Include previous close fields |
 
 **Responses:**
 
@@ -338,9 +338,9 @@ https://api.schwabapi.com/marketdata/v1
 
 | Name | Location | Required | Type | Description |
 |------|----------|----------|------|-------------|
-| `` |  |  |  |  |
-| `` |  |  |  |  |
-| `` |  |  |  |  |
+| `symbols` | query | ✓ | string | Comma-separated list of symbols (e.g., `AAPL,BAC,$SPX`) |
+| `fields` | query |  | string | Comma-separated root nodes: `quote,fundamental,extended,reference,regular`; omit for full response |
+| `indicative` | query |  | boolean | Include indicative ETF symbols (e.g., `$ABC.IV` when true) |
 
 **Responses:**
 
@@ -370,8 +370,8 @@ https://api.schwabapi.com/marketdata/v1
 
 | Name | Location | Required | Type | Description |
 |------|----------|----------|------|-------------|
-| `` |  |  |  |  |
-| `` |  |  |  |  |
+| `symbol_id` | path | ✓ | string | Symbol of instrument (e.g., `TSLA`) |
+| `fields` | query |  | string | Comma-separated root nodes: `quote,fundamental,extended,reference,regular`; omit for full response |
 
 **Responses:**
 

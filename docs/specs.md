@@ -557,6 +557,12 @@ UI:
   - Mark the session as `verification_degraded=true`
   - Continue running, but include degradation in any LLM context if enabled
 
+Journal health recovery rule (MVP — Final):
+
+- `verification_degraded` remains latched until the journal queue drains to zero **and** at least one subsequent append+fsync cycle succeeds after the failure.
+- On successful append+fsync with an empty queue, clear `verification_degraded`, remove the banner, and allow the trading gate to consider the journal subsystem healthy.
+- If any write fails during recovery attempts, keep `verification_degraded` latched and repeat recovery on the next enqueue.
+
 ---
 
 ## 8. Credential Storage & Authentication
@@ -616,6 +622,127 @@ Streaming:
 - On reconnect, re-subscribe to the active symbol and resume aggregation; do not “fill gaps” with fabricated bars.
 
 **Required streaming capabilities:**
+---
+
+### 8.3.1 Market Data REST Contract (MVP — Final)
+
+The following REST endpoints and parameters are the ONLY Market Data REST calls permitted in MVP.
+
+Market Data REST Authority (MVP — Final):
+
+Endpoint shapes are re-verified against the captured Schwab docs (2026-02-13) in `docs/schwab/Market_Data_API.md` and `docs/schwab/Quick_Reference.md`. This section supersedes earlier probe-only restrictions.
+
+The implementation MUST NOT infer, guess, or include parameters outside the lists below.
+
+#### GET /marketdata/v1/quotes and GET /marketdata/v1/{symbol}/quotes
+
+Authoritative Working Shapes (MVP — Final, re-verified 2026-02-13):
+
+- GET /marketdata/v1/quotes
+  - Required query: `symbols` (comma-separated string)
+  - Optional query: `fields` (comma-separated root nodes: `quote,fundamental,extended,reference,regular`), `indicative` (boolean to include indicative ETF symbols)
+- GET /marketdata/v1/{symbol}/quotes
+  - Path: `{symbol}` (single symbol)
+  - Optional query: `fields` (same as above)
+
+Successful response (200):
+- QuoteResponse keyed by the requested symbol(s).
+
+Both list and single-symbol forms are allowed; prefer the list form when requesting multiple symbols.
+
+---
+
+#### GET /marketdata/v1/pricehistory
+
+Authoritative Working Shape (MVP — Final, re-verified 2026-02-13):
+
+GET /marketdata/v1/pricehistory
+
+- Required query: `symbol` (string)
+- Optional query (per Schwab docs; use valid combinations only):
+  - `periodType` (`day|month|year|ytd`)
+  - `period` (integer; valid values depend on `periodType`)
+  - `frequencyType` (string; valid values depend on `periodType`)
+  - `frequency` (integer; valid values depend on `frequencyType`)
+  - `startDate` (ms epoch)
+  - `endDate` (ms epoch)
+  - `needExtendedHoursData` (boolean)
+  - `needPreviousClose` (boolean)
+
+Successful response (200) top-level keys:
+- `candles`
+- `empty`
+- `symbol`
+
+Each candle object keys:
+- `datetime` (epoch ms)
+- `open`
+- `high`
+- `low`
+- `close`
+- `volume`
+
+The path variant `/marketdata/v1/{symbol}/pricehistory` shown in some Schwab examples MAY be used for a single symbol; prefer the documented query form above for consistency.
+
+#### GET /marketdata/v1/markets and GET /marketdata/v1/markets/{market_id}
+
+Authoritative Working Shapes (MVP — Final, re-verified 2026-02-13):
+
+- GET /marketdata/v1/markets
+  - Required query: `markets` (comma-separated list of `equity,option,bond,future,forex`)
+  - Optional query: `date` (YYYY-MM-DD; defaults to current day, up to +1 year)
+- GET /marketdata/v1/markets/{market_id}
+  - Path: `{market_id}` (`equity|option|bond|future|forex`)
+  - Optional query: `date` (YYYY-MM-DD; defaults to current day, up to +1 year)
+
+Successful response (200):
+- Market hours payload keyed by the requested market(s).
+
+---
+
+### 8.3.2 Trader REST Contract (MVP — Probe-Verified)
+
+Probe-confirmed endpoints (2026-02-09). These are authoritative for MVP.
+
+#### GET /trader/v1/accounts/accountNumbers
+- 200
+- Item keys: `accountNumber`, `hashValue`
+
+#### GET /trader/v1/accounts
+- 200
+- Item keys include: `aggregatedBalance`, `securitiesAccount`
+
+#### GET /trader/v1/userPreference
+- 200
+- Top-level keys: `accounts`, `offers`, `streamerInfo`
+
+#### GET /trader/v1/orders
+Required query parameters (MVP — Final):
+- `fromEnteredTime`
+- `toEnteredTime`
+- `maxResults`
+
+Expected success behavior:
+- 200 may return an empty list when no orders exist (valid).
+
+#### GET /trader/v1/accounts/{accountHash}/orders
+Required query parameters (MVP — Final):
+- `fromEnteredTime`
+- `toEnteredTime`
+- `maxResults`
+
+Expected success behavior:
+- 200 may return an empty list when no orders exist (valid).
+
+---
+
+### Determinism Rule
+
+If `docs/schwab/Market_Data_API.md` contains incomplete or blank parameter tables,
+this section (§8.3.1) is authoritative for MVP behavior.
+
+The implementation MUST NOT infer, guess, or include undocumented parameters.
+
 
 **Streaming credential acquisition (MVP — Final):**
 - `SchwabRestClient` MUST call `GET /trader/v1/userPreference` to obtain streaming connection fields (StreamerInfo) after OAuth completes (access token available).
@@ -630,6 +757,25 @@ Streaming:
   * bid/ask/last price
   * volume (cumulative or delta)
   * authoritative timestamps (trade timestamp preferred, quote timestamp fallback)
+---
+
+### 8.3.2 Trader REST Contract (MVP — Probe-Verified)
+
+Probe-confirmed endpoints (2026-02-09):
+
+GET /trader/v1/accounts/accountNumbers
+- 200
+- Item keys: accountNumber, hashValue
+
+GET /trader/v1/accounts
+- 200
+- Item keys include: aggregatedBalance, securitiesAccount
+
+GET /trader/v1/userPreference
+- 200
+- Top-level keys: accounts, offers, streamerInfo
+
+These shapes are authoritative for MVP and override any incomplete converted markdown under docs/schwab/*.
 
 **Streaming operational requirements:**
 
@@ -644,35 +790,28 @@ Streaming:
   * Auto-reconnect with backoff per “Retry / Backoff Constants (MVP — Final)” below until user exits.
   * After reconnect, re-subscribe to the active symbol and resume aggregation.
 
-**OAuth callback & multi-instance rule:**
+**OAuth callback & multi-instance rule (MVP — Final):**
 
-* The OAuth redirect URI must be localhost-based and pre-registered with Schwab.
-* Use a fixed callback port (e.g., **8765**) for simplicity.
-* If another instance is already running the interactive OAuth connect flow, additional instances must detect a lock (file lock) and instruct the user to complete auth in the first instance.
+* Schwab OAuth Redirect URI MUST be HTTPS and pre-registered with Schwab.
+* The app MUST use the hosted callback:
+  - `https://companion-auth.p3l.co/callback`
+* The hosted callback MUST immediately 302-redirect the browser to the app via a custom URL scheme:
+  - `toscompanion://oauth?code=<code>&state=<state>`
+* The Windows EXE MUST register the `toscompanion://` URL protocol handler and MUST receive `code` + `state` via that handler (no local HTTP listener in MVP).
+* Multi-instance: if an instance is already running, protocol handler delivery MUST forward the `code` to the existing instance and exit; otherwise, the handler MUST launch the app and deliver the `code`.
 
-**Callback implementation requirements (MVP):**
-- Redirect URI MUST be: `http://127.0.0.1:8765/callback` (host 127.0.0.1, port 8765, path /callback).
-- If port 8765 is already in use by a non-app process, the app MUST fail loudly and instruct the user how to resolve (do NOT silently choose another port unless the spec explicitly permits it).
-- OAuth UX is defined below in “OAuth UX (MVP — Final)” and is binding for MVP.
+**OAuth redirect (MVP — Final):**
+- Redirect URI registered in Schwab portal MUST be exactly:
+  - `https://companion-auth.p3l.co/callback`
+- The app MUST validate `state` matches the active OAuth attempt; mismatch MUST fail loudly.
 
-OAuth Redirect (MVP — Final)
-
-- Local callback listener MUST use:
-  - Host: 127.0.0.1
-  - Port: 8765 (fixed)
-  - Path: /callback
-
-Example redirect URI:
-http://127.0.0.1:8765/callback
-
-OAuth UX (MVP — Final)
-
+**OAuth UX (MVP — Final):**
 - Default behavior: auto-open the system browser to the authorization URL.
 - UI MUST display:
   - the authorization URL (read-only)
   - a “Copy URL” button
   - an “Open Browser” button (manual fallback)
-- If auto-open fails, the user MUST be able to complete OAuth via the manual buttons without restarting the app.
+- If protocol callback delivery fails (no app handler / OS error), UI MUST instruct the user to install/reinstall the app (protocol registration) and retry OAuth.
 
 Retry / Backoff Constants (MVP — Final)
 
@@ -751,6 +890,18 @@ Loop:
 1. Submit LIMIT at current ask/bid bounded by cap/floor
 2. Every interval: if not fully filled, replace to latest ask/bid bounded by cap/floor
 3. Stop on fill, timeout, cancel/flatten, or disconnect
+
+Deterministic chase price formula (MVP — Final):
+
+- On each replace tick, compute `raw_price`:
+  - BUY: `min(latest_ask, buy_cap)`
+  - SELL: `max(latest_bid, sell_floor)`
+- `latest_ask/latest_bid` MUST be sourced from the most recent canonical quote (§13.1) at or before the replace timestamp.
+- If the required side price is null (BUY needs ask; SELL needs bid), EMM MUST immediately cancel remaining qty and surface `EMM NO QUOTE`.
+- Rounding: LIMIT price MUST be rounded to the nearest valid tick:
+  - Equities tick size = $0.01 (round to 2 decimals, half-up).
+- Replace is permitted only while quote freshness <= 5s; if quote is STALE during EMM, EMM MUST cancel remaining qty and surface `EMM STALE`.
+
 4. On timeout/disconnect: cancel remaining open qty; surface status `EMM TIMEOUT` / `EMM DISCONNECTED`
 
 Partial fills: manage remaining qty only.
@@ -1284,11 +1435,12 @@ The implementation MUST map responsibilities to these modules (names may vary; o
 
 Streaming Field Normalization (MVP — Final)
 
-Schwab streaming payload field IDs/keys are normalized into the canonical quote event schema (§13.1) using a repo-local mapping table embedded in this spec:
+Schwab streaming payload field IDs/keys are normalized into the canonical quote event schema (§13.1) using Appendix D — Schwab Stream Field Mapping (MVP — Final).
 
-- Appendix D — Schwab Stream Field Mapping (MVP — Final)
+Appendix D is authoritative and fully populated for MVP using captured LEVELONE_EQUITIES stream data.
 
-This mapping table is authoritative. The implementation MUST NOT guess field meanings. If incoming stream fields differ, Appendix D MUST be updated in a versioned spec revision before implementation changes proceed.
+The implementation MUST NOT guess field meanings. If incoming stream fields differ from Appendix D, the spec MUST be versioned and updated before implementation changes proceed.
+
 
 ---
 
@@ -1390,6 +1542,15 @@ Each `LLM_RECOMMENDATION_EVENT` MUST include:
 * `transfer_to_ticket` (boolean)
 * `modified_before_execution` (boolean, if applicable)
 
+Deterministic ID derivation (MVP — Final):
+
+- `ae_snapshot_id`: MUST be `sha256_hex(canonical_json_bytes(snapshot_json))` where `snapshot_json` is the exact normalized LLM input payload object defined in §11.2.5 (post AE→LLM mapping + appended fields). `canonical_json_bytes` MUST be UTF-8 JSON with:
+  - object keys sorted ascending
+  - arrays preserved in-order
+  - no extra whitespace (minified)
+- `llm_prompt_version_hash`: MUST be `sha256_hex(canonical_json_bytes(messages_array))` where `messages_array` is the exact ordered list of LLM chat messages sent (system/developer/user), serialized as JSON objects `{role, content}` with keys sorted.
+- `previous_recommendation_hash`: MUST be `sha256_hex(canonical_json_bytes(recommendation_struct))` using the same canonical JSON rules above.
+
 Raw, full-text LLM responses SHOULD NOT be logged unless explicitly required for debugging.
 
 ---
@@ -1438,6 +1599,17 @@ Until these conditions are satisfied:
 - Order buttons MUST be disabled
 - Synthetic arming MUST be disabled
 - A visible banner MUST explain which prerequisite is unmet
+
+Broker reconciliation complete (deterministic definition, MVP — Final):
+
+- Account is selected for trading.
+- A reconciliation fetch completes successfully via the appropriate Schwab orders endpoint for the active account (covering at least the current trading day).
+- In-memory `orders_by_id` is updated to match broker truth:
+  - Add any broker working orders not already tracked locally.
+  - Mark locally-tracked orders terminal if the broker reports them terminal.
+  - Flag any broker working order for the active symbol that is unknown locally; gate remains closed while such unknowns exist.
+- No unreconciled/unknown working orders remain for the active symbol/account, and no reconciliation request is pending or failed.
+- If reconciliation fails (request error or unknown working orders remain), keep the gate closed, surface a banner, and retry per standard backoff until the conditions above are satisfied.
 
 ---
 
@@ -1531,27 +1703,49 @@ This section does not alter the test list; it preserves authority to prevent tes
 ## Appendix D — Schwab Stream Field Mapping (MVP — Final)
 
 This appendix defines the ONLY permitted mapping from Schwab streaming messages into the canonical quote event schema (§13.1).
+Schwab docs may show QUOTE examples; for MVP we standardize on LEVELONE_EQUITIES because it is confirmed available in capture; QUOTE is non-required.
 
-MVP NOTE — SPEC_BLOCKED UNTIL FIELD IDS CAPTURED
-- The Schwab QUOTE streaming field identifiers (keys/indices) for `ts_ms`, `symbol`, `bid`, `ask`, `last`, `bid_size`, `ask_size`, `last_size`, and `volume` MUST be captured from a live Schwab QUOTE subscription and recorded here **before** normalization is implemented.
-- No guessing or inference is permitted. Until this table is populated with real identifiers, streaming normalization and canonical quote emission (§13.1) remain SPEC_BLOCKED.
+### D.1 Source Service (MVP)
 
-Rules:
-- If an inbound stream message does not contain the fields required below, the message MUST be treated as `DATA_INTEGRITY_ERROR` and MUST NOT be partially guessed.
-- This appendix is the authoritative mapping table for MVP.
+For MVP, canonical quote events MUST be built from the `LEVELONE_EQUITIES` streaming service.
 
-### D.1 Mapping Table (QUOTE service)
+The QUOTE service MAY be unavailable and is not required for MVP.
 
-| Canonical Field (§13.1) | Schwab QUOTE field id/key | Notes |
-|---|---|---|
-| ts_ms | TODO(SPEC_CLARIFICATION) | UTC epoch ms derived from Schwab timestamp field; trade ts preferred, else quote ts, else ingest |
-| symbol | TODO(SPEC_CLARIFICATION) | |
-| bid | TODO(SPEC_CLARIFICATION) | |
-| ask | TODO(SPEC_CLARIFICATION) | |
-| last | TODO(SPEC_CLARIFICATION) | |
-| bid_size | TODO(SPEC_CLARIFICATION) | optional |
-| ask_size | TODO(SPEC_CLARIFICATION) | optional |
-| last_size | TODO(SPEC_CLARIFICATION) | optional |
-| volume | TODO(SPEC_CLARIFICATION) | cumulative or delta (see §5.4) |
+Schwab documentation may show QUOTE service examples; MVP standardizes on LEVELONE_EQUITIES because QUOTE is not reliably available (confirmed by capture).
 
-**SPEC_CLARIFICATION REQUIRED (blocking):** Populate the Schwab stream field identifiers/keys used for QUOTE subscription fields so this mapping is fully deterministic.
+
+### D.2 Mapping Table (LEVELONE_EQUITIES)
+
+Inbound message shape (captured):
+
+- data[0].service == "LEVELONE_EQUITIES"
+- data[0].timestamp → authoritative stream timestamp (ms)
+- data[0].content[0].key → symbol
+- numeric string keys "1".."15" → quote fields
+
+| Canonical Field (§13.1) | Schwab Stream Source | Deterministic Rule |
+|--------------------------|----------------------|--------------------|
+| ts_ms | data[0].timestamp | Use as UTC epoch ms |
+| symbol | data[0].content[0].key | |
+| bid | data[0].content[0]["1"] | |
+| ask | data[0].content[0]["2"] | |
+| last | data[0].content[0]["3"] | |
+| bid_size | data[0].content[0]["4"] | |
+| ask_size | data[0].content[0]["5"] | |
+| last_size | null | Not present in captured payload |
+| volume | data[0].content[0]["8"] | Cumulative volume |
+
+source_ts_type:
+- MUST be set to `QUOTE_TS` (derived from stream timestamp)
+
+raw_source:
+- MUST be set to `SCHWAB_STREAM`
+
+Validation Rule (MVP — Final):
+
+LEVELONE_EQUITIES updates MAY be partial (delta messages). The implementation MUST maintain a per-symbol last-known cache for fields mapped in Appendix D.
+
+- On each LEVELONE_EQUITIES message, update the cache for any present mapped fields.
+- The canonical quote event (§13.1) MUST be emitted using the cache values if and only if all required fields are available in cache:
+  - `symbol`, `ts_ms`, `bid`, `ask`, `last`, `volume`
+- If after applying the update the cache still lacks any required field, the implementation MUST NOT emit a canonical quote event for that message (silent drop for that event emission), and MUST NOT guess values.

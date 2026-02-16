@@ -122,6 +122,8 @@ Emit a deterministic snapshot for the active symbol used by UI overlays and as t
 **Note (integration boundary):**
 AE-1.1 does NOT emit the following LLM-payload fields required by `specs.md §11.2.5`: `schema_version`, `session_mode`, and the `quote{bid,ask,last,volume}` object. These fields are deterministically added by the application during normalization per `specs.md §11.2.5`.
 
+NOTE (MVP — Final): AE-1.1 output defined in this document is NOT the final LLM input payload shape. The application constructs the LLM payload per `specs.md §11.2.5` by appending `schema_version`, `session_mode`, `quote{bid,ask,last,volume}`, and mapping `bars_window_5m` → `bars_window`. The LLM payload field names MUST match `specs.md §11.2.5` exactly.
+
 
 If `data_quality != ok`:
 - `status` MAY remain `ok` if the snapshot is structurally valid.
@@ -213,6 +215,60 @@ Each event MUST include at minimum: `timestamp_ms` (int, UTC epoch milliseconds)
   - `type` (enum: `breakout|pullback|continuation|failure`)
   - `confidence` (enum: `low|medium|high`)
   - `timestamp_ms` (int, UTC epoch ms)
+
+### 2.4.4.1 Event & Signal Algorithms (MVP — Final)
+
+All event/signal computations are deterministic and computed on 1-minute bars using the last 120 minutes of 1m data (per §2.4.3.1).
+
+Constants (MVP — Final):
+- `LEVEL_TOUCH_TOL_PCT = 0.10`  (0.10% proximity to a level price)
+- `REJECTION_REVERSAL_PCT = 0.30` (0.30% reversal from touch extreme)
+- `REJECTION_MAX_SECONDS = 180` (must reverse within 180s)
+- `VOL_SPIKE_MULT = 3.0`
+- `VOL_BASELINE_BARS = 30` (median of last 30 completed 1m volumes)
+- `BREAKOUT_MARGIN_PCT = 0.05` (0.05% above level)
+- `BREAKOUT_CONFIRM_BARS = 2` (two consecutive 1m closes)
+- `FAILURE_WINDOW_BARS = 10`
+
+Volume multiple:
+- For any event with `volume_multiple`, compute:
+  - `baseline = median(volume of last VOL_BASELINE_BARS completed 1m bars prior to event bar)`
+  - `volume_multiple = event_bar_volume / baseline` (if baseline==0 → set to null)
+
+largest_red_candle_events / largest_green_candle_events:
+- Use 1m bars in lookback.
+- Candle body = `abs(close - open)`.
+- Red = close < open; Green = close > open.
+- Select top N by body size (N caps already defined in §2.4.3.1).
+- timestamp_ms = event bar close timestamp.
+
+volume_spike_events:
+- Event occurs on a 1m bar if `volume_multiple >= VOL_SPIKE_MULT`.
+- timestamp_ms = event bar close timestamp.
+- move_pct_from_level = null (not level-related by default).
+- time_to_move_seconds = 0.
+
+rejection_events:
+- For each level price `L` in `levels`:
+  - A “touch” occurs when bar high/low enters `L ± (L*LEVEL_TOUCH_TOL_PCT/100)`.
+  - After touch, a rejection occurs if within REJECTION_MAX_SECONDS:
+    - For resistance touch (price at/above L): price moves downward by >= REJECTION_REVERSAL_PCT from the max reached during the touch window.
+    - For support touch (price at/below L): price moves upward by >= REJECTION_REVERSAL_PCT from the min reached during the touch window.
+- timestamp_ms = timestamp of the bar where the reversal threshold is first met.
+- move_pct_from_level = `(close_at_reversal - L) / L * 100`.
+- time_to_move_seconds = seconds from first touch bar timestamp to reversal timestamp.
+- volume_multiple computed on the reversal bar.
+
+signals (breakout/pullback/continuation/failure):
+- Define `prior_high` as the max 1m high over the lookback excluding the most recent bar.
+- breakout = last `BREAKOUT_CONFIRM_BARS` 1m closes each > `prior_high * (1 + BREAKOUT_MARGIN_PCT/100)`.
+- failure = breakout attempt where within `FAILURE_WINDOW_BARS` after first close-above, a 1m close returns <= `prior_high`.
+- pullback = after breakout, a drawdown from the local max close of >= 0.30% within 20 bars.
+- continuation = after pullback, a higher high close than the breakout max close within 10 bars.
+Confidence:
+- `high` if breakout is true AND volume_multiple on the breakout bar is >= 2.0
+- else `medium` if breakout is true
+- else `low`
 
 ### 2.4.5 Explicit Non-Responsibilities
 The Analysis Engine MUST NOT:
@@ -401,4 +457,3 @@ The Analysis Engine does NOT:
 
 - `notes.method_version` is fixed to `AE-1.0` for MVP.
 - Any algorithm change increments this version.
-

@@ -1,0 +1,24 @@
+{"response":[{"service":"ADMIN","command":"LOGIN","requestid":"1","SchwabClientCorrelId":"00c828b2-d2d2-08a9-aaec-c374e61ece99","timestamp":1770997909717,"content":{"code":0,"msg":"server=s0635dc6-2;status=NP"}}]}
+{"response":[{"service":"QUOTE","command":"SUBS","requestid":"2","SchwabClientCorrelId":"00c828b2-d2d2-08a9-aaec-c374e61ece99","timestamp":1770997910049,"content":{"code":11,"msg":"Service not available or temporary down."}}]}
+{"notify":[{"heartbeat":"1770997910250"}]}
+{"response":[{"service":"LEVELONE_EQUITIES","command":"SUBS","requestid":"3","SchwabClientCorrelId":"00c828b2-d2d2-08a9-aaec-c374e61ece99","timestamp":1770997910250,"content":{"code":0,"msg":"SUBS command succeeded"}}]}
+{"data":[{"service":"LEVELONE_EQUITIES", "timestamp":1770997910278,"command":"SUBS","content":[{"key":"AAPL","delayed":false,"assetMainType":"EQUITY","assetSubType":"COE","cusip":"037833100","1":259.32,"2":259.35,"3":259.32,"4":100,"5":200,"6":"V","7":"Q","8":14691569,"9":100,"10":262.23,"11":258.37,"12":261.73,"13":"Q","14":true,"15":"APPLE INC"}]}]}
+{"notify":[{"heartbeat":"1770997910451"}]}
+{"response":[{"service":"CHART_EQUITY","command":"SUBS","requestid":"4","SchwabClientCorrelId":"00c828b2-d2d2-08a9-aaec-c374e61ece99","timestamp":1770997910451,"content":{"code":0,"msg":"SUBS command succeeded"}}]}
+{"data":[{"service":"LEVELONE_EQUITIES", "timestamp":1770997911457,"command":"SUBS","content":[{"key":"AAPL","4":200,"5":300,"8":14691925}]},{"service":"CHART_EQUITY", "timestamp":1770997911457,"command":"SUBS","content":[{"seq":201,"key":"AAPL","1":230,"2":258.59,"3":259.065,"4":258.53,"5":259.05,"6":55635,"7":1770997800000,"8":20497}]}]}
+{"data":[{"service":"LEVELONE_EQUITIES", "timestamp":1770997912500,"command":"SUBS","content":[{"key":"AAPL","1":259.37,"2":259.42,"3":259.395,"4":100,"5":100,"7":"V","8":14695330}]}]}
+{"data":[{"service":"LEVELONE_EQUITIES", "timestamp":1770997913542,"command":"SUBS","content":[{"key":"AAPL","1":259.38,"3":259.355,"5":300,"6":"Q","7":"Q","8":14696924}]}]}
+{"data":[{"service":"LEVELONE_EQUITIES", "timestamp":1770997914585,"command":"SUBS","content":[{"key":"AAPL","1":259.41,"2":259.44,"3":259.425,"5":600,"6":"P","7":"U","8":14697782,"9":200}]}]}
+{"data":[{"service":"LEVELONE_EQUITIES", "timestamp":1770997915627,"command":"SUBS","content":[{"key":"AAPL","3":259.405,"5":500,"7":"Q","8":14698413,"9":100}]}]}
+{"data":[{"service":"LEVELONE_EQUITIES", "timestamp":1770997916671,"command":"SUBS","content":[{"key":"AAPL","2":259.45,"3":259.43,"5":300,"6":"Q","8":14700722}]}]}
+{"data":[{"service":"LEVELONE_EQUITIES", "timestamp":1770997917714,"command":"SUBS","content":[{"key":"AAPL","2":259.44,"3":259.425,"7":"P","8":14701402}]}]}
+{"data":[{"service":"LEVELONE_EQUITIES", "timestamp":1770997918758,"command":"SUBS","content":[{"key":"AAPL","1":259.38,"2":259.41,"3":259.41,"5":100,"6":"Z","7":"V","8":14703829}]}]}
+{"data":[{"service":"LEVELONE_EQUITIES", "timestamp":1770997919800,"command":"SUBS","content":[{"key":"AAPL","2":259.43,"3":259.38,"6":"Q","7":"Z","8":14706265}]}]}
+{"data":[{"service":"LEVELONE_EQUITIES", "timestamp":1770997920843,"command":"SUBS","content":[{"key":"AAPL","1":259.37,"2":259.41,"3":259.4,"5":800,"6":"Z","7":"Q","8":14706630}]}]}
+{"data":[{"service":"LEVELONE_EQUITIES", "timestamp":1770997921886,"command":"SUBS","content":[{"key":"AAPL","3":259.3818,"8":14706995,"9":200}]}]}
+{"data":[{"service":"LEVELONE_EQUITIES", "timestamp":1770997922929,"command":"SUBS","content":[{"key":"AAPL","1":259.35,"2":259.4,"3":259.37,"4":3000,"5":100,"6":"Q","8":14707667,"9":100}]},{"service":"CHART_EQUITY", "timestamp":1770997922929,"command":"SUBS","content":[{"seq":202,"key":"AAPL","1":231,"2":259.035,"3":259.44,"4":258.95,"5":259.4,"6":62752,"7":1770997860000,"8":20497}]}]}
+{"data":[{"service":"LEVELONE_EQUITIES", "timestamp":1770997923971,"command":"SUBS","content":[{"key":"AAPL","1":259.34,"4":100,"5":200,"8":14711896}]}]}
+{"data":[{"service":"LEVELONE_EQUITIES", "timestamp":1770997925014,"command":"SUBS","content":[{"key":"AAPL","1":259.35,"2":259.41,"3":259.39,"4":200,"5":700,"6":"Z","8":14714807}]}]}
+{"data":[{"service":"LEVELONE_EQUITIES", "timestamp":1770997926058,"command":"SUBS","content":[{"key":"AAPL","1":259.34,"2":259.4,"3":259.38,"4":1000,"5":100,"6":"Q","8":14715025}]}]}
+{"data":[{"service":"LEVELONE_EQUITIES", "timestamp":1770997927101,"command":"SUBS","content":[{"key":"AAPL","1":259.38,"2":259.43,"3":259.405,"4":100,"7":"K","8":14716900}]}]}
+{"data":[{"service":"LEVELONE_EQUITIES", "timestamp":1770997928145,"command":"SUBS","content":[{"key":"AAPL","1":259.39,"2":259.44,"5":500,"7":"P","8":14716987}]}]}
