@@ -94,3 +94,37 @@ def test_token_refresh_http(monkeypatch, tmp_path):
     new_tokens = provider.refresh()
     assert new_tokens["access_token"] == "new"
     assert provider._token_cache["refresh_token"] == "rt2"
+
+
+def test_auth_helper_mode(monkeypatch):
+    monkeypatch.setenv("AUTH_HELPER_URL", "http://helper")
+    provider = TokenProvider()
+    resp_data = {"access_token": "helper_tok", "expires_at": time.time() + 3600}
+
+    class FakeResp:
+        status_code = 200
+
+        def json(self):
+            return resp_data
+
+    def fake_get(url, timeout=10.0):
+        return FakeResp()
+
+    monkeypatch.setattr("httpx.get", fake_get)
+    token = provider()
+    assert token == "helper_tok"
+
+
+def test_auth_helper_requires_auth(monkeypatch):
+    monkeypatch.setenv("AUTH_HELPER_URL", "http://helper")
+    provider = TokenProvider(state_callback=lambda s: setattr(provider, "_state", s))
+
+    class FakeResp:
+        status_code = 401
+
+        def json(self):
+            return {}
+
+    monkeypatch.setattr("httpx.get", lambda url, timeout=10.0: FakeResp())
+    provider()
+    assert getattr(provider, "_state", None) == "AUTH_REQUIRED"

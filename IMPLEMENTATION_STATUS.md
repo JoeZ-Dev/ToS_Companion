@@ -29,6 +29,7 @@ Completed Work
 - Plotly chart placeholder embedded via QtWebEngine; acceptance test stub present.
 - LLMService now includes flash-delta detection per specs §11.4 with callback hook and tests.
 - CI helper scripts added: tools/ci.sh (pytest) and tools/windows_smoke.ps1 (PyInstaller + mock run).
+- Auth Helper added (tools/auth_helper) serving access tokens from homelab; TokenProvider supports AUTH_HELPER_URL mode with AUTH_REQUIRED fallback; tests stub helper mode.
 
 Remaining Work
 --------------

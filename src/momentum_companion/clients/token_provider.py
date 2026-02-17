@@ -32,8 +32,13 @@ class TokenProvider:
         self._refresh_event.set()
         self._refresh_listeners: List[Callable[[dict], None]] = []
         self._state_callback = state_callback
+        self._auth_helper_url = os.environ.get("AUTH_HELPER_URL")
+        self._helper_cache: dict = {}
 
     def __call__(self) -> str:
+        if self._auth_helper_url:
+            self._maybe_refresh_helper()
+            return self._helper_cache.get("access_token", "")
         self._maybe_refresh()
         return self._token_cache.get("access_token", "")
 
@@ -132,13 +137,45 @@ class TokenProvider:
         data = {"grant_type": "refresh_token", "refresh_token": refresh_token}
         headers = {"Content-Type": "application/x-www-form-urlencoded", "Authorization": f"Basic {auth}"}
         resp = httpx.post(TOKEN_URL, data=data, headers=headers, timeout=10.0)
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except Exception:
+            if resp.status_code == 401 and self._state_callback:
+                self._state_callback("AUTH_REQUIRED")
+            raise
         body = resp.json()
         access_token = body.get("access_token")
         expires_in = body.get("expires_in", 1800)
         refresh_token_new = body.get("refresh_token", refresh_token)
         expires_at = time.time() + expires_in - 60
         return {"access_token": access_token, "expires_at": expires_at, "refresh_token": refresh_token_new}
+
+    def _maybe_refresh_helper(self) -> None:
+        expires_at = self._helper_cache.get("expires_at")
+        now = time.time()
+        if expires_at and now < expires_at - 60 and self._helper_cache.get("access_token"):
+            return
+        self._fetch_from_helper()
+
+    def _fetch_from_helper(self) -> None:
+        if not self._auth_helper_url:
+            return
+        url = self._auth_helper_url.rstrip("/") + "/access_token"
+        try:
+            resp = httpx.get(url, timeout=10.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                self._helper_cache = {
+                    "access_token": data.get("access_token"),
+                    "expires_at": data.get("expires_at") or (time.time() + 900),
+                }
+                self._notify_listeners()
+            else:
+                if self._state_callback:
+                    self._state_callback("AUTH_REQUIRED")
+        except Exception:
+            if self._state_callback:
+                self._state_callback("AUTH_REQUIRED")
 
     def add_refresh_listener(self, listener: Callable[[dict], None]) -> None:
         self._refresh_listeners.append(listener)

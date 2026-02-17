@@ -1,5 +1,6 @@
-tools/schwab_capture/.tokens.json
-tools/schwab_capture/captured_quote_messages.jsonl
-tools/schwab_capture/.env
-tools/schwab_capture/.venv/
-
+__pycache__/
+*.pyc
+.venv/
+dist/
+build/
+*.spec
