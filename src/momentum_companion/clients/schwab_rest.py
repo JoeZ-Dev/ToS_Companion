@@ -80,6 +80,12 @@ class SchwabRestClient:
         return resp.json()
 
     @with_backoff()
+    def get_user_preference(self) -> Dict[str, Any]:
+        """Fetch userPreference to obtain streamerInfo."""
+        resp = self._request("GET", f"{self._base_url}/userPreference")
+        return resp.json()
+
+    @with_backoff()
     def fetch_price_history(
         self, symbol: str, start_ms: Optional[int], end_ms: Optional[int], freq: str
     ) -> Dict[str, Any]:

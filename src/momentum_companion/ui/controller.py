@@ -6,20 +6,26 @@ from momentum_companion.llm.service import LLMService
 from momentum_companion.ui.main_window import MainWindow
 from momentum_companion.ui.chart_widget import ChartWidget
 from momentum_companion.clients.schwab_stream import SchwabStreamClient
-from momentum_companion.clients.token_provider import TokenProvider
 from momentum_companion.clients.schwab_rest import SchwabRestClient
+from momentum_companion.clients.token_provider import TokenProvider
 
 
 class UIController:
     """Coordinates UI state, signals/slots, and renders updates (§4.1)."""
 
     def __init__(
-        self, window: MainWindow, llm_service: LLMService, rest_client: SchwabRestClient | None = None, stream_client: SchwabStreamClient | None = None
+        self,
+        window: MainWindow,
+        llm_service: LLMService,
+        rest_client: SchwabRestClient | None = None,
+        stream_client: SchwabStreamClient | None = None,
+        token_provider: TokenProvider | None = None,
     ) -> None:
         self._window = window
         self._llm_service = llm_service
         self._rest_client = rest_client
         self._stream_client = stream_client
+        self._token_provider = token_provider
         self._hook_symbol_input()
 
     def handle_flash(self, symbol: str, rec: dict, payload: dict) -> None:
@@ -80,8 +86,33 @@ class UIController:
             self._window.connection_label.setText("Connection: HISTORY ERROR")
 
     def _subscribe_stream(self, symbol: str) -> None:
-        if not self._stream_client:
+        if not self._ensure_stream_client():
             return
+        self._stream_client._active_symbol = symbol  # type: ignore[attr-defined]
         self._stream_client.subscribe_level_one(symbol)
-        # We rely on stream callbacks to update freshness; placeholder status here
         self._window.connection_label.setText("Connection: STREAM SUBSCRIBED")
+
+    def _ensure_stream_client(self) -> bool:
+        if self._stream_client:
+            return True
+        if not self._rest_client or not self._token_provider:
+            self._window.banner.setText("Stream not available (missing rest/token)")
+            return False
+        try:
+            prefs = self._rest_client.get_user_preference()
+            streamer_info = prefs[0]["streamerInfo"][0] if isinstance(prefs, list) else prefs["streamerInfo"][0]
+        except Exception:
+            self._window.banner.setText("Failed to load streamer info")
+            return False
+        self._stream_client = SchwabStreamClient(
+            streamer_info, on_quote=self._handle_quote, token_provider=self._token_provider, state_callback=None
+        )
+        self._window.connection_label.setText("Connection: CONNECTING")
+        self._stream_client.connect()
+        return True
+
+    def _handle_quote(self, event: dict) -> None:
+        ts_ms = event.get("ts_ms")
+        self._window.connection_label.setText("Connection: STREAMING")
+        if ts_ms:
+            self._window.last_update_label.setText(f"Last Update: {ts_ms}")

@@ -31,7 +31,7 @@ def main(instance_id: str) -> None:
     trig = SyntheticTriggerEngine(None)
     executor = TradeExecutor(rest, emm, trig, journal, state_callback=state_cb)
     llm_service = LLMService(LLMCoach(), journal=journal, state_callback=state_cb, flash_callback=None)
-    controller = UIController(window, llm_service, rest_client=rest, stream_client=stream_client)
+    controller = UIController(window, llm_service, rest_client=rest, stream_client=stream_client, token_provider=token_provider)
     # wire flash callback
     llm_service._flash_callback = controller.handle_flash  # type: ignore[attr-defined]
     window.show()
