@@ -43,7 +43,6 @@ class UIController:
         self._render_timer.start()
         self._dirty = False
         self._last_forming_sig: tuple[int | None, float | None] = (None, None)
-        self._last_render_ts_ms: int | None = None
         self._hook_symbol_input()
 
     def handle_flash(self, symbol: str, rec: dict, payload: dict) -> None:
@@ -55,7 +54,7 @@ class UIController:
         """Render LLM recommendation."""
         self._window.apply_llm_recommendation(rec)
 
-    def render_chart(self, bars: list[dict], latest_ts: int | None = None) -> None:
+    def render_chart(self, bars: list[dict]) -> None:
         """Update chart widget with candlesticks."""
         times = [b["ts"] for b in bars]
         opens = [b["open"] for b in bars]
@@ -64,7 +63,7 @@ class UIController:
         closes = [b["close"] for b in bars]
         chart: ChartWidget = self._window.findChild(ChartWidget)
         if chart:
-            chart.render_bars(times, opens, highs, lows, closes, latest_ts=latest_ts)
+            chart.render_bars(times, opens, highs, lows, closes)
 
     def _hook_symbol_input(self) -> None:
         if hasattr(self._window, "symbol_input"):
@@ -192,8 +191,7 @@ class UIController:
                 {"ts": forming.ts_ms, "open": forming.open, "high": forming.high, "low": forming.low, "close": forming.close}
             ]
         self._bars = window_bars
-        self._last_render_ts_ms = window_bars[-1]["ts"] if window_bars else self._last_render_ts_ms
-        self.render_chart(window_bars, latest_ts=self._last_render_ts_ms)
+        self.render_chart(window_bars)
 
     def _render_tick(self) -> None:
         if not self._dirty:
