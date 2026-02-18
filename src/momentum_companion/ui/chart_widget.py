@@ -48,7 +48,7 @@ class ChartWidget(QtWebEngineWidgets.QWebEngineView):
               uirevision: 'static'
             });
             window.updateData = function(payload) {
-              const data = JSON.parse(payload);
+              var data = JSON.parse(payload);
               Plotly.react('chart', [{
                 type: 'candlestick',
                 x: data.x,
