@@ -186,12 +186,12 @@ class UIController:
         with self._bars_lock:
             window_bars = [b for b in self._bars if b.get("ts") is not None and b["ts"] >= cutoff]
             forming = self._aggregator.forming_bar()
+        render_bars = list(window_bars)
         if forming:
-            window_bars = window_bars + [
+            render_bars.append(
                 {"ts": forming.ts_ms, "open": forming.open, "high": forming.high, "low": forming.low, "close": forming.close}
-            ]
-        self._bars = window_bars
-        self.render_chart(window_bars)
+            )
+        self.render_chart(render_bars)
 
     def _render_tick(self) -> None:
         if not self._dirty:
