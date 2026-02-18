@@ -21,22 +21,19 @@ class LevelOneCache:
         Returns None if required fields are still missing after applying the delta.
         Raises ValueError on schema violations.
         """
-        try:
-            service = message.get("service")
-            if service != "LEVELONE_EQUITIES":
-                return None
-            ts_raw = message.get("timestamp")
-            if ts_raw is None:
-                return None
-            ts_ms = int(ts_raw)
-            content_list = message.get("content") or []
-            if not content_list:
-                return None
-            content = content_list[0]
-            symbol = content.get("key")
-            if not symbol:
-                return None
-        except Exception:
+        service = message.get("service")
+        if service != "LEVELONE_EQUITIES":
+            raise ValueError("Unsupported service")
+        ts_raw = message.get("timestamp")
+        if ts_raw is None:
+            return None
+        ts_ms = int(ts_raw)
+        content_list = message.get("content") or []
+        if not content_list:
+            return None
+        content = content_list[0]
+        symbol = content.get("key")
+        if not symbol:
             return None
 
         fields = content

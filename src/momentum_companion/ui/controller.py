@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+import time
 
 from momentum_companion.llm.service import LLMService
 from momentum_companion.ui.main_window import MainWindow
@@ -31,6 +32,8 @@ class UIController:
         self._aggregator = BarAggregator10s()
         self._bars: list[dict] = []
         self._pending_symbol: str | None = None
+        self._display_window_ms = 10 * 60 * 1000  # 10 minutes
+        self._last_render_monotonic = 0.0
         self._hook_symbol_input()
 
     def handle_flash(self, symbol: str, rec: dict, payload: dict) -> None:
@@ -77,7 +80,9 @@ class UIController:
             return
         try:
             self._window.banner.setText("")
-            resp = self._rest_client.fetch_price_history(symbol, None, None, "day")
+            end_ms = int(time.time() * 1000)
+            start_ms = end_ms - self._display_window_ms
+            resp = self._rest_client.fetch_price_history(symbol, start_ms, end_ms, "day")
             candles = resp.get("candles") or []
             self._bars = [
                 {"ts": c.get("datetime"), "open": c.get("open"), "high": c.get("high"), "low": c.get("low"), "close": c.get("close")}
@@ -147,12 +152,18 @@ class UIController:
         self.render_chart(self._bars[-50:])
 
     def _render_live_chart(self) -> None:
+        now = time.time()
+        # simple throttle to avoid overwhelming WebView; ~2 fps
+        if now - self._last_render_monotonic < 0.5:
+            return
+        self._last_render_monotonic = now
         forming = self._aggregator.forming_bar()
+        cutoff = (forming.ts_ms if forming else int(time.time() * 1000)) - self._display_window_ms
+        window_bars = [b for b in self._bars if b.get("ts") is not None and b["ts"] >= cutoff]
         if forming:
-            bars = self._bars[-49:] + [
-                {"ts": forming.ts_ms, "open": forming.open, "high": forming.high, "low": forming.low, "close": forming.close}
-            ]
-            self.render_chart(bars)
+            window_bars.append({"ts": forming.ts_ms, "open": forming.open, "high": forming.high, "low": forming.low, "close": forming.close})
+        if window_bars:
+            self.render_chart(window_bars)
 
     def _on_stream_state(self, state: str) -> None:
         """Update UI with stream state transitions."""
