@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 import time
-from functools import partial
-from PySide6 import QtCore
 
 from momentum_companion.llm.service import LLMService
 from momentum_companion.ui.main_window import MainWindow
@@ -137,10 +135,6 @@ class UIController:
         return self._stream_client
 
     def _handle_quote(self, event: QuoteEvent) -> None:
-        # Marshal to UI thread to avoid cross-thread Qt updates.
-        QtCore.QTimer.singleShot(0, partial(self._process_quote_ui, event))
-
-    def _process_quote_ui(self, event: QuoteEvent) -> None:
         ts_ms = event.get("ts_ms")
         self._window.connection_label.setText("Connection: STREAMING")
         if ts_ms:
