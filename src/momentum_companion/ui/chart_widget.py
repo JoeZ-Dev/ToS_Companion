@@ -18,56 +18,21 @@ class ChartWidget(QtWebEngineWidgets.QWebEngineView):
         self._init_chart()
 
     def _init_chart(self) -> None:
-        html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <script src="{PLOTLY_CDN}"></script>
-        </head>
-        <body>
-          <div id="chart"></div>
-          <script>
-            window.ts_vals = [];
-            window.opens = [];
-            window.highs = [];
-            window.lows = [];
-            window.closes = [];
-            Plotly.newPlot('chart', [{
-              type: 'candlestick',
-              x: [],
-              open: [],
-              high: [],
-              low: [],
-              close: [],
-              name: '10s',
-              showlegend: false
-            }], {
-              title: '10s Chart',
-              height: 400,
-              showlegend: false,
-              uirevision: 'static'
-            });
-            window.updateData = function(payload) {
-              var data = JSON.parse(payload);
-              Plotly.react('chart', [{
-                type: 'candlestick',
-                x: data.x,
-                open: data.open,
-                high: data.high,
-                low: data.low,
-                close: data.close,
-                name: '10s',
-                showlegend: false
-              }], {
-                height: 400,
-                showlegend: false,
-                uirevision: 'static'
-              });
-            }
-          </script>
-        </body>
-        </html>
-        """
+        html = (
+            "<!DOCTYPE html>"
+            "<html><head>"
+            f'<script src="{PLOTLY_CDN}"></script>'
+            "</head><body>"
+            '<div id="chart"></div>'
+            "<script>"
+            "Plotly.newPlot('chart',[{type:\"candlestick\",x:[],open:[],high:[],low:[],close:[],name:\"10s\",showlegend:false}],"
+            "{title:\"10s Chart\",height:400,showlegend:false,uirevision:\"static\"});"
+            "window.updateData=function(payload){var data=JSON.parse(payload);"
+            "Plotly.react('chart',[{type:\"candlestick\",x:data.x,open:data.open,high:data.high,low:data.low,close:data.close,"
+            "name:\"10s\",showlegend:false}],{height:400,showlegend:false,uirevision:\"static\"});};"
+            "</script>"
+            "</body></html>"
+        )
         self.setHtml(html)
 
     def render_bars(self, times: list, opens: list, highs: list, lows: list, closes: list) -> None:
