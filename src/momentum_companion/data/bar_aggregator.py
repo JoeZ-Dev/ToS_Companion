@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import replace
 from typing import Optional, List
 from zoneinfo import ZoneInfo
 import pandas as pd
@@ -86,6 +87,12 @@ class BarAggregator10s:
         self._current_bar = None
         self._window_start = None
         return completed
+
+    def forming_bar(self) -> Optional[TenSecondBar]:
+        """Return a copy of the current forming bar, if any."""
+        if self._current_bar is None:
+            return None
+        return replace(self._current_bar)
 
     def _start_bar(self, ts: int, price: float, volume: float, is_extended: bool) -> None:
         self._current_bar = TenSecondBar(

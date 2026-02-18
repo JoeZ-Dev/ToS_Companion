@@ -139,11 +139,20 @@ class UIController:
         completed = self._aggregator.ingest_quote(event)
         if completed:
             self._append_bar(completed)
+        self._render_live_chart()
 
     def _append_bar(self, bar: TenSecondBar) -> None:
         bar_dict = {"ts": bar.ts_ms, "open": bar.open, "high": bar.high, "low": bar.low, "close": bar.close}
         self._bars.append(bar_dict)
         self.render_chart(self._bars[-50:])
+
+    def _render_live_chart(self) -> None:
+        forming = self._aggregator.forming_bar()
+        if forming:
+            bars = self._bars[-49:] + [
+                {"ts": forming.ts_ms, "open": forming.open, "high": forming.high, "low": forming.low, "close": forming.close}
+            ]
+            self.render_chart(bars)
 
     def _on_stream_state(self, state: str) -> None:
         """Update UI with stream state transitions."""
