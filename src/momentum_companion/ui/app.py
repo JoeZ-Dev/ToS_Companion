@@ -24,11 +24,14 @@ def main(instance_id: str) -> None:
 
     token_provider = TokenProvider(state_callback=state_cb)
     rest = SchwabRestClient(base_url="https://api.schwabapi.com/trader/v1", auth_token_provider=token_provider)
+    # TODO: fetch streamer_info via userPreference; placeholder empty dict
+    streamer_info = {"streamerSocketUrl": "", "schwabClientCustomerId": "", "schwabClientCorrelId": "", "schwabClientChannel": "", "schwabClientFunctionId": ""}
+    stream_client = SchwabStreamClient(streamer_info, on_quote=lambda e: None, token_provider=token_provider, state_callback=state_cb)
     emm = EMMEngine(rest, journal)
     trig = SyntheticTriggerEngine(None)
     executor = TradeExecutor(rest, emm, trig, journal, state_callback=state_cb)
     llm_service = LLMService(LLMCoach(), journal=journal, state_callback=state_cb, flash_callback=None)
-    controller = UIController(window, llm_service, rest_client=rest)
+    controller = UIController(window, llm_service, rest_client=rest, stream_client=stream_client)
     # wire flash callback
     llm_service._flash_callback = controller.handle_flash  # type: ignore[attr-defined]
     window.show()

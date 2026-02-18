@@ -5,15 +5,21 @@ from typing import Any
 from momentum_companion.llm.service import LLMService
 from momentum_companion.ui.main_window import MainWindow
 from momentum_companion.ui.chart_widget import ChartWidget
+from momentum_companion.clients.schwab_stream import SchwabStreamClient
+from momentum_companion.clients.token_provider import TokenProvider
+from momentum_companion.clients.schwab_rest import SchwabRestClient
 
 
 class UIController:
     """Coordinates UI state, signals/slots, and renders updates (§4.1)."""
 
-    def __init__(self, window: MainWindow, llm_service: LLMService, rest_client=None) -> None:
+    def __init__(
+        self, window: MainWindow, llm_service: LLMService, rest_client: SchwabRestClient | None = None, stream_client: SchwabStreamClient | None = None
+    ) -> None:
         self._window = window
         self._llm_service = llm_service
         self._rest_client = rest_client
+        self._stream_client = stream_client
         self._hook_symbol_input()
 
     def handle_flash(self, symbol: str, rec: dict, payload: dict) -> None:
@@ -47,6 +53,7 @@ class UIController:
         self._window.connection_label.setText("Connection: REQUESTED")
         self._window.banner.setText(f"Requested symbol: {symbol}")
         self._load_history(symbol)
+        self._subscribe_stream(symbol)
 
     def _load_history(self, symbol: str) -> None:
         """Fetch minimal price history to seed chart."""
@@ -70,3 +77,11 @@ class UIController:
                 self._window.connection_label.setText("Connection: READY (no data)")
         except Exception as exc:  # noqa: BLE001
             self._window.banner.setText(f"History load failed for {symbol}")
+            self._window.connection_label.setText("Connection: HISTORY ERROR")
+
+    def _subscribe_stream(self, symbol: str) -> None:
+        if not self._stream_client:
+            return
+        self._stream_client.subscribe_level_one(symbol)
+        # We rely on stream callbacks to update freshness; placeholder status here
+        self._window.connection_label.setText("Connection: STREAM SUBSCRIBED")
