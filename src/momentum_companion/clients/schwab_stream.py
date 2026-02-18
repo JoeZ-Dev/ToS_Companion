@@ -47,8 +47,10 @@ class SchwabStreamClient:
 
     def connect(self) -> None:
         """Open WebSocket and authenticate."""
-        self._connection_state = "RECONNECTING"
-        url = self._streamer_info["streamerSocketUrl"]
+        self._emit_state("CONNECTING")
+        url = self._streamer_info.get("streamerSocketUrl", "")
+        if not url:
+            raise ValueError("Missing streamerSocketUrl")
         self._ws = websocket.WebSocketApp(
             url,
             on_open=self._on_open,

@@ -30,6 +30,5 @@ class ChartWidget(QtWebEngineWidgets.QWebEngineView):
                 )
             ]
         )
-        self._fig.update_traces(connectgaps=False)
         self._fig.update_layout(height=400)
         self.setHtml(self._fig.to_html(include_plotlyjs="cdn"))
