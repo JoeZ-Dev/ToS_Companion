@@ -8,6 +8,7 @@ from momentum_companion.ui.chart_widget import ChartWidget
 from momentum_companion.clients.schwab_stream import SchwabStreamClient
 from momentum_companion.clients.schwab_rest import SchwabRestClient
 from momentum_companion.clients.token_provider import TokenProvider
+from momentum_companion.data.contracts import QuoteEvent
 
 
 class UIController:
@@ -88,7 +89,6 @@ class UIController:
     def _subscribe_stream(self, symbol: str) -> None:
         if not self._ensure_stream_client():
             return
-        self._stream_client._active_symbol = symbol  # type: ignore[attr-defined]
         self._stream_client.subscribe_level_one(symbol)
         self._window.connection_label.setText("Connection: STREAM SUBSCRIBED")
 
@@ -111,7 +111,7 @@ class UIController:
         self._stream_client.connect()
         return True
 
-    def _handle_quote(self, event: dict) -> None:
+    def _handle_quote(self, event: QuoteEvent) -> None:
         ts_ms = event.get("ts_ms")
         self._window.connection_label.setText("Connection: STREAMING")
         if ts_ms:
