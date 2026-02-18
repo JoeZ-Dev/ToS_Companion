@@ -174,6 +174,9 @@ class SchwabStreamClient:
                     self._emit_state("DISCONNECTED")
                     self._attempt_reconnect()
             elif service == "LEVELONE_EQUITIES":
+                if isinstance(msg.get("content"), dict):
+                    # SUBS/UNSUBS responses carry dict content; ignore
+                    continue
                 try:
                     event = self._cache.process_message(msg)
                 except ValueError as exc:
