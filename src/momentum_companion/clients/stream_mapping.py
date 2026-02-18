@@ -22,9 +22,9 @@ class LevelOneCache:
         Raises ValueError on schema violations.
         """
         try:
-            service = message["service"]
+            service = message.get("service")
             if service != "LEVELONE_EQUITIES":
-                raise ValueError("Unsupported service")
+                return None
             ts_raw = message.get("timestamp")
             if ts_raw is None:
                 return None
@@ -33,9 +33,11 @@ class LevelOneCache:
             if not content_list:
                 return None
             content = content_list[0]
-            symbol = content["key"]
-        except Exception as exc:
-            raise ValueError("Malformed streaming message") from exc
+            symbol = content.get("key")
+            if not symbol:
+                return None
+        except Exception:
+            return None
 
         fields = content
         sym_cache = self._cache.setdefault(symbol, {})
