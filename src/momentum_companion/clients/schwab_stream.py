@@ -126,6 +126,7 @@ class SchwabStreamClient:
 
     # Internal callbacks
     def _on_open(self, ws: websocket.WebSocketApp) -> None:
+        logger.info("Stream open, sending LOGIN")
         login_msg = {
             "service": "ADMIN",
             "command": "LOGIN",
@@ -172,7 +173,7 @@ class SchwabStreamClient:
                         if self._active_symbol:
                             self.subscribe_level_one(self._active_symbol)
                     elif command == "LOGIN" and code != 0:
-                        logger.error("Stream LOGIN failed code=%s", code)
+                        logger.error("Stream LOGIN failed code=%s payload=%r", code, msg)
                         self._emit_state("LOGIN_FAILED")
                     if command == "LOGOUT":
                         self._emit_state("DISCONNECTED")
@@ -198,6 +199,7 @@ class SchwabStreamClient:
         self._emit_state("ERROR")
 
     def _on_close(self, ws: websocket.WebSocketApp, close_status_code: int, close_msg: str) -> None:
+        logger.warning("Stream closed code=%s msg=%s", close_status_code, close_msg)
         self._connected = False
         self._emit_state("DISCONNECTED")
         self._attempt_reconnect()

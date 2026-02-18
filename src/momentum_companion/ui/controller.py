@@ -152,6 +152,7 @@ class UIController:
         if completed:
             self._append_bar(completed)
         self._render_live_chart()
+        self._window.stream_label.setText("Stream: CONNECTED")
 
     def _append_bar(self, bar: TenSecondBar) -> None:
         bar_dict = {"ts": bar.ts_ms, "open": bar.open, "high": bar.high, "low": bar.low, "close": bar.close}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from PySide6 import QtWebEngineWidgets
 import plotly.graph_objects as go
@@ -46,6 +47,6 @@ class ChartWidget(QtWebEngineWidgets.QWebEngineView):
     def _to_datetime(ts: int) -> datetime:
         """Convert ms epoch to datetime for x-axis readability."""
         try:
-            return datetime.utcfromtimestamp(ts / 1000)
+            return datetime.fromtimestamp(ts / 1000, tz=ZoneInfo("America/New_York"))
         except Exception:
             return datetime.utcfromtimestamp(0)
