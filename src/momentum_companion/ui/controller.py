@@ -53,6 +53,7 @@ class UIController:
         if not self._rest_client:
             return
         try:
+            self._window.banner.setText("")
             resp = self._rest_client.fetch_price_history(symbol, None, None, "day")
             candles = resp.get("candles") or []
             bars = [
@@ -61,7 +62,11 @@ class UIController:
             ]
             if bars:
                 self.render_chart(bars[-50:])  # show recent slice
-            self._window.connection_label.setText("Connection: READY (no live stream)")
-            self._window.last_update_label.setText(f"Last Update: history for {symbol}")
+                self._window.banner.setText("")
+                self._window.connection_label.setText("Connection: READY (history)")
+                self._window.last_update_label.setText(f"Last Update: history for {symbol}")
+            else:
+                self._window.banner.setText(f"No history data for {symbol}")
+                self._window.connection_label.setText("Connection: READY (no data)")
         except Exception as exc:  # noqa: BLE001
             self._window.banner.setText(f"History load failed for {symbol}")
