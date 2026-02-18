@@ -84,12 +84,11 @@ class SchwabRestClient:
         self, symbol: str, start_ms: Optional[int], end_ms: Optional[int], freq: str
     ) -> Dict[str, Any]:
         """Retrieve historical candles used for AE inputs."""
-        params: Dict[str, Any] = {}
+        params: Dict[str, Any] = {"periodType": "day", "period": 1, "frequencyType": "minute", "frequency": 1}
         if start_ms is not None:
             params["startDate"] = start_ms
         if end_ms is not None:
             params["endDate"] = end_ms
-        params.update(self._freq_params(freq))
         resp = self._request("GET", f"{self._md_base_url}/{symbol}/pricehistory", params=params)
         return resp.json()
 
