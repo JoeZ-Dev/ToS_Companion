@@ -39,7 +39,6 @@ class SchwabStreamClient:
         self._connection_state: str = "DISCONNECTED"
         self._journal = journal
         self._state_callback = state_callback
-        self._logged_first_event = False
         if hasattr(self._token_provider, "add_refresh_listener"):
             try:
                 self._token_provider.add_refresh_listener(self._on_token_refreshed)  # type: ignore[attr-defined]
@@ -52,7 +51,6 @@ class SchwabStreamClient:
         url = self._streamer_info.get("streamerSocketUrl", "")
         if not url:
             raise ValueError("Missing streamerSocketUrl")
-        self._logged_first_event = False
         self._ws = websocket.WebSocketApp(
             url,
             on_open=self._on_open,
@@ -66,7 +64,6 @@ class SchwabStreamClient:
     def subscribe_level_one(self, symbol: str) -> None:
         """Subscribe to LEVELONE_EQUITIES for the active symbol."""
         self._active_symbol = symbol
-        logger.info("Requesting SUBS for %s (connected=%s)", symbol, self._connected)
         if not self._connected or not self._ws:
             return
         sub_msg = {
@@ -165,7 +162,6 @@ class SchwabStreamClient:
             for msg in messages:
                 service = msg.get("service")
                 command = msg.get("command")
-                logger.info("Stream message service=%s command=%s", service, command)
                 if service == "ADMIN":
                     content = msg.get("content") or {}
                     if isinstance(content, list) and content:
@@ -184,10 +180,9 @@ class SchwabStreamClient:
                         self._attempt_reconnect()
                 elif service == "LEVELONE_EQUITIES":
                     content = msg.get("content")
-                    # SUBS responses carry dict content; treat code 0 as subscribed
+                    # ignore SUBS/UNSUBS responses with dict content
                     if isinstance(content, dict):
-                        code = content.get("code")
-                        if code == 0 and command == "SUBS":
+                        if content.get("code") == 0 and command == "SUBS":
                             self._emit_state("SUBSCRIBED")
                         continue
                     if not isinstance(content, list):
@@ -199,9 +194,6 @@ class SchwabStreamClient:
                         continue
                     if event:
                         self._last_ts_ms = event["ts_ms"]
-                        if not self._logged_first_event:
-                            logger.info("First quote event received for %s", event.get("symbol"))
-                            self._logged_first_event = True
                         self._on_quote(event)
         except Exception as exc:  # noqa: BLE001
             logger.error("Stream on_message failed: %s; payload=%r", exc, payload)
