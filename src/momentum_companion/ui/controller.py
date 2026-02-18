@@ -186,6 +186,8 @@ class UIController:
             self._window.connection_label.setText("Connection: STREAM CONNECTED")
             if self._pending_symbol and self._stream_client:
                 self._stream_client.subscribe_level_one(self._pending_symbol)
+        elif state == "SUBSCRIBED":
+            self._window.connection_label.setText("Connection: STREAM SUBSCRIBED")
         elif state == "RECONNECTING":
             self._window.connection_label.setText("Connection: RECONNECTING")
         elif state == "CONNECTING":
