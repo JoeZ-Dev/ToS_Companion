@@ -9,6 +9,7 @@ from momentum_companion.clients.schwab_stream import SchwabStreamClient
 from momentum_companion.clients.schwab_rest import SchwabRestClient
 from momentum_companion.clients.token_provider import TokenProvider
 from momentum_companion.data.contracts import QuoteEvent
+from momentum_companion.data.bar_aggregator import BarAggregator10s, TenSecondBar
 
 
 class UIController:
@@ -27,6 +28,9 @@ class UIController:
         self._rest_client = rest_client
         self._stream_client = stream_client
         self._token_provider = token_provider
+        self._aggregator = BarAggregator10s()
+        self._bars: list[dict] = []
+        self._pending_symbol: str | None = None
         self._hook_symbol_input()
 
     def handle_flash(self, symbol: str, rec: dict, payload: dict) -> None:
@@ -57,10 +61,15 @@ class UIController:
         symbol = self._window.symbol_input.text().strip().upper()
         if not symbol:
             return
+        self._pending_symbol = symbol
+        self._aggregator = BarAggregator10s()
+        self._bars = []
+        self._window.symbol_input.setDisabled(True)
         self._window.connection_label.setText("Connection: REQUESTED")
         self._window.banner.setText(f"Requested symbol: {symbol}")
         self._load_history(symbol)
         self._subscribe_stream(symbol)
+        self._window.symbol_input.setDisabled(False)
 
     def _load_history(self, symbol: str) -> None:
         """Fetch minimal price history to seed chart."""
@@ -70,12 +79,12 @@ class UIController:
             self._window.banner.setText("")
             resp = self._rest_client.fetch_price_history(symbol, None, None, "day")
             candles = resp.get("candles") or []
-            bars = [
+            self._bars = [
                 {"ts": c.get("datetime"), "open": c.get("open"), "high": c.get("high"), "low": c.get("low"), "close": c.get("close")}
                 for c in candles
             ]
-            if bars:
-                self.render_chart(bars[-50:])  # show recent slice
+            if self._bars:
+                self.render_chart(self._bars[-50:])  # show recent slice
                 self._window.banner.setText("")
                 self._window.connection_label.setText("Connection: READY (history)")
                 self._window.last_update_label.setText(f"Last Update: history for {symbol}")
@@ -127,6 +136,14 @@ class UIController:
         if ts_ms:
             self._window.last_update_label.setText(f"Last Update: {ts_ms}")
         self._window.update_quote_display(event.get("bid"), event.get("ask"), event.get("last"), ts_ms)
+        completed = self._aggregator.ingest_quote(event)
+        if completed:
+            self._append_bar(completed)
+
+    def _append_bar(self, bar: TenSecondBar) -> None:
+        bar_dict = {"ts": bar.ts_ms, "open": bar.open, "high": bar.high, "low": bar.low, "close": bar.close}
+        self._bars.append(bar_dict)
+        self.render_chart(self._bars[-50:])
 
     def _on_stream_state(self, state: str) -> None:
         """Update UI with stream state transitions."""
@@ -136,6 +153,8 @@ class UIController:
             self._window.connection_label.setText("Connection: STREAM ERROR")
         elif state == "CONNECTED":
             self._window.connection_label.setText("Connection: STREAM CONNECTED")
+            if self._pending_symbol and self._stream_client:
+                self._stream_client.subscribe_level_one(self._pending_symbol)
         elif state == "RECONNECTING":
             self._window.connection_label.setText("Connection: RECONNECTING")
         elif state == "CONNECTING":
