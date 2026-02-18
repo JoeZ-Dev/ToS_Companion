@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 import time
+import threading
+from functools import partial
+from PySide6 import QtCore
 
 from momentum_companion.llm.service import LLMService
 from momentum_companion.ui.main_window import MainWindow
@@ -33,6 +36,11 @@ class UIController:
         self._bars: list[dict] = []
         self._pending_symbol: str | None = None
         self._display_window_ms = 60 * 60 * 1000  # 1 hour window
+        self._bars_lock = threading.Lock()
+        self._render_timer = QtCore.QTimer()
+        self._render_timer.setInterval(1000)
+        self._render_timer.timeout.connect(self._render_tick)  # type: ignore[arg-type]
+        self._render_timer.start()
         self._hook_symbol_input()
 
     def handle_flash(self, symbol: str, rec: dict, payload: dict) -> None:
@@ -135,32 +143,50 @@ class UIController:
         return self._stream_client
 
     def _handle_quote(self, event: QuoteEvent) -> None:
+        bid = event.get("bid")
+        ask = event.get("ask")
+        last = event.get("last")
+        ts_ms = event.get("ts_ms")
         try:
-            ts_ms = event.get("ts_ms")
-            self._window.connection_label.setText("Connection: STREAMING")
-            if ts_ms:
-                self._window.last_update_label.setText(f"Last Update: {ts_ms}")
-            self._window.update_quote_display(event.get("bid"), event.get("ask"), event.get("last"), ts_ms)
-            completed = self._aggregator.ingest_quote(event)
-            if completed:
-                self._append_bar(completed)
+            with self._bars_lock:
+                completed = self._aggregator.ingest_quote(event)
+                if completed:
+                    self._append_bar_locked(completed)
         except Exception as exc:  # noqa: BLE001
-            # Log and keep app alive if a render error occurs
             from momentum_companion.utils.logging import logging
 
             logging.getLogger(__name__).error("Quote handling failed: %s", exc, exc_info=True)
+        # UI label updates on main thread
+        QtCore.QTimer.singleShot(0, partial(self._update_labels_ui, ts_ms, bid, ask, last))
+
+    def _update_labels_ui(self, ts_ms: int | None, bid: float | None, ask: float | None, last: float | None) -> None:
+        self._window.connection_label.setText("Connection: STREAMING")
+        if ts_ms:
+            self._window.last_update_label.setText(f"Last Update: {ts_ms}")
+        self._window.update_quote_display(bid, ask, last, ts_ms)
 
     def _append_bar(self, bar: TenSecondBar) -> None:
+        with self._bars_lock:
+            self._append_bar_locked(bar)
+
+    def _append_bar_locked(self, bar: TenSecondBar) -> None:
         bar_dict = {"ts": bar.ts_ms, "open": bar.open, "high": bar.high, "low": bar.low, "close": bar.close}
         self._bars.append(bar_dict)
-        # Temporarily skip chart redraws to isolate crash cause.
-        # self._prune_and_render()
 
     def _prune_and_render(self) -> None:
         cutoff = int(time.time() * 1000) - self._display_window_ms
-        window_bars = [b for b in self._bars if b.get("ts") is not None and b["ts"] >= cutoff]
+        with self._bars_lock:
+            window_bars = [b for b in self._bars if b.get("ts") is not None and b["ts"] >= cutoff]
+            forming = self._aggregator.forming_bar()
+        if forming:
+            window_bars = window_bars + [
+                {"ts": forming.ts_ms, "open": forming.open, "high": forming.high, "low": forming.low, "close": forming.close}
+            ]
         self._bars = window_bars
         self.render_chart(window_bars)
+
+    def _render_tick(self) -> None:
+        self._prune_and_render()
 
     def _on_stream_state(self, state: str) -> None:
         """Update UI with stream state transitions."""
