@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from PySide6 import QtWebEngineWidgets
 import plotly.graph_objects as go
@@ -34,12 +34,18 @@ class ChartWidget(QtWebEngineWidgets.QWebEngineView):
             ]
         )
         self._fig.update_layout(height=400)
+        if x_vals:
+            try:
+                tail = x_vals[-1] + timedelta(seconds=30)
+                self._fig.update_layout(xaxis=dict(range=[x_vals[0], tail]))
+            except Exception:
+                pass
         self.setHtml(self._fig.to_html(include_plotlyjs="cdn"))
 
     @staticmethod
-    def _to_datetime(ts: int) -> str:
-        """Convert ms epoch to ISO string for x-axis readability."""
+    def _to_datetime(ts: int) -> datetime:
+        """Convert ms epoch to datetime for x-axis readability."""
         try:
-            return datetime.utcfromtimestamp(ts / 1000).isoformat()
+            return datetime.utcfromtimestamp(ts / 1000)
         except Exception:
-            return str(ts)
+            return datetime.utcfromtimestamp(0)

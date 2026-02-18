@@ -146,42 +146,45 @@ class SchwabStreamClient:
         except json.JSONDecodeError:
             logger.warning("Malformed JSON from stream")
             return
-        messages = []
-        if payload.get("service"):
-            messages.append(payload)
-        if isinstance(payload.get("data"), list):
-            messages.extend(payload["data"])
-        if isinstance(payload.get("response"), list):
-            messages.extend(payload["response"])
-        # Ignore heartbeats/notify entries
-        for msg in messages:
-            service = msg.get("service")
-            command = msg.get("command")
-            if service == "ADMIN":
-                content = msg.get("content") or {}
-                if isinstance(content, list) and content:
-                    content = content[0]
-                code = content.get("code", 0) if isinstance(content, dict) else 0
-                if command == "LOGIN" and code == 0:
-                    self._connected = True
-                    self._emit_state("CONNECTED")
-                    if self._active_symbol:
-                        self.subscribe_level_one(self._active_symbol)
-                elif command == "LOGIN" and code != 0:
-                    logger.error("Stream LOGIN failed code=%s", code)
-                    self._emit_state("LOGIN_FAILED")
-                if command == "LOGOUT":
-                    self._emit_state("DISCONNECTED")
-                    self._attempt_reconnect()
-            elif service == "LEVELONE_EQUITIES":
-                try:
-                    event = self._cache.process_message(msg)
-                except ValueError as exc:
-                    logger.warning("Stream message dropped: %s", exc)
-                    continue
-                if event:
-                    self._last_ts_ms = event["ts_ms"]
-                    self._on_quote(event)
+        try:
+            messages = []
+            if payload.get("service"):
+                messages.append(payload)
+            if isinstance(payload.get("data"), list):
+                messages.extend(payload["data"])
+            if isinstance(payload.get("response"), list):
+                messages.extend(payload["response"])
+            # Ignore heartbeats/notify entries
+            for msg in messages:
+                service = msg.get("service")
+                command = msg.get("command")
+                if service == "ADMIN":
+                    content = msg.get("content") or {}
+                    if isinstance(content, list) and content:
+                        content = content[0]
+                    code = content.get("code", 0) if isinstance(content, dict) else 0
+                    if command == "LOGIN" and code == 0:
+                        self._connected = True
+                        self._emit_state("CONNECTED")
+                        if self._active_symbol:
+                            self.subscribe_level_one(self._active_symbol)
+                    elif command == "LOGIN" and code != 0:
+                        logger.error("Stream LOGIN failed code=%s", code)
+                        self._emit_state("LOGIN_FAILED")
+                    if command == "LOGOUT":
+                        self._emit_state("DISCONNECTED")
+                        self._attempt_reconnect()
+                elif service == "LEVELONE_EQUITIES":
+                    try:
+                        event = self._cache.process_message(msg)
+                    except ValueError as exc:
+                        logger.warning("Stream message dropped: %s", exc)
+                        continue
+                    if event:
+                        self._last_ts_ms = event["ts_ms"]
+                        self._on_quote(event)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Stream on_message failed: %s", exc)
 
     def _on_error(self, ws: websocket.WebSocketApp, error: Exception) -> None:
         logger.error("Stream error: %s", error)
