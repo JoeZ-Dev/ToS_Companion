@@ -173,15 +173,12 @@ class SchwabStreamClient:
                 if command == "LOGOUT":
                     self._emit_state("DISCONNECTED")
                     self._attempt_reconnect()
-                elif service == "LEVELONE_EQUITIES":
-                    if isinstance(msg.get("content"), dict):
-                        logger.info("Stream SUBS/UNSUBS response: %r", msg)
-                        continue
-                    try:
-                        event = self._cache.process_message(msg)
-                    except ValueError as exc:
-                        logger.warning("Stream message dropped: %s", exc)
-                        continue
+            elif service == "LEVELONE_EQUITIES":
+                try:
+                    event = self._cache.process_message(msg)
+                except ValueError as exc:
+                    logger.warning("Stream message dropped: %s", exc)
+                    continue
                 if event:
                     self._last_ts_ms = event["ts_ms"]
                     self._on_quote(event)
