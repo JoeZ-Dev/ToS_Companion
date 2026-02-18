@@ -34,6 +34,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # Middle split: chart + side panel
         middle = QtWidgets.QHBoxLayout()
         chart_area = QtWidgets.QVBoxLayout()
+        self.quote_label = QtWidgets.QLabel("Quote: --")
+        chart_area.addWidget(self.quote_label)
         chart_area.addWidget(ChartWidget())
         middle.addLayout(chart_area, 3)
 
@@ -103,6 +105,16 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self.state_label.setStyleSheet("color: green; font-weight: bold;")
             self.banner.setText("")
+
+    def update_quote_display(self, bid: float | None, ask: float | None, last: float | None, ts_ms: int | None) -> None:
+        """Display latest L1 values above the chart."""
+        parts = []
+        parts.append(f"Bid: {bid:.2f}" if bid is not None else "Bid: --")
+        parts.append(f"Ask: {ask:.2f}" if ask is not None else "Ask: --")
+        parts.append(f"Last: {last:.2f}" if last is not None else "Last: --")
+        if ts_ms:
+            parts.append(f"ts: {ts_ms}")
+        self.quote_label.setText(" | ".join(parts))
 
     def apply_llm_recommendation(self, rec: dict) -> None:
         """Render basic LLM recommendation text."""

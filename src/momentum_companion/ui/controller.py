@@ -116,3 +116,4 @@ class UIController:
         self._window.connection_label.setText("Connection: STREAMING")
         if ts_ms:
             self._window.last_update_label.setText(f"Last Update: {ts_ms}")
+        self._window.update_quote_display(event.get("bid"), event.get("ask"), event.get("last"), ts_ms)
