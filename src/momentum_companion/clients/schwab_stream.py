@@ -162,6 +162,7 @@ class SchwabStreamClient:
             for msg in messages:
                 service = msg.get("service")
                 command = msg.get("command")
+                logger.debug("Stream message service=%s command=%s", service, command)
                 if service == "ADMIN":
                     content = msg.get("content") or {}
                     if isinstance(content, list) and content:
@@ -180,8 +181,13 @@ class SchwabStreamClient:
                         self._attempt_reconnect()
                 elif service == "LEVELONE_EQUITIES":
                     content = msg.get("content")
+                    # SUBS responses carry dict content; treat code 0 as subscribed
+                    if isinstance(content, dict):
+                        code = content.get("code")
+                        if code == 0 and command == "SUBS":
+                            self._emit_state("SUBSCRIBED")
+                        continue
                     if not isinstance(content, list):
-                        # SUBS/UNSUBS responses carry dict content; ignore
                         continue
                     try:
                         event = self._cache.process_message(msg)
