@@ -153,7 +153,8 @@ class UIController:
     def _append_bar(self, bar: TenSecondBar) -> None:
         bar_dict = {"ts": bar.ts_ms, "open": bar.open, "high": bar.high, "low": bar.low, "close": bar.close}
         self._bars.append(bar_dict)
-        self._prune_and_render()
+        # Temporarily skip chart redraws to isolate crash cause.
+        # self._prune_and_render()
 
     def _prune_and_render(self) -> None:
         cutoff = int(time.time() * 1000) - self._display_window_ms
