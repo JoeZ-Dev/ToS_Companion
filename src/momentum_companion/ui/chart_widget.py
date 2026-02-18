@@ -28,17 +28,19 @@ class ChartWidget(QtWebEngineWidgets.QWebEngineView):
             "Plotly.newPlot('chart',[{type:\"candlestick\",x:[],open:[],high:[],low:[],close:[],name:\"10s\",showlegend:false}],"
             "{title:\"10s Chart\",height:400,showlegend:false,uirevision:\"static\"});"
             "window.updateData=function(payload){var data=JSON.parse(payload);"
+            "var layout={height:400,showlegend:false,uirevision:\"static\"};"
+            "if(data.latest){layout.xaxis={range:[data.x[Math.max(0,data.x.length-50)], data.x[data.x.length-1]]};}"
             "Plotly.react('chart',[{type:\"candlestick\",x:data.x,open:data.open,high:data.high,low:data.low,close:data.close,"
-            "name:\"10s\",showlegend:false}],{height:400,showlegend:false,uirevision:\"static\"});};"
+            "name:\"10s\",showlegend:false}],layout);};"
             "</script>"
             "</body></html>"
         )
         self.setHtml(html)
 
-    def render_bars(self, times: list, opens: list, highs: list, lows: list, closes: list) -> None:
+    def render_bars(self, times: list, opens: list, highs: list, lows: list, closes: list, latest_ts: int | None = None) -> None:
         """Incrementally update candlesticks via JS to avoid full re-render flicker."""
         x_vals = [self._to_datetime_str(t) for t in times]
-        payload = json.dumps({"x": x_vals, "open": opens, "high": highs, "low": lows, "close": closes})
+        payload = json.dumps({"x": x_vals, "open": opens, "high": highs, "low": lows, "close": closes, "latest": latest_ts})
         # Execute JS in the page to update data
         self.page().runJavaScript(f"window.updateData('{payload}');")
 

@@ -43,6 +43,7 @@ class UIController:
         self._render_timer.start()
         self._dirty = False
         self._last_forming_sig: tuple[int | None, float | None] = (None, None)
+        self._last_render_ts_ms: int | None = None
         self._hook_symbol_input()
 
     def handle_flash(self, symbol: str, rec: dict, payload: dict) -> None:
@@ -191,7 +192,8 @@ class UIController:
                 {"ts": forming.ts_ms, "open": forming.open, "high": forming.high, "low": forming.low, "close": forming.close}
             ]
         self._bars = window_bars
-        self.render_chart(window_bars)
+        self._last_render_ts_ms = window_bars[-1]["ts"] if window_bars else self._last_render_ts_ms
+        self.render_chart(window_bars, latest_ts=self._last_render_ts_ms)
 
     def _render_tick(self) -> None:
         if not self._dirty:
