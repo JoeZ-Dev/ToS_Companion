@@ -22,8 +22,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # Top bar
         top = QtWidgets.QHBoxLayout()
         top.addWidget(QtWidgets.QLabel("Symbol:"))
-        top.addWidget(QtWidgets.QLineEdit())
-        top.addWidget(QtWidgets.QLabel("Connection: CONNECTED"))
+        self.symbol_input = QtWidgets.QLineEdit()
+        top.addWidget(self.symbol_input)
+        self.connection_label = QtWidgets.QLabel("Connection: DISCONNECTED")
         top.addWidget(QtWidgets.QLabel("LLM: OFF"))
         top.addStretch()
         root.addLayout(top)

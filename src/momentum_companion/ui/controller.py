@@ -13,6 +13,7 @@ class UIController:
     def __init__(self, window: MainWindow, llm_service: LLMService) -> None:
         self._window = window
         self._llm_service = llm_service
+        self._hook_symbol_input()
 
     def handle_flash(self, symbol: str, rec: dict, payload: dict) -> None:
         """Trigger flash alert in UI."""
@@ -33,3 +34,15 @@ class UIController:
         chart: ChartWidget = self._window.findChild(ChartWidget)
         if chart:
             chart.render_bars(times, opens, highs, lows, closes)
+
+    def _hook_symbol_input(self) -> None:
+        if hasattr(self._window, "symbol_input"):
+            self._window.symbol_input.returnPressed.connect(self._on_symbol_entered)  # type: ignore[attr-defined]
+
+    def _on_symbol_entered(self) -> None:
+        symbol = self._window.symbol_input.text().strip().upper()
+        if not symbol:
+            return
+        self._window.connection_label.setText("Connection: CONNECTING")
+        # Placeholder: hook real stream/REST here
+        self._window.connection_label.setText("Connection: CONNECTED")
