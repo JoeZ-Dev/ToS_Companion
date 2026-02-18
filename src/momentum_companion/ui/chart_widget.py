@@ -38,6 +38,15 @@ class ChartWidget(QtWebEngineWidgets.QWebEngineView):
     def render_bars(self, times: list, opens: list, highs: list, lows: list, closes: list) -> None:
         """Incrementally update candlesticks via JS to avoid full re-render flicker."""
         x_vals = [self._to_datetime_str(t) for t in times]
+        # pad 6 bars to the right using the last interval
+        pad_gap_ms = (times[-1] - times[-2]) if len(times) >= 2 else 10_000
+        if times:
+            pad_ts = self._to_datetime_str(times[-1] + pad_gap_ms * 6)
+            x_vals = x_vals + [pad_ts]
+            opens = list(opens) + [opens[-1]]
+            highs = list(highs) + [highs[-1]]
+            lows = list(lows) + [lows[-1]]
+            closes = list(closes) + [closes[-1]]
         payload = json.dumps({"x": x_vals, "open": opens, "high": highs, "low": lows, "close": closes})
         # Execute JS in the page to update data
         self.page().runJavaScript(f"window.updateData('{payload}');")
