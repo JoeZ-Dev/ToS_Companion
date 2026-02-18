@@ -37,7 +37,7 @@ class ChartWidget(QtWebEngineWidgets.QWebEngineView):
         if x_vals:
             try:
                 tail = x_vals[-1] + timedelta(seconds=30)
-                self._fig.update_layout(xaxis=dict(range=[x_vals[0], tail]))
+                self._fig.update_layout(xaxis=dict(range=[x_vals[0], tail], autorange=False))
             except Exception:
                 pass
         self.setHtml(self._fig.to_html(include_plotlyjs="cdn"))

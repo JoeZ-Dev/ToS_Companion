@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 import time
+from functools import partial
+
+from PySide6 import QtCore
 
 from momentum_companion.llm.service import LLMService
 from momentum_companion.ui.main_window import MainWindow
@@ -136,6 +139,10 @@ class UIController:
         return self._stream_client
 
     def _handle_quote(self, event: QuoteEvent) -> None:
+        # Called from stream thread; marshal to UI thread.
+        QtCore.QTimer.singleShot(0, partial(self._process_quote_ui, event))
+
+    def _process_quote_ui(self, event: QuoteEvent) -> None:
         ts_ms = event.get("ts_ms")
         self._window.connection_label.setText("Connection: STREAMING")
         if ts_ms:
@@ -167,6 +174,9 @@ class UIController:
 
     def _on_stream_state(self, state: str) -> None:
         """Update UI with stream state transitions."""
+        QtCore.QTimer.singleShot(0, partial(self._apply_stream_state_ui, state))
+
+    def _apply_stream_state_ui(self, state: str) -> None:
         self._window.stream_label.setText(f"Stream: {state}")
         if state in {"DOWN", "STREAM_DOWN", "LOGIN_FAILED"}:
             self._window.banner.setText("Stream unavailable. Check auth/connection.")
