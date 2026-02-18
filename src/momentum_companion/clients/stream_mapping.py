@@ -25,8 +25,14 @@ class LevelOneCache:
             service = message["service"]
             if service != "LEVELONE_EQUITIES":
                 raise ValueError("Unsupported service")
-            ts_ms = int(message["timestamp"])
-            content = message["content"][0]
+            ts_raw = message.get("timestamp")
+            if ts_raw is None:
+                return None
+            ts_ms = int(ts_raw)
+            content_list = message.get("content") or []
+            if not content_list:
+                return None
+            content = content_list[0]
             symbol = content["key"]
         except Exception as exc:
             raise ValueError("Malformed streaming message") from exc
