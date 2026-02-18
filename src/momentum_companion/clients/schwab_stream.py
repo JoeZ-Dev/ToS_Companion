@@ -146,6 +146,9 @@ class SchwabStreamClient:
         except json.JSONDecodeError:
             logger.warning("Malformed JSON from stream")
             return
+        if not isinstance(payload, dict):
+            logger.warning("Non-dict payload dropped: %r", payload)
+            return
         try:
             messages = []
             if payload.get("service"):
@@ -184,7 +187,7 @@ class SchwabStreamClient:
                         self._last_ts_ms = event["ts_ms"]
                         self._on_quote(event)
         except Exception as exc:  # noqa: BLE001
-            logger.error("Stream on_message failed: %s", exc)
+            logger.error("Stream on_message failed: %s; payload=%r", exc, payload)
 
     def _on_error(self, ws: websocket.WebSocketApp, error: Exception) -> None:
         logger.error("Stream error: %s", error)
