@@ -10,9 +10,10 @@ from momentum_companion.ui.chart_widget import ChartWidget
 class UIController:
     """Coordinates UI state, signals/slots, and renders updates (§4.1)."""
 
-    def __init__(self, window: MainWindow, llm_service: LLMService) -> None:
+    def __init__(self, window: MainWindow, llm_service: LLMService, rest_client=None) -> None:
         self._window = window
         self._llm_service = llm_service
+        self._rest_client = rest_client
         self._hook_symbol_input()
 
     def handle_flash(self, symbol: str, rec: dict, payload: dict) -> None:
@@ -45,3 +46,22 @@ class UIController:
             return
         self._window.connection_label.setText("Connection: REQUESTED")
         self._window.banner.setText(f"Requested symbol: {symbol}")
+        self._load_history(symbol)
+
+    def _load_history(self, symbol: str) -> None:
+        """Fetch minimal price history to seed chart."""
+        if not self._rest_client:
+            return
+        try:
+            resp = self._rest_client.fetch_price_history(symbol, None, None, "day")
+            candles = resp.get("candles") or []
+            bars = [
+                {"ts": c.get("datetime"), "open": c.get("open"), "high": c.get("high"), "low": c.get("low"), "close": c.get("close")}
+                for c in candles
+            ]
+            if bars:
+                self.render_chart(bars[-50:])  # show recent slice
+            self._window.connection_label.setText("Connection: READY (no live stream)")
+            self._window.last_update_label.setText(f"Last Update: history for {symbol}")
+        except Exception as exc:  # noqa: BLE001
+            self._window.banner.setText(f"History load failed for {symbol}")
