@@ -47,10 +47,8 @@ class SchwabStreamClient:
 
     def connect(self) -> None:
         """Open WebSocket and authenticate."""
-        self._emit_state("CONNECTING")
-        url = self._streamer_info.get("streamerSocketUrl", "")
-        if not url:
-            raise ValueError("Missing streamerSocketUrl")
+        self._connection_state = "RECONNECTING"
+        url = self._streamer_info["streamerSocketUrl"]
         self._ws = websocket.WebSocketApp(
             url,
             on_open=self._on_open,
@@ -95,7 +93,7 @@ class SchwabStreamClient:
         if self._ws:
             self._ws.close()
         self._connected = False
-        self._emit_state("DISCONNECTED")
+        self._connection_state = "DISCONNECTED"
 
     def is_connected(self) -> bool:
         """Return connection state."""
@@ -126,7 +124,6 @@ class SchwabStreamClient:
 
     # Internal callbacks
     def _on_open(self, ws: websocket.WebSocketApp) -> None:
-        logger.info("Stream open, sending LOGIN")
         login_msg = {
             "service": "ADMIN",
             "command": "LOGIN",
@@ -147,69 +144,39 @@ class SchwabStreamClient:
         except json.JSONDecodeError:
             logger.warning("Malformed JSON from stream")
             return
-        if not isinstance(payload, dict):
-            logger.warning("Non-dict payload dropped: %r", payload)
+        # Handle admin responses
+        if payload.get("service") == "ADMIN" and payload.get("command") == "LOGIN":
+            self._connected = True
+            self._connection_state = "CONNECTED"
+            if self._active_symbol:
+                self.subscribe_level_one(self._active_symbol)
             return
-        try:
-            messages = []
-            if payload.get("service"):
-                messages.append(payload)
-            if isinstance(payload.get("data"), list):
-                messages.extend(payload["data"])
-            if isinstance(payload.get("response"), list):
-                messages.extend(payload["response"])
-            # Ignore heartbeats/notify entries
-            for msg in messages:
-                service = msg.get("service")
-                command = msg.get("command")
-                if service == "ADMIN":
-                    content = msg.get("content") or {}
-                    if isinstance(content, list) and content:
-                        content = content[0]
-                    code = content.get("code", 0) if isinstance(content, dict) else 0
-                    if command == "LOGIN" and code == 0:
-                        self._connected = True
-                        self._emit_state("CONNECTED")
-                        if self._active_symbol:
-                            self.subscribe_level_one(self._active_symbol)
-                    elif command == "LOGIN" and code != 0:
-                        logger.error("Stream LOGIN failed code=%s payload=%r", code, msg)
-                        self._emit_state("LOGIN_FAILED")
-                    if command == "LOGOUT":
-                        self._emit_state("DISCONNECTED")
-                        self._attempt_reconnect()
-                elif service == "LEVELONE_EQUITIES":
-                    content = msg.get("content")
-                    # ignore SUBS/UNSUBS responses with dict content
-                    if isinstance(content, dict):
-                        if content.get("code") == 0 and command == "SUBS":
-                            self._emit_state("SUBSCRIBED")
-                        continue
-                    if not isinstance(content, list):
-                        continue
-                    try:
-                        event = self._cache.process_message(msg)
-                    except ValueError as exc:
-                        logger.warning("Stream message dropped: %s", exc)
-                        continue
-                    if event:
-                        self._last_ts_ms = event["ts_ms"]
-                        self._on_quote(event)
-        except Exception as exc:  # noqa: BLE001
-            logger.error("Stream on_message failed: %s; payload=%r", exc, payload)
+        if payload.get("service") == "LEVELONE_EQUITIES":
+            for content in payload.get("content", []):
+                event = self._cache.process_message(
+                    {
+                        "service": "LEVELONE_EQUITIES",
+                        "timestamp": payload.get("timestamp"),
+                        "content": [content],
+                    }
+                )
+                if event:
+                    self._last_ts_ms = event["ts_ms"]
+                    self._on_quote(event)
+        if payload.get("service") == "ADMIN" and payload.get("command") == "LOGOUT":
+            self._connection_state = "DISCONNECTED"
+            self._attempt_reconnect()
 
     def _on_error(self, ws: websocket.WebSocketApp, error: Exception) -> None:
         logger.error("Stream error: %s", error)
-        self._emit_state("ERROR")
 
     def _on_close(self, ws: websocket.WebSocketApp, close_status_code: int, close_msg: str) -> None:
-        logger.warning("Stream closed code=%s msg=%s", close_status_code, close_msg)
         self._connected = False
-        self._emit_state("DISCONNECTED")
+        self._connection_state = "DISCONNECTED"
         self._attempt_reconnect()
 
     def _attempt_reconnect(self) -> None:
-        self._emit_state("RECONNECTING")
+        self._connection_state = "RECONNECTING"
         backoffs = [1, 2, 4, 8, 16, 32]
         for delay in backoffs:
             time.sleep(delay)
@@ -220,7 +187,7 @@ class SchwabStreamClient:
                 return
             except Exception as exc:  # noqa: BLE001
                 logger.error("Reconnect attempt failed: %s", exc)
-        self._emit_state("DOWN")
+        self._connection_state = "DOWN"
         if self._journal:
             try:
                 self._journal.append_event(
@@ -235,12 +202,8 @@ class SchwabStreamClient:
                 )
             except Exception:
                 logger.error("Failed to journal STREAM_DOWN")
-        self._emit_state("STREAM_DOWN")
-
-    def _emit_state(self, state: str) -> None:
-        self._connection_state = state
         if self._state_callback:
             try:
-                self._state_callback(state)
+                self._state_callback("STREAM_DOWN")
             except Exception:
-                logger.error("Failed to emit state callback: %s", state)
+                logger.error("Failed to emit STREAM_DOWN state")
