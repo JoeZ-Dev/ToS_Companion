@@ -10,6 +10,8 @@ import base64
 import os
 import httpx
 
+from momentum_companion.clients.oauth_flow import OAuthFlow, BOUNCE_REDIRECT_URI
+
 TOKEN_PATH = Path.home() / ".tos_companion" / "tokens.json"
 TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token"
 
@@ -34,6 +36,8 @@ class TokenProvider:
         self._state_callback = state_callback
         self._auth_helper_url = os.environ.get("AUTH_HELPER_URL")
         self._helper_cache: dict = {}
+        self._client_id = os.environ.get("SCHWAB_CLIENT_ID")
+        self._client_secret = os.environ.get("SCHWAB_CLIENT_SECRET")
 
     def __call__(self) -> str:
         if self._auth_helper_url:
@@ -176,6 +180,17 @@ class TokenProvider:
         except Exception:
             if self._state_callback:
                 self._state_callback("AUTH_REQUIRED")
+
+    def interactive_login(self) -> dict:
+        """Run full interactive OAuth using bounce server and local loopback."""
+        if not self._client_id or not self._client_secret:
+            raise RuntimeError("SCHWAB_CLIENT_ID/SECRET required for interactive login.")
+        flow = OAuthFlow(self._client_id, self._client_secret)
+        tokens = flow.interactive_login()
+        self._token_cache.update(tokens)
+        self._save_tokens()
+        self._notify_listeners()
+        return tokens
 
     def add_refresh_listener(self, listener: Callable[[dict], None]) -> None:
         self._refresh_listeners.append(listener)
