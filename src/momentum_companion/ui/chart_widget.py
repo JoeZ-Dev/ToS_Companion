@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from PySide6 import QtWebEngineWidgets
 import plotly.graph_objects as go
 
@@ -17,10 +20,11 @@ class ChartWidget(QtWebEngineWidgets.QWebEngineView):
 
     def render_bars(self, times: list, opens: list, highs: list, lows: list, closes: list) -> None:
         """Render candlesticks with gaps off."""
+        x_vals = [self._to_datetime(t) for t in times]
         self._fig = go.Figure(
             data=[
                 go.Candlestick(
-                    x=times,
+                    x=x_vals,
                     open=opens,
                     high=highs,
                     low=lows,
@@ -32,3 +36,11 @@ class ChartWidget(QtWebEngineWidgets.QWebEngineView):
         )
         self._fig.update_layout(height=400)
         self.setHtml(self._fig.to_html(include_plotlyjs="cdn"))
+
+    @staticmethod
+    def _to_datetime(ts: int) -> datetime:
+        """Convert ms epoch to ET datetime for axis readability."""
+        try:
+            return datetime.fromtimestamp(ts / 1000, tz=ZoneInfo("America/New_York"))
+        except Exception:
+            return datetime.fromtimestamp(0, tz=ZoneInfo("America/New_York"))

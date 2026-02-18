@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+import time
 
 from momentum_companion.llm.service import LLMService
 from momentum_companion.ui.main_window import MainWindow
@@ -31,6 +32,7 @@ class UIController:
         self._aggregator = BarAggregator10s()
         self._bars: list[dict] = []
         self._pending_symbol: str | None = None
+        self._display_window_ms = 60 * 60 * 1000  # 1 hour window
         self._hook_symbol_input()
 
     def handle_flash(self, symbol: str, rec: dict, payload: dict) -> None:
@@ -77,7 +79,9 @@ class UIController:
             return
         try:
             self._window.banner.setText("")
-            resp = self._rest_client.fetch_price_history(symbol, None, None, "day")
+            end_ms = int(time.time() * 1000)
+            start_ms = end_ms - self._display_window_ms
+            resp = self._rest_client.fetch_price_history(symbol, start_ms, end_ms, "day")
             candles = resp.get("candles") or []
             self._bars = [
                 {"ts": c.get("datetime"), "open": c.get("open"), "high": c.get("high"), "low": c.get("low"), "close": c.get("close")}
@@ -143,7 +147,13 @@ class UIController:
     def _append_bar(self, bar: TenSecondBar) -> None:
         bar_dict = {"ts": bar.ts_ms, "open": bar.open, "high": bar.high, "low": bar.low, "close": bar.close}
         self._bars.append(bar_dict)
-        self.render_chart(self._bars[-50:])
+        self._prune_and_render()
+
+    def _prune_and_render(self) -> None:
+        cutoff = int(time.time() * 1000) - self._display_window_ms
+        window_bars = [b for b in self._bars if b.get("ts") is not None and b["ts"] >= cutoff]
+        self._bars = window_bars
+        self.render_chart(window_bars)
 
     def _on_stream_state(self, state: str) -> None:
         """Update UI with stream state transitions."""
