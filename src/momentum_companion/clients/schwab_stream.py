@@ -39,6 +39,7 @@ class SchwabStreamClient:
         self._connection_state: str = "DISCONNECTED"
         self._journal = journal
         self._state_callback = state_callback
+        self._emit_state = self._emit_state_impl
         if hasattr(self._token_provider, "add_refresh_listener"):
             try:
                 self._token_provider.add_refresh_listener(self._on_token_refreshed)  # type: ignore[attr-defined]
@@ -204,6 +205,14 @@ class SchwabStreamClient:
                 )
             except Exception:
                 logger.error("Failed to journal STREAM_DOWN")
+
+    def _emit_state_impl(self, state: str) -> None:
+        self._connection_state = state
+        if self._state_callback:
+            try:
+                self._state_callback(state)
+            except Exception:
+                logger.error("Failed to emit state callback: %s", state)
         if self._state_callback:
             try:
                 self._state_callback("STREAM_DOWN")
