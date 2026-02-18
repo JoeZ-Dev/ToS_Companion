@@ -135,14 +135,20 @@ class UIController:
         return self._stream_client
 
     def _handle_quote(self, event: QuoteEvent) -> None:
-        ts_ms = event.get("ts_ms")
-        self._window.connection_label.setText("Connection: STREAMING")
-        if ts_ms:
-            self._window.last_update_label.setText(f"Last Update: {ts_ms}")
-        self._window.update_quote_display(event.get("bid"), event.get("ask"), event.get("last"), ts_ms)
-        completed = self._aggregator.ingest_quote(event)
-        if completed:
-            self._append_bar(completed)
+        try:
+            ts_ms = event.get("ts_ms")
+            self._window.connection_label.setText("Connection: STREAMING")
+            if ts_ms:
+                self._window.last_update_label.setText(f"Last Update: {ts_ms}")
+            self._window.update_quote_display(event.get("bid"), event.get("ask"), event.get("last"), ts_ms)
+            completed = self._aggregator.ingest_quote(event)
+            if completed:
+                self._append_bar(completed)
+        except Exception as exc:  # noqa: BLE001
+            # Log and keep app alive if a render error occurs
+            from momentum_companion.utils.logging import logging
+
+            logging.getLogger(__name__).error("Quote handling failed: %s", exc, exc_info=True)
 
     def _append_bar(self, bar: TenSecondBar) -> None:
         bar_dict = {"ts": bar.ts_ms, "open": bar.open, "high": bar.high, "low": bar.low, "close": bar.close}

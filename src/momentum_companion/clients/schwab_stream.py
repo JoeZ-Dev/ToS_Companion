@@ -191,6 +191,7 @@ class SchwabStreamClient:
         self._emit_state("ERROR")
 
     def _on_close(self, ws: websocket.WebSocketApp, close_status_code: int, close_msg: str) -> None:
+        logger.warning("Stream closed code=%s msg=%s", close_status_code, close_msg)
         self._connected = False
         self._emit_state("DISCONNECTED")
         self._attempt_reconnect()
