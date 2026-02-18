@@ -41,6 +41,8 @@ class UIController:
         self._render_timer.setInterval(1000)
         self._render_timer.timeout.connect(self._render_tick)  # type: ignore[arg-type]
         self._render_timer.start()
+        self._dirty = False
+        self._last_forming_sig: tuple[int | None, float | None] = (None, None)
         self._hook_symbol_input()
 
     def handle_flash(self, symbol: str, rec: dict, payload: dict) -> None:
@@ -152,6 +154,12 @@ class UIController:
                 completed = self._aggregator.ingest_quote(event)
                 if completed:
                     self._append_bar_locked(completed)
+                    self._dirty = True
+                forming = self._aggregator.forming_bar()
+                sig = (forming.ts_ms if forming else None, forming.close if forming else None)
+                if sig != self._last_forming_sig:
+                    self._dirty = True
+                    self._last_forming_sig = sig
         except Exception as exc:  # noqa: BLE001
             from momentum_companion.utils.logging import logging
 
@@ -186,7 +194,10 @@ class UIController:
         self.render_chart(window_bars)
 
     def _render_tick(self) -> None:
+        if not self._dirty:
+            return
         self._prune_and_render()
+        self._dirty = False
 
     def _on_stream_state(self, state: str) -> None:
         """Update UI with stream state transitions."""

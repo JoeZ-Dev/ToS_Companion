@@ -32,7 +32,7 @@ class ChartWidget(QtWebEngineWidgets.QWebEngineView):
             window.highs = [];
             window.lows = [];
             window.closes = [];
-            Plotly.newPlot('chart', [{{
+            Plotly.newPlot('chart', [{
               type: 'candlestick',
               x: [],
               open: [],
@@ -41,14 +41,15 @@ class ChartWidget(QtWebEngineWidgets.QWebEngineView):
               close: [],
               name: '10s',
               showlegend: false
-            }}], {{
+            }], {
               title: '10s Chart',
               height: 400,
-              showlegend: false
-            }});
-            window.updateData = function(payload) {{
+              showlegend: false,
+              uirevision: 'static'
+            });
+            window.updateData = function(payload) {
               const data = JSON.parse(payload);
-              Plotly.react('chart', [{{
+              Plotly.react('chart', [{
                 type: 'candlestick',
                 x: data.x,
                 open: data.open,
@@ -57,11 +58,12 @@ class ChartWidget(QtWebEngineWidgets.QWebEngineView):
                 close: data.close,
                 name: '10s',
                 showlegend: false
-              }}], {{
+              }], {
                 height: 400,
-                showlegend: false
-              }});
-            }}
+                showlegend: false,
+                uirevision: 'static'
+              });
+            }
           </script>
         </body>
         </html>
