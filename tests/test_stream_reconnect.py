@@ -89,3 +89,35 @@ def test_stream_restarts_on_token_refresh(monkeypatch, tmp_path):
     ws2.on_open(ws2)
     ws2.on_message(ws2, json.dumps({"service": "ADMIN", "command": "LOGIN"}))
     assert any(m["command"] == "SUBS" for m in ws2.sent)
+
+
+def test_stream_handles_data_wrapper(monkeypatch):
+    created = []
+    events = []
+
+    def fake_ws(url, on_open, on_message, on_error, on_close):
+        ws = FakeWS(url, on_open, on_message, on_error, on_close)
+        created.append(ws)
+        return ws
+
+    monkeypatch.setattr("momentum_companion.clients.schwab_stream.websocket.WebSocketApp", fake_ws)
+    client = SchwabStreamClient(_base_streamer_info(), lambda e: events.append(e))
+    client.connect()
+    ws = created[-1]
+    ws.on_open(ws)
+    # login response wrapped in "response"
+    login_payload = {"response": [{"service": "ADMIN", "command": "LOGIN", "content": {"code": 0}}]}
+    ws.on_message(ws, json.dumps(login_payload))
+    client.subscribe_level_one("AAPL")
+    data_payload = {
+        "data": [
+            {
+                "service": "LEVELONE_EQUITIES",
+                "timestamp": 1710000000000,
+                "command": "SUBS",
+                "content": [{"key": "AAPL", "1": 100.0, "2": 101.0, "3": 100.5, "8": 1000}],
+            }
+        ]
+    }
+    ws.on_message(ws, json.dumps(data_payload))
+    assert events and events[-1]["symbol"] == "AAPL"

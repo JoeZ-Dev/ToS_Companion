@@ -105,11 +105,20 @@ class UIController:
         except Exception:
             self._window.banner.setText("Failed to load streamer info")
             return None
-        self._stream_client = SchwabStreamClient(
-            streamer_info, on_quote=self._handle_quote, token_provider=self._token_provider, state_callback=None
-        )
+        try:
+            self._stream_client = SchwabStreamClient(
+                streamer_info,
+                on_quote=self._handle_quote,
+                token_provider=self._token_provider,
+                state_callback=self._on_stream_state,
+            )
+            self._window.connection_label.setText("Connection: CONNECTING")
+            self._stream_client.connect()
+        except Exception as exc:  # noqa: BLE001
+            self._window.banner.setText(f"Stream connect failed: {exc}")
+            self._window.connection_label.setText("Connection: STREAM ERROR")
+            return None
         self._window.connection_label.setText("Connection: CONNECTING")
-        self._stream_client.connect()
         return self._stream_client
 
     def _handle_quote(self, event: QuoteEvent) -> None:
@@ -118,3 +127,16 @@ class UIController:
         if ts_ms:
             self._window.last_update_label.setText(f"Last Update: {ts_ms}")
         self._window.update_quote_display(event.get("bid"), event.get("ask"), event.get("last"), ts_ms)
+
+    def _on_stream_state(self, state: str) -> None:
+        """Update UI with stream state transitions."""
+        self._window.stream_label.setText(f"Stream: {state}")
+        if state in {"DOWN", "STREAM_DOWN", "LOGIN_FAILED"}:
+            self._window.banner.setText("Stream unavailable. Check auth/connection.")
+            self._window.connection_label.setText("Connection: STREAM ERROR")
+        elif state == "CONNECTED":
+            self._window.connection_label.setText("Connection: STREAM CONNECTED")
+        elif state == "RECONNECTING":
+            self._window.connection_label.setText("Connection: RECONNECTING")
+        elif state == "CONNECTING":
+            self._window.connection_label.setText("Connection: CONNECTING")
