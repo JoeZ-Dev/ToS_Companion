@@ -43,6 +43,5 @@ class UIController:
         symbol = self._window.symbol_input.text().strip().upper()
         if not symbol:
             return
-        self._window.connection_label.setText("Connection: CONNECTING")
-        # Placeholder: hook real stream/REST here
-        self._window.connection_label.setText("Connection: CONNECTED")
+        self._window.connection_label.setText("Connection: REQUESTED")
+        self._window.banner.setText(f"Requested symbol: {symbol}")

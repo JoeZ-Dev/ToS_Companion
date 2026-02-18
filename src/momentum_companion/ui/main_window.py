@@ -24,8 +24,10 @@ class MainWindow(QtWidgets.QMainWindow):
         top.addWidget(QtWidgets.QLabel("Symbol:"))
         self.symbol_input = QtWidgets.QLineEdit()
         top.addWidget(self.symbol_input)
-        self.connection_label = QtWidgets.QLabel("Connection: DISCONNECTED")
-        top.addWidget(QtWidgets.QLabel("LLM: OFF"))
+        self.connection_label = QtWidgets.QLabel("Connection: UNKNOWN")
+        top.addWidget(self.connection_label)
+        self.llm_status = QtWidgets.QLabel("LLM: OFF")
+        top.addWidget(self.llm_status)
         top.addStretch()
         root.addLayout(top)
 
@@ -70,7 +72,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Controls + states
         controls = QtWidgets.QHBoxLayout()
-        controls.addWidget(QtWidgets.QPushButton("Reconnect"))
+        self.reconnect_btn = QtWidgets.QPushButton("Reconnect")
+        controls.addWidget(self.reconnect_btn)
         controls.addWidget(QtWidgets.QPushButton("Cancel All"))
         controls.addWidget(QtWidgets.QPushButton("Flatten"))
         self.state_label = QtWidgets.QLabel("State: OK")
