@@ -14,8 +14,16 @@ logger = logging.getLogger(__name__)
 class SchwabRestClient:
     """REST client wrapper for Schwab endpoints (accounts/orders/history) per specs.md §13."""
 
-    def __init__(self, base_url: str, auth_token_provider: Any, timeout: float = 10.0, client: Optional[httpx.Client] = None) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        auth_token_provider: Any,
+        timeout: float = 10.0,
+        client: Optional[httpx.Client] = None,
+        marketdata_base_url: Optional[str] = None,
+    ) -> None:
         self._base_url = base_url.rstrip("/")
+        self._md_base_url = (marketdata_base_url or "https://api.schwabapi.com/marketdata/v1").rstrip("/")
         self._auth_token_provider = auth_token_provider
         self._timeout = timeout
         self._client = client or httpx.Client(timeout=timeout)
@@ -76,13 +84,13 @@ class SchwabRestClient:
         self, symbol: str, start_ms: Optional[int], end_ms: Optional[int], freq: str
     ) -> Dict[str, Any]:
         """Retrieve historical candles used for AE inputs."""
-        params: Dict[str, Any] = {"symbol": symbol}
+        params: Dict[str, Any] = {}
         if start_ms is not None:
             params["startDate"] = start_ms
         if end_ms is not None:
             params["endDate"] = end_ms
         params.update(self._freq_params(freq))
-        resp = self._request("GET", f"{self._base_url}/pricehistory", params=params)
+        resp = self._request("GET", f"{self._md_base_url}/{symbol}/pricehistory", params=params)
         return resp.json()
 
     def _freq_params(self, freq: str) -> Dict[str, Any]:
