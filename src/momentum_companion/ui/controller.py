@@ -87,29 +87,30 @@ class UIController:
             self._window.connection_label.setText("Connection: HISTORY ERROR")
 
     def _subscribe_stream(self, symbol: str) -> None:
-        if not self._ensure_stream_client():
+        client = self._ensure_stream_client()
+        if not client:
             return
-        self._stream_client.subscribe_level_one(symbol)
+        client.subscribe_level_one(symbol)
         self._window.connection_label.setText("Connection: STREAM SUBSCRIBED")
 
-    def _ensure_stream_client(self) -> bool:
+    def _ensure_stream_client(self) -> SchwabStreamClient | None:
         if self._stream_client:
-            return True
+            return self._stream_client
         if not self._rest_client or not self._token_provider:
             self._window.banner.setText("Stream not available (missing rest/token)")
-            return False
+            return None
         try:
             prefs = self._rest_client.get_user_preference()
             streamer_info = prefs[0]["streamerInfo"][0] if isinstance(prefs, list) else prefs["streamerInfo"][0]
         except Exception:
             self._window.banner.setText("Failed to load streamer info")
-            return False
+            return None
         self._stream_client = SchwabStreamClient(
             streamer_info, on_quote=self._handle_quote, token_provider=self._token_provider, state_callback=None
         )
         self._window.connection_label.setText("Connection: CONNECTING")
         self._stream_client.connect()
-        return True
+        return self._stream_client
 
     def _handle_quote(self, event: QuoteEvent) -> None:
         ts_ms = event.get("ts_ms")
