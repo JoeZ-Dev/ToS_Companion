@@ -164,8 +164,8 @@ class UIController:
             from momentum_companion.utils.logging import logging
 
             logging.getLogger(__name__).error("Quote handling failed: %s", exc, exc_info=True)
-        # Update labels immediately to keep quote line live
-        self._update_labels_ui(ts_ms, bid, ask, last)
+        # UI label updates on main thread
+        QtCore.QTimer.singleShot(0, partial(self._update_labels_ui, ts_ms, bid, ask, last))
 
     def _update_labels_ui(self, ts_ms: int | None, bid: float | None, ask: float | None, last: float | None) -> None:
         self._window.connection_label.setText("Connection: STREAMING")
