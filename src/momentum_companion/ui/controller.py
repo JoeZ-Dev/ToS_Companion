@@ -55,7 +55,7 @@ class UIController:
         """Render LLM recommendation."""
         self._window.apply_llm_recommendation(rec)
 
-    def render_chart(self, bars: list[dict]) -> None:
+    def render_chart(self, bars: list[dict], latest_ts: int | None = None) -> None:
         """Update chart widget with candlesticks."""
         times = [b["ts"] for b in bars]
         opens = [b["open"] for b in bars]
@@ -64,7 +64,7 @@ class UIController:
         closes = [b["close"] for b in bars]
         chart: ChartWidget = self._window.findChild(ChartWidget)
         if chart:
-            chart.render_bars(times, opens, highs, lows, closes)
+            chart.render_bars(times, opens, highs, lows, closes, latest_ts=latest_ts)
 
     def _hook_symbol_input(self) -> None:
         if hasattr(self._window, "symbol_input"):
