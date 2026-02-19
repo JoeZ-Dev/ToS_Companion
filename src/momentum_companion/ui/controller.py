@@ -8,12 +8,13 @@ from PySide6 import QtCore
 
 from momentum_companion.llm.service import LLMService
 from momentum_companion.ui.main_window import MainWindow
-from momentum_companion.ui.chart_widget import ChartWidget
+from momentum_companion.ui.chart_adapter import ChartAdapter
 from momentum_companion.clients.schwab_stream import SchwabStreamClient
 from momentum_companion.clients.schwab_rest import SchwabRestClient
 from momentum_companion.clients.token_provider import TokenProvider
 from momentum_companion.data.contracts import QuoteEvent
 from momentum_companion.data.bar_aggregator import BarAggregator10s, TenSecondBar
+from momentum_companion.data.price_update import PriceUpdate
 
 
 class UIController:
@@ -35,15 +36,17 @@ class UIController:
         self._aggregator = BarAggregator10s()
         self._bars: list[dict] = []
         self._pending_symbol: str | None = None
-        self._display_window_ms = 60 * 60 * 1000  # 1 hour window
+        self._display_window_sec = 60 * 60  # 1 hour window
         self._bars_lock = threading.Lock()
         self._render_timer = QtCore.QTimer()
-        self._render_timer.setInterval(1000)
+        self._render_timer.setInterval(100)  # 10fps target
         self._render_timer.timeout.connect(self._render_tick)  # type: ignore[arg-type]
         self._render_timer.start()
         self._dirty = False
         self._last_forming_sig: tuple[int | None, float | None] = (None, None)
         self._hook_symbol_input()
+        self._chart_adapter = ChartAdapter(self._window.chart_widget)
+        self._initial_render_done = False
 
     def handle_flash(self, symbol: str, rec: dict, payload: dict) -> None:
         """Trigger flash alert in UI."""
@@ -53,17 +56,6 @@ class UIController:
     def handle_llm_output(self, rec: dict) -> None:
         """Render LLM recommendation."""
         self._window.apply_llm_recommendation(rec)
-
-    def render_chart(self, bars: list[dict]) -> None:
-        """Update chart widget with candlesticks."""
-        times = [b["ts"] for b in bars]
-        opens = [b["open"] for b in bars]
-        highs = [b["high"] for b in bars]
-        lows = [b["low"] for b in bars]
-        closes = [b["close"] for b in bars]
-        chart: ChartWidget = self._window.findChild(ChartWidget)
-        if chart:
-            chart.render_bars(times, opens, highs, lows, closes)
 
     def _hook_symbol_input(self) -> None:
         if hasattr(self._window, "symbol_input"):
@@ -76,6 +68,7 @@ class UIController:
         self._pending_symbol = symbol
         self._aggregator = BarAggregator10s()
         self._bars = []
+        self._initial_render_done = False
         self._window.symbol_input.setDisabled(True)
         self._window.connection_label.setText("Connection: REQUESTED")
         self._window.banner.setText(f"Requested symbol: {symbol}")
@@ -90,15 +83,18 @@ class UIController:
         try:
             self._window.banner.setText("")
             end_ms = int(time.time() * 1000)
-            start_ms = end_ms - self._display_window_ms
+            start_ms = end_ms - (self._display_window_sec * 1000)
             resp = self._rest_client.fetch_price_history(symbol, start_ms, end_ms, "day")
             candles = resp.get("candles") or []
             self._bars = [
-                {"ts": c.get("datetime"), "open": c.get("open"), "high": c.get("high"), "low": c.get("low"), "close": c.get("close")}
+                {"time": int(c.get("datetime") // 1000), "open": c.get("open"), "high": c.get("high"), "low": c.get("low"), "close": c.get("close")}
                 for c in candles
+                if c.get("datetime") is not None
             ]
             if self._bars:
-                self.render_chart(self._bars[-50:])  # show recent slice
+                seed = self._bars[-180:]
+                self._chart_adapter.set_history(seed)
+                self._initial_render_done = True
                 self._window.banner.setText("")
                 self._window.connection_label.setText("Connection: READY (history)")
                 self._window.last_update_label.setText(f"Last Update: history for {symbol}")
@@ -150,16 +146,18 @@ class UIController:
         last = event.get("last")
         ts_ms = event.get("ts_ms")
         try:
-            with self._bars_lock:
-                completed = self._aggregator.ingest_quote(event)
-                if completed:
-                    self._append_bar_locked(completed)
-                    self._dirty = True
-                forming = self._aggregator.forming_bar()
-                sig = (forming.ts_ms if forming else None, forming.close if forming else None)
-                if sig != self._last_forming_sig:
-                    self._dirty = True
-                    self._last_forming_sig = sig
+            if ts_ms and last is not None:
+                pu = PriceUpdate(timestamp=int(ts_ms // 1000), price=last, size=event.get("volume"), source="L1")
+                with self._bars_lock:
+                    completed = self._aggregator.ingest_price(pu)
+                    if completed:
+                        self._append_bar_locked(completed)
+                        self._dirty = True
+                    forming = self._aggregator.forming_bar()
+                    sig = (forming.ts if forming else None, forming.close if forming else None)
+                    if sig != self._last_forming_sig:
+                        self._dirty = True
+                        self._last_forming_sig = sig
         except Exception as exc:  # noqa: BLE001
             from momentum_companion.utils.logging import logging
 
@@ -178,20 +176,28 @@ class UIController:
             self._append_bar_locked(bar)
 
     def _append_bar_locked(self, bar: TenSecondBar) -> None:
-        bar_dict = {"ts": bar.ts_ms, "open": bar.open, "high": bar.high, "low": bar.low, "close": bar.close}
+        bar_dict = {"time": bar.ts, "open": bar.open, "high": bar.high, "low": bar.low, "close": bar.close, "volume": bar.volume}
         self._bars.append(bar_dict)
+        if len(self._bars) > 180:
+            self._bars = self._bars[-180:]
 
     def _prune_and_render(self) -> None:
-        cutoff = int(time.time() * 1000) - self._display_window_ms
+        cutoff_sec = int(time.time()) - self._display_window_sec
         with self._bars_lock:
-            window_bars = [b for b in self._bars if b.get("ts") is not None and b["ts"] >= cutoff]
+            window_bars = [b for b in self._bars if b.get("time") is not None and b["time"] >= cutoff_sec]
             forming = self._aggregator.forming_bar()
         render_bars = list(window_bars)
         if forming:
             render_bars.append(
-                {"ts": forming.ts_ms, "open": forming.open, "high": forming.high, "low": forming.low, "close": forming.close}
+                {"time": forming.ts, "open": forming.open, "high": forming.high, "low": forming.low, "close": forming.close, "volume": forming.volume}
             )
-        self.render_chart(render_bars)
+        if not render_bars:
+            return
+        if not self._initial_render_done:
+            self._chart_adapter.set_history(render_bars[-181:])
+            self._initial_render_done = True
+        else:
+            self._chart_adapter.upsert_bar(render_bars[-1])
 
     def _render_tick(self) -> None:
         if not self._dirty:

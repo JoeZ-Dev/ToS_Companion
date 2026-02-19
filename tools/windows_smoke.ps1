@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
-# Build EXE
-pyinstaller --clean --noconfirm --onefile --name momentum_companion ..\src\momentum_companion\ui\__main__.py
+# Build EXE with bundled lightweight-charts asset
+pyinstaller --clean --noconfirm --onefile --add-data "..\src\momentum_companion\ui\assets\lightweight-charts.standalone.production.js;momentum_companion/ui/assets" --name momentum_companion ..\src\momentum_companion\ui\__main__.py
 
 # Smoke run with mock LLM (no network)
 $env:LLM_MODE = "mock"

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6 import QtWidgets
 
-from momentum_companion.ui.chart_widget import ChartWidget
+from momentum_companion.ui.chart_widget import LightweightChartWidget
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -36,7 +36,8 @@ class MainWindow(QtWidgets.QMainWindow):
         chart_area = QtWidgets.QVBoxLayout()
         self.quote_label = QtWidgets.QLabel("Quote: --")
         chart_area.addWidget(self.quote_label)
-        chart_area.addWidget(ChartWidget())
+        self.chart_widget = LightweightChartWidget()
+        chart_area.addWidget(self.chart_widget)
         middle.addLayout(chart_area, 3)
 
         side_panel = QtWidgets.QVBoxLayout()
