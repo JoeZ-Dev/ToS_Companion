@@ -17,12 +17,10 @@ class ChartAdapter:
 
     def set_history(self, bars: List[BarDict]) -> None:
         self._last_full = list(bars)
-        payload = json.dumps(bars)
-        self._widget.set_data_payload(payload)
+        self._widget.set_data(bars)
 
     def upsert_bar(self, bar: BarDict) -> None:
-        payload = json.dumps(bar)
-        self._widget.update_bar_payload(payload)
+        self._widget.update_bar(bar)
         if self._last_full is not None:
             if self._last_full and int(self._last_full[-1]["time"]) == int(bar["time"]):
                 self._last_full[-1] = bar
