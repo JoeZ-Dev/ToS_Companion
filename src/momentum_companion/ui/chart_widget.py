@@ -27,6 +27,8 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
             "</head><body style='margin:0;padding:0;background:#0f1419;color:#c8d1da;width:100%;height:100vh;'>"
             "<div id='chart' style='width:100%;height:100%;'></div>"
             "<script>"
+            "window.lwc_setData = function(){};"
+            "window.lwc_update = function(){};"
             "// TODO: add volume pane in a follow-up step."
             "const CHART_COLORS={"
             " up:'#26a69a',"
