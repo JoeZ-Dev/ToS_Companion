@@ -145,7 +145,29 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 let lastPriceLine=null;
                 let lastHeader=null;
                 const barStore=new Map();
+                const volumeVals=[];
                 window.__symbol = window.__symbol || '';
+                function trackVolume(v){{
+                  if(v===undefined||v===null){{return;}}
+                  const num=Number(v);
+                  if(!Number.isFinite(num)){{return;}}
+                  const vol=Math.max(0, num);
+                  volumeVals.push(vol);
+                  if(volumeVals.length>800){{volumeVals.splice(0, volumeVals.length-800);}}
+                }}
+                function updateVolumeScale(){{
+                  if(!volumeVals.length){{return;}}
+                  const sorted=[...volumeVals].sort((a,b)=>a-b);
+                  const min=sorted[0];
+                  const idx=Math.floor(Math.max(0, sorted.length-1)*0.95);
+                  const p95=sorted[idx];
+                  const max=Math.max(p95, min+1);
+                  try {{
+                    const ps=volumeSeries.priceScale();
+                    ps.setAutoScale(false);
+                    ps.setVisibleRange({{from:min,to:max}});
+                  }} catch(_e) {{}}
+                }}
                 function volumePoint(bar){{
                   if(!bar||bar.time===undefined){{return null;}}
                   const up=bar.close===undefined||bar.open===undefined?true:(bar.close>=bar.open);
@@ -263,10 +285,12 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 window.lwc_setData=function(data){{
                   const bars=data||[];
                   barStore.clear();
-                  bars.forEach(b=>{{ if(b && b.time!==undefined) barStore.set(b.time,b); }});
+                  volumeVals.length=0;
+                  bars.forEach(b=>{{ if(b && b.time!==undefined) barStore.set(b.time,b); if(b && b.volume!==undefined){{trackVolume(b.volume);}} }});
                   candleSeries.setData(bars);
                   const vol=bars.map(volumePoint).filter(v=>v);
                   volumeSeries.setData(vol);
+                  updateVolumeScale();
                   if(bars.length>0){{updateLastPriceLine(bars[bars.length-1]);}}
                 }};
                 window.lwc_update=function(bar){{
@@ -274,7 +298,7 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                   if(bar.time!==undefined){{barStore.set(bar.time, bar);}}
                   candleSeries.update(bar);
                   const vb=volumePoint(bar);
-                  if(vb){{volumeSeries.update(vb);}}
+                  if(vb){{volumeSeries.update(vb); trackVolume(vb.value); updateVolumeScale();}}
                   updateLastPriceLine(bar);
                 }};
                 window.lwc_setSeries=function(name, points){{
