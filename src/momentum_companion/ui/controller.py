@@ -104,10 +104,9 @@ class UIController:
                 if c.get("datetime") is not None
             ]
             if self._bars:
-                seed = self._bars[-180:]
-                self._chart_adapter.set_history(seed)
-                self._update_studies(seed)
-                self._update_header(seed, None)
+                self._chart_adapter.set_history(self._bars)
+                self._update_studies(self._bars)
+                self._update_header(self._bars, None)
                 self._initial_render_done = True
                 self._window.banner.setText("")
                 self._window.connection_label.setText("Connection: READY (history)")
@@ -278,9 +277,8 @@ class UIController:
             logging.getLogger(__name__).exception("Failed to set header")
 
     def _prune_and_render(self) -> None:
-        cutoff_sec = int(time.time()) - self._display_window_sec
         with self._bars_lock:
-            window_bars = [b for b in self._bars if b.get("time") is not None and b["time"] >= cutoff_sec]
+            window_bars = list(self._bars)
             forming = self._aggregator.forming_bar()
         render_bars = list(window_bars)
         if forming:
@@ -295,8 +293,8 @@ class UIController:
             render_bars.append(forming_dict)
         if not render_bars:
             return
-        # Studies only on completed bars
-        self._update_studies(window_bars)
+        # Studies computed on all stored bars
+        self._update_studies(self._bars)
         forming_bar = locals().get("forming_dict", None)
         self._update_header(window_bars, forming_bar)
         if not self._initial_render_done:
