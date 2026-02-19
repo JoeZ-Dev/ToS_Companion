@@ -5,8 +5,8 @@ from typing import Dict, Optional
 from momentum_companion.data.contracts import QuoteEvent
 
 
-# bid/ask/last/volume are required to emit per Appendix D rules.
-REQUIRED_FIELDS = ("bid", "ask", "last", "volume")
+# bid/ask/last are required for UI + aggregation; volume may be absent after-hours.
+REQUIRED_FIELDS = ("bid", "ask", "last")
 
 
 class LevelOneCache:
