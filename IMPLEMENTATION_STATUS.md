@@ -1,6 +1,6 @@
 Project Summary
 ---------------
-Momentum Trading Companion MVP per docs/specs.md: Windows-targeted Python desktop app (PySide6 + Plotly) that streams Schwab equities data, builds 10s bars + studies, runs deterministic Analysis Engine snapshots, provides optional LLM coaching, executes long-only trades with EMM and synthetic stops, and journals all activity in per-instance SQLite.
+Momentum Trading Companion MVP per docs/specs.md: Windows-targeted Python desktop app (PySide6 + Lightweight Charts) that streams Schwab equities data, builds 10s bars + studies (VWAP/EMA/MACD), runs deterministic Analysis Engine snapshots, provides optional LLM coaching, executes long-only trades with EMM and synthetic stops, and journals all activity in per-instance SQLite.
 
 Completed Work
 --------------
@@ -26,10 +26,11 @@ Completed Work
 - Stream client restarts on token refresh, reconnects with backoff, journals STREAM_DOWN, and resubscribes after LOGIN.
 - EMM engine implements abort reasons (NO_QUOTE/STALE_QUOTE/TIMEOUT/DISCONNECT) with journaling; tick rounding and tests in place.
 - UI scaffold updated with state callbacks; state wiring from token/auth, stream down, LLM invalid output, and reconciliation gate.
-- Plotly chart placeholder embedded via QtWebEngine; acceptance test stub present.
 - LLMService now includes flash-delta detection per specs §11.4 with callback hook and tests.
 - CI helper scripts added: tools/ci.sh (pytest) and tools/windows_smoke.ps1 (PyInstaller + mock run).
 - Auth Helper added (tools/auth_helper) serving access tokens from homelab; TokenProvider supports AUTH_HELPER_URL mode with AUTH_REQUIRED fallback; tests stub helper mode.
+- Upgraded charting to Lightweight Charts v5.1.0 with volume overlaid on price, MACD pane (line/signal/hist), and VWAP/EMA overlays via QtWebEngine widget.
+- IndicatorsEngine now computes MACD line/signal/hist alongside VWAP/EMA; controller pushes MACD to chart.
 
 Remaining Work
 --------------
@@ -48,7 +49,7 @@ Authoritative Checklist (execute in order)
 7) BarAggregator10s: 10s bars left-inclusive/right-exclusive, gap handling, volume delta logic, stale flagging and styling hook.
 8) IndicatorsEngine: VWAP (anchored 04:00 ET), EMA9/EMA20 visibility rules; reuse AE outputs when applicable.
 9) Analysis Engine integration: invoke AE-1.1 snapshot per completed 10s bar; handle data_quality/status gates; store AE-1.0 profiles.
-10) UIController (PySide6 + Plotly): layout per §4.1; chart behaviors; trade ticket; LLM panel; flash notifications.
+10) UIController (PySide6 + Lightweight Charts): layout per §4.1; chart behaviors; trade ticket; LLM panel; flash notifications.
 11) TradeExecutor: NORMAL vs SEAMLESS order routing, EMMEngine chase-limit loop, synthetic stop/trigger arming, flatten/cancel flows.
 12) SyntheticTriggerEngine: arm/disarm/firing logic with session rules and reconnect handling.
 13) JournalWriter: append-only writes, verification_degraded handling, export to CSV/JSON, required event coverage.
@@ -63,4 +64,4 @@ Known Blockers / Clarifications
   - LLMCoach actual invocation and schema validation beyond reason_codes.
   - TradeExecutor full flatten/cancel/reconcile against broker orders and safety gate.
   - Stream auth/refresh handling and robust reconnect logic.
-  - UI/controller implementation, acceptance tests, Windows packaging steps.
+  - UI/controller polish, acceptance tests, Windows packaging steps.
