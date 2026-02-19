@@ -13,6 +13,10 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
 
     def __init__(self) -> None:
         super().__init__()
+        self._ready = False
+        self._pending_history: list[dict] | None = None
+        self._pending_bar: dict | None = None
+        self.loadFinished.connect(self._on_load_finished)  # type: ignore[arg-type]
         self._init_chart()
 
     def _init_chart(self) -> None:
@@ -59,11 +63,29 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
             "</body></html>"
         )
         self.setHtml(html)
+        # setHtml is async; bindings become available on loadFinished.
+
+    def _on_load_finished(self, ok: bool) -> None:
+        self._ready = ok
+        if not ok:
+            return
+        if self._pending_history is not None:
+            self.set_data(self._pending_history)
+            self._pending_history = None
+        if self._pending_bar is not None:
+            self.update_bar(self._pending_bar)
+            self._pending_bar = None
 
     def set_data(self, bars: list[dict]) -> None:
         payload = json.dumps(bars)
+        if not self._ready:
+            self._pending_history = bars
+            return
         self.page().runJavaScript(f"window.lwc_setData({payload});")
 
     def update_bar(self, bar: dict) -> None:
         payload = json.dumps(bar)
+        if not self._ready:
+            self._pending_bar = bar
+            return
         self.page().runJavaScript(f"window.lwc_update({payload});")
