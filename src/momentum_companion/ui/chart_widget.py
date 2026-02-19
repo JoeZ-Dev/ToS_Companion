@@ -135,8 +135,8 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 options.localization.timeFormatter=utcToET_hhmmss;
                 const container=document.getElementById('chart');
                 const chart=LightweightCharts.createChart(container, options);
-                const candleSeries=chart.addCandlestickSeries({candle_json});
-                const volumeSeries=chart.addHistogramSeries({volume_json});
+                const candleSeries=chart.addSeries(LightweightCharts.CandlestickSeries, {candle_json});
+                const volumeSeries=chart.addSeries(LightweightCharts.HistogramSeries, {volume_json});
                 chart.priceScale('').applyOptions({{visible:false}});
                 const lineStyles={line_styles_json};
                 const lineSeriesMap={{}};
@@ -161,7 +161,7 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 function ensureLineSeries(name){{
                   if(lineSeriesMap[name]){{return lineSeriesMap[name];}}
                   const style=lineStyles[name]||{{color:'#cccccc',lineWidth:1}};
-                  lineSeriesMap[name]=chart.addLineSeries(style);
+                  lineSeriesMap[name]=chart.addSeries(LightweightCharts.LineSeries, style);
                   return lineSeriesMap[name];
                 }}
                 function setSeriesVisible(name, visible){{
