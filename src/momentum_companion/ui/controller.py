@@ -199,8 +199,6 @@ class UIController:
     def _append_bar_locked(self, bar: TenSecondBar) -> None:
         bar_dict = {"time": bar.ts, "open": bar.open, "high": bar.high, "low": bar.low, "close": bar.close, "volume": bar.volume}
         self._bars.append(bar_dict)
-        if len(self._bars) > 180:
-            self._bars = self._bars[-180:]
 
     def _update_studies(self, bars: list[dict]) -> None:
         """Compute VWAP/EMA studies and push to chart adapter."""
