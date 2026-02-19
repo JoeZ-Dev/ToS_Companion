@@ -32,6 +32,9 @@ class ChartAdapter:
     def set_series(self, name: str, points: List[Dict]) -> None:
         self._widget.set_series(name, points)
 
+    def set_header(self, header: Dict) -> None:
+        self._widget.set_header(header)
+
     def set_markers(self, markers: List[Dict]) -> None:
         # Placeholder for future markers
         return None
@@ -47,6 +50,7 @@ class FakeChartAdapter(ChartAdapter):
         self.history: List[List[BarDict]] = []
         self.upserts: List[BarDict] = []
         self.series: List[tuple[str, List[Dict]]] = []
+        self.headers: List[Dict] = []
 
     def set_history(self, bars: List[BarDict]) -> None:
         self.history.append(list(bars))
@@ -56,6 +60,9 @@ class FakeChartAdapter(ChartAdapter):
 
     def set_series(self, name: str, points: List[Dict]) -> None:
         self.series.append((name, list(points)))
+
+    def set_header(self, header: Dict) -> None:
+        self.headers.append(dict(header))
 
     def shutdown(self) -> None:
         return None

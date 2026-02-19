@@ -4,6 +4,7 @@ from typing import Any
 import time
 import threading
 from functools import partial
+import statistics
 from PySide6 import QtCore
 
 from momentum_companion.llm.service import LLMService
@@ -50,6 +51,7 @@ class UIController:
         self._chart_adapter = ChartAdapter(self._window.chart_widget)
         self._initial_render_done = False
         self._indicators = IndicatorsEngine()
+        self._last_quote: dict[str, Any] = {"bid": None, "ask": None, "last": None, "total_volume": None}
 
     def handle_flash(self, symbol: str, rec: dict, payload: dict) -> None:
         """Trigger flash alert in UI."""
@@ -105,6 +107,7 @@ class UIController:
                 seed = self._bars[-180:]
                 self._chart_adapter.set_history(seed)
                 self._update_studies(seed)
+                self._update_header(seed, None)
                 self._initial_render_done = True
                 self._window.banner.setText("")
                 self._window.connection_label.setText("Connection: READY (history)")
@@ -169,6 +172,13 @@ class UIController:
                     if sig != self._last_forming_sig:
                         self._dirty = True
                         self._last_forming_sig = sig
+            # track latest quote for header
+            self._last_quote = {
+                "bid": bid,
+                "ask": ask,
+                "last": last,
+                "total_volume": event.get("volume"),
+            }
         except Exception as exc:  # noqa: BLE001
             from momentum_companion.utils.logging import logging
 
@@ -238,6 +248,37 @@ class UIController:
 
             logging.getLogger(__name__).exception("Failed to compute studies")
 
+    def _update_header(self, bars: list[dict], forming: dict | None) -> None:
+        """Compute header snapshot (last/bid/ask/dayVol/barVol/vel) and push to chart."""
+        if not bars and not forming:
+            return
+        last_bar = forming or (bars[-1] if bars else None)
+        if not last_bar:
+            return
+        bar_vol = last_bar.get("volume") or 0
+        now_sec = int(time.time())
+        elapsed = 10
+        if forming and forming.get("time") is not None:
+            elapsed = max(1, now_sec - int(forming["time"]))
+        current_rate = bar_vol / max(elapsed, 1)
+        completed_rates = [b.get("volume", 0) / 10 for b in bars[-30:] if b.get("volume") is not None]
+        baseline = statistics.median(completed_rates) if completed_rates else 0
+        vel = current_rate / baseline if baseline else None
+        hdr = {
+            "last": self._last_quote.get("last") if self._last_quote.get("last") is not None else last_bar.get("close"),
+            "bid": self._last_quote.get("bid"),
+            "ask": self._last_quote.get("ask"),
+            "dayVol": self._last_quote.get("total_volume"),
+            "barVol": bar_vol,
+            "vel": vel,
+        }
+        try:
+            self._chart_adapter.set_header(hdr)
+        except Exception:  # noqa: BLE001
+            from momentum_companion.utils.logging import logging
+
+            logging.getLogger(__name__).exception("Failed to set header")
+
     def _prune_and_render(self) -> None:
         cutoff_sec = int(time.time()) - self._display_window_sec
         with self._bars_lock:
@@ -245,13 +286,21 @@ class UIController:
             forming = self._aggregator.forming_bar()
         render_bars = list(window_bars)
         if forming:
-            render_bars.append(
-                {"time": forming.ts, "open": forming.open, "high": forming.high, "low": forming.low, "close": forming.close, "volume": forming.volume}
-            )
+            forming_dict = {
+                "time": forming.ts,
+                "open": forming.open,
+                "high": forming.high,
+                "low": forming.low,
+                "close": forming.close,
+                "volume": forming.volume,
+            }
+            render_bars.append(forming_dict)
         if not render_bars:
             return
         # Studies only on completed bars
         self._update_studies(window_bars)
+        forming_bar = locals().get("forming_dict", None)
+        self._update_header(window_bars, forming_bar)
         if not self._initial_render_done:
             self._chart_adapter.set_history(render_bars[-181:])
             self._initial_render_done = True
