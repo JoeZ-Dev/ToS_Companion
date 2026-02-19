@@ -46,7 +46,14 @@ class UIController:
         self._render_timer.timeout.connect(self._render_tick)  # type: ignore[arg-type]
         self._render_timer.start()
         self._dirty = False
-        self._last_forming_sig: tuple[int | None, float | None] = (None, None)
+        self._last_forming_sig: tuple[int | None, float | None, float | None, float | None, float | None, float | None] = (
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
         self._hook_symbol_input()
         self._chart_adapter = ChartAdapter(self._window.chart_widget)
         self._initial_render_done = False
@@ -165,12 +172,19 @@ class UIController:
                     completed = self._aggregator.ingest_price(pu)
                     if completed:
                         self._append_bar_locked(completed)
-                        self._dirty = True
+                        self._request_render()
                     forming = self._aggregator.forming_bar()
-                    sig = (forming.ts if forming else None, forming.close if forming else None)
+                    sig = (
+                        forming.ts if forming else None,
+                        forming.open if forming else None,
+                        forming.high if forming else None,
+                        forming.low if forming else None,
+                        forming.close if forming else None,
+                        forming.volume if forming else None,
+                    )
                     if sig != self._last_forming_sig:
-                        self._dirty = True
                         self._last_forming_sig = sig
+                        self._request_render()
             # track latest quote for header
             self._last_quote = {
                 "bid": bid,
@@ -308,6 +322,11 @@ class UIController:
             return
         self._prune_and_render()
         self._dirty = False
+
+    def _request_render(self) -> None:
+        """Mark dirty and schedule a render on the Qt event loop ASAP."""
+        self._dirty = True
+        QtCore.QTimer.singleShot(0, self._render_tick)
 
     def _on_stream_state(self, state: str) -> None:
         """Update UI with stream state transitions."""
