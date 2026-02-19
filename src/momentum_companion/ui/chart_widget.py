@@ -23,10 +23,9 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
         js = ASSET_JS.read_text(encoding="utf-8")
         html = (
             "<!DOCTYPE html><html><head><meta charset='utf-8'>"
-            "<style>html,body,#chart{margin:0;padding:0;width:100%;height:100%;background:#0f1419;color:#c8d1da;}</style>"
             f"<script>{js}</script>"
-            "</head><body>"
-            "<div id='chart'></div>"
+            "</head><body style='margin:0;padding:0;background:#0f1419;color:#c8d1da;width:100%;height:100vh;'>"
+            "<div id='chart' style='width:100%;height:100%;'></div>"
             "<script>"
             "window.lwc_setData = function(){};"
             "window.lwc_update = function(){};"
