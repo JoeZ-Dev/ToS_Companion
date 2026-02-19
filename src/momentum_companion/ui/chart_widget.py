@@ -139,11 +139,11 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 const chart=LightweightCharts.createChart(container, options);
                 const candleSeries=chart.addSeries(LightweightCharts.CandlestickSeries, {candle_json});
                 const volumeSeries=chart.addSeries(LightweightCharts.HistogramSeries, {volume_json});
-                chart.priceScale('').applyOptions({visible:false});
+                chart.priceScale('').applyOptions({{visible:false}});
                 const lineStyles={line_styles_json};
-                const lineSeriesMap={};
-                const macdSeriesMap={};
-                const menuState={VOLUME:true,VWAP:true,EMA9:true,EMA20:true};
+                const lineSeriesMap={{}};
+                const macdSeriesMap={{}};
+                const menuState={{VOLUME:true,VWAP:true,EMA9:true,EMA20:true}};
                 let lastPriceLine=null;
                 let lastHeader=null;
                 const barStore=new Map();
