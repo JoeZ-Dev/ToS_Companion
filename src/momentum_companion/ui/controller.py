@@ -199,21 +199,33 @@ class UIController:
             anchor = df["ts_utc"].iloc[-1].normalize() + pd.Timedelta(hours=4)
             studies = self._indicators.compute_studies(df, anchor)
 
-            def series_to_points(series: pd.Series) -> list[dict]:
+            def series_to_points(series: pd.Series, times: pd.Series) -> list[dict]:
                 if series is None:
                     return []
                 series = series.dropna()
                 if series.empty:
                     return []
-                # series index is ts_utc
-                return [{"time": int(ts.timestamp()), "value": float(val)} for ts, val in series.items()]
+                pts: list[dict] = []
+                for idx, val in series.items():
+                    # Prefer datetime-like index; fall back to times alignment
+                    if hasattr(idx, "timestamp"):
+                        t = int(pd.Timestamp(idx).timestamp())
+                    else:
+                        if idx in times.index:
+                            t = int(times.loc[idx])
+                        else:
+                            # best-effort fallback by position
+                            t = int(times.iloc[len(pts)])
+                    pts.append({"time": t, "value": float(val)})
+                return pts
 
+            times = df["time"]
             if "vwap" in studies:
-                self._chart_adapter.set_series("VWAP", series_to_points(studies["vwap"]))
+                self._chart_adapter.set_series("VWAP", series_to_points(studies["vwap"], times))
             if "ema9" in studies:
-                self._chart_adapter.set_series("EMA9", series_to_points(studies["ema9"]))
+                self._chart_adapter.set_series("EMA9", series_to_points(studies["ema9"], times))
             if "ema20" in studies:
-                self._chart_adapter.set_series("EMA20", series_to_points(studies["ema20"]))
+                self._chart_adapter.set_series("EMA20", series_to_points(studies["ema20"], times))
         except Exception:  # noqa: BLE001
             from momentum_companion.utils.logging import logging
 
