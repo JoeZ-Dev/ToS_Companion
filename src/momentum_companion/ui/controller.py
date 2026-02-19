@@ -15,6 +15,8 @@ from momentum_companion.clients.token_provider import TokenProvider
 from momentum_companion.data.contracts import QuoteEvent
 from momentum_companion.data.bar_aggregator import BarAggregator10s, TenSecondBar
 from momentum_companion.data.price_update import PriceUpdate
+from momentum_companion.indicators.engine import IndicatorsEngine
+import pandas as pd
 
 
 class UIController:
@@ -47,6 +49,7 @@ class UIController:
         self._hook_symbol_input()
         self._chart_adapter = ChartAdapter(self._window.chart_widget)
         self._initial_render_done = False
+        self._indicators = IndicatorsEngine()
 
     def handle_flash(self, symbol: str, rec: dict, payload: dict) -> None:
         """Trigger flash alert in UI."""
@@ -94,6 +97,7 @@ class UIController:
             if self._bars:
                 seed = self._bars[-180:]
                 self._chart_adapter.set_history(seed)
+                self._update_studies(seed)
                 self._initial_render_done = True
                 self._window.banner.setText("")
                 self._window.connection_label.setText("Connection: READY (history)")
@@ -181,6 +185,40 @@ class UIController:
         if len(self._bars) > 180:
             self._bars = self._bars[-180:]
 
+    def _update_studies(self, bars: list[dict]) -> None:
+        """Compute VWAP/EMA studies and push to chart adapter."""
+        if not bars:
+            return
+        try:
+            df = pd.DataFrame(bars)
+            if df.empty or "close" not in df:
+                return
+            if "volume" not in df:
+                df["volume"] = 0
+            df["ts_utc"] = pd.to_datetime(df["time"], unit="s", utc=True)
+            anchor = df["ts_utc"].iloc[-1].normalize() + pd.Timedelta(hours=4)
+            studies = self._indicators.compute_studies(df, anchor)
+
+            def series_to_points(series: pd.Series) -> list[dict]:
+                if series is None:
+                    return []
+                series = series.dropna()
+                if series.empty:
+                    return []
+                # series index is ts_utc
+                return [{"time": int(ts.timestamp()), "value": float(val)} for ts, val in series.items()]
+
+            if "vwap" in studies:
+                self._chart_adapter.set_series("VWAP", series_to_points(studies["vwap"]))
+            if "ema9" in studies:
+                self._chart_adapter.set_series("EMA9", series_to_points(studies["ema9"]))
+            if "ema20" in studies:
+                self._chart_adapter.set_series("EMA20", series_to_points(studies["ema20"]))
+        except Exception:  # noqa: BLE001
+            from momentum_companion.utils.logging import logging
+
+            logging.getLogger(__name__).exception("Failed to compute studies")
+
     def _prune_and_render(self) -> None:
         cutoff_sec = int(time.time()) - self._display_window_sec
         with self._bars_lock:
@@ -193,6 +231,8 @@ class UIController:
             )
         if not render_bars:
             return
+        # Studies only on completed bars
+        self._update_studies(window_bars)
         if not self._initial_render_done:
             self._chart_adapter.set_history(render_bars[-181:])
             self._initial_render_done = True
