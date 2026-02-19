@@ -128,8 +128,8 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 }}
                 function formatTimeET(seconds, tenths){{
                   const t=utcToET_hhmmss(seconds);
-                  const d=(tenths===undefined||tenths===null)?0:tenths;
-                  return `${{t}}.${{d}}`;
+                  if (tenths === undefined || tenths === null || tenths === 0) return t;
+                  return `${{t}}.${{tenths}}`;
                 }}
                 const options={options_json};
                 options.localization.timeFormatter=utcToET_hhmmss;
