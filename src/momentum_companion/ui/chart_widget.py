@@ -86,7 +86,7 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 .legend-row{{ display:flex; justify-content:space-between; gap:12px; }}
                 #magnifier{{ position:absolute; top:0; bottom:0; width:120px; background:rgba(255,255,255,0.10); display:none; z-index:15; pointer-events:none; border-left:1px solid rgba(255,255,255,0.10); border-right:1px solid rgba(255,255,255,0.10); }}
                 #magnifier-line{{ position:absolute; top:0; bottom:0; left:50%; transform:translateX(-50%); border-left:1px dashed rgba(255,255,255,0.35); }}
-                #tooltip{{ position:absolute; display:none; z-index:40; pointer-events:none; background:rgba(38,38,38,0.92); border:1px solid rgba(255,255,255,0.14); border-radius:10px; padding:10px 12px; box-shadow:0 10px 26px rgba(0,0,0,0.5); min-width:140px; max-width:220px; text-align:center; font-family:'Segoe UI',sans-serif; }}
+                #tooltip{{ position:absolute; display:none; z-index:40; pointer-events:none; background:transparent; border:none; padding:10px 12px; box-shadow:0 10px 26px rgba(0,0,0,0.5); min-width:10px; max-width:180px; text-align:center; font-family:'Segoe UI',sans-serif; }}
                 .tt-symbol{{ font-size:12px; margin-bottom:2px; opacity:0.95; }}
                 .tt-price{{ font-size:30px; font-weight:600; line-height:1.05; margin:0; }}
                 .tt-time{{ font-size:12px; opacity:0.85; margin-top:2px; margin-bottom:6px; }}
@@ -205,7 +205,7 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 const magnifier=document.getElementById('magnifier');
                 const wrap=document.getElementById('wrap');
                 const MAG_WIDTH=120;
-                const PAD=10;
+                const PAD=30;
                 function clamp(v,min,max){{return Math.max(min, Math.min(max, v));}}
                 chart.subscribeCrosshairMove(param=>{{
                   if(!param || param.time===undefined || !param.point){{toolTip.style.display='none';magnifier.style.display='none';return;}}
