@@ -90,7 +90,14 @@ class UIController:
             resp = self._rest_client.fetch_price_history(symbol, start_ms, end_ms, "day")
             candles = resp.get("candles") or []
             self._bars = [
-                {"time": int(c.get("datetime") // 1000), "open": c.get("open"), "high": c.get("high"), "low": c.get("low"), "close": c.get("close")}
+                {
+                    "time": int(c.get("datetime") // 1000),
+                    "open": c.get("open"),
+                    "high": c.get("high"),
+                    "low": c.get("low"),
+                    "close": c.get("close"),
+                    "volume": c.get("volume") or 0,
+                }
                 for c in candles
                 if c.get("datetime") is not None
             ]
