@@ -4,7 +4,7 @@ from typing import Any
 import time
 import threading
 from functools import partial
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore
 
 from momentum_companion.llm.service import LLMService
 from momentum_companion.ui.main_window import MainWindow
@@ -86,16 +86,11 @@ class UIController:
             start_ms = end_ms - (self._display_window_sec * 1000)
             resp = self._rest_client.fetch_price_history(symbol, start_ms, end_ms, "day")
             candles = resp.get("candles") or []
-            cleaned = []
-            for c in candles:
-                dt = c.get("datetime")
-                o, h, l, cl = c.get("open"), c.get("high"), c.get("low"), c.get("close")
-                if dt is None or any(v is None for v in (o, h, l, cl)):
-                    continue
-                cleaned.append(
-                    {"time": int(dt // 1000), "open": o, "high": h, "low": l, "close": cl, "volume": c.get("volume") or 0}
-                )
-            self._bars = cleaned
+            self._bars = [
+                {"time": int(c.get("datetime") // 1000), "open": c.get("open"), "high": c.get("high"), "low": c.get("low"), "close": c.get("close")}
+                for c in candles
+                if c.get("datetime") is not None
+            ]
             if self._bars:
                 seed = self._bars[-180:]
                 self._chart_adapter.set_history(seed)
