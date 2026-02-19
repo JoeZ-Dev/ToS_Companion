@@ -20,7 +20,7 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
         html = (
             "<!DOCTYPE html><html><head><meta charset='utf-8'>"
             f"<script>{js}</script>"
-            "</head><body style='margin:0;padding:0;background:#0f1419;color:#c8d1da;width:100%;height:100vh;'>"
+            "</head><body style='margin:0;padding:0;background:#0f1419;color:#c8d1da;'>"
             "<div id='chart' style='width:100%;height:100%;'></div>"
             "<script>"
             "// TODO: add volume pane in a follow-up step."
