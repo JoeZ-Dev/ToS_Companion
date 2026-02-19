@@ -78,47 +78,61 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
             <head>
               <meta charset='utf-8'>
               <style>
-                html,body,#chart {{ margin:0; padding:0; width:100%; height:100%; background:#0f1419; color:#c8d1da; }}
-                #chart {{ position:relative; }}
-                #overlay {{ position:absolute; top:8px; left:8px; display:flex; gap:8px; z-index:10; pointer-events:none; align-items:flex-start; }}
-                .legend {{ background:rgba(16,20,25,0.92); color:#c8d1da; padding:6px 8px; border:1px solid rgba(197,203,206,0.2); border-radius:4px; font:12px 'Segoe UI',sans-serif; min-width:140px; pointer-events:none; }}
-                .legend-row {{ display:flex; justify-content:space-between; gap:12px; }}
-                #tooltip {{ position:absolute; display:none; min-width:120px; z-index:15; pointer-events:none; background:transparent; border:none; box-shadow:none; color:#c8d1da; font:12px 'Segoe UI',sans-serif; }}
-                #magnifier {{ position:absolute; top:0; height:100%; display:none; background:rgba(128,128,128,0.1); z-index:12; pointer-events:none; }}
-                #magnifier-line {{ position:absolute; top:0; bottom:0; left:50%; width:0; border-left:1px dashed rgba(200,200,200,0.6); }}
-                .menu {{ position:relative; pointer-events:auto; }}
-                .menu-btn {{ background:rgba(42,46,57,0.8); color:#c8d1da; border:1px solid rgba(197,203,206,0.2); border-radius:4px; padding:4px 8px; cursor:pointer; font:12px 'Segoe UI',sans-serif; }}
-                .menu-list {{ position:absolute; top:100%; left:0; margin-top:4px; background:rgba(16,20,25,0.95); border:1px solid rgba(197,203,206,0.2); border-radius:4px; min-width:140px; display:none; flex-direction:column; z-index:20; }}
-                .menu-item {{ padding:6px 8px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; gap:8px; }}
-                .menu-item:hover {{ background:rgba(42,46,57,0.8); }}
-                .menu-item .dot {{ width:10px; height:10px; border-radius:50%; display:inline-block; }}
+                html,body{{ margin:0; padding:0; width:100%; height:100%; background:#0f1419; color:#c8d1da; }}
+                #wrap{{ position:relative; width:100%; height:100%; }}
+                #chart{{ position:relative; width:100%; height:100%; }}
+                #overlay{{ position:absolute; top:8px; left:8px; display:flex; gap:8px; z-index:30; pointer-events:none; align-items:flex-start; }}
+                .legend{{ background:rgba(16,20,25,0.92); color:#c8d1da; padding:6px 8px; border:1px solid rgba(197,203,206,0.2); border-radius:4px; font:12px 'Segoe UI',sans-serif; min-width:140px; pointer-events:none; }}
+                .legend-row{{ display:flex; justify-content:space-between; gap:12px; }}
+                #magnifier{{ position:absolute; top:0; bottom:0; width:120px; background:rgba(255,255,255,0.10); display:none; z-index:15; pointer-events:none; border-left:1px solid rgba(255,255,255,0.10); border-right:1px solid rgba(255,255,255,0.10); }}
+                #magnifier-line{{ position:absolute; top:0; bottom:0; left:50%; transform:translateX(-50%); border-left:1px dashed rgba(255,255,255,0.35); }}
+                #tooltip{{ position:absolute; display:none; z-index:40; pointer-events:none; background:rgba(38,38,38,0.92); border:1px solid rgba(255,255,255,0.14); border-radius:10px; padding:10px 12px; box-shadow:0 10px 26px rgba(0,0,0,0.5); min-width:140px; max-width:220px; text-align:center; font-family:'Segoe UI',sans-serif; }}
+                .tt-symbol{{ font-size:12px; margin-bottom:2px; opacity:0.95; }}
+                .tt-price{{ font-size:30px; font-weight:600; line-height:1.05; margin:0; }}
+                .tt-time{{ font-size:12px; opacity:0.85; margin-top:2px; margin-bottom:6px; }}
+                .tt-meta{{ font-size:11px; opacity:0.9; line-height:1.35; text-align:left; display:grid; grid-template-columns:auto auto; gap:2px 10px; }}
+                .tt-k{{ opacity:0.75; }}
+                .tt-v{{ justify-self:end; }}
+                .menu{{ position:relative; pointer-events:auto; }}
+                .menu-btn{{ background:rgba(42,46,57,0.8); color:#c8d1da; border:1px solid rgba(197,203,206,0.2); border-radius:4px; padding:4px 8px; cursor:pointer; font:12px 'Segoe UI',sans-serif; }}
+                .menu-list{{ position:absolute; top:100%; left:0; margin-top:4px; background:rgba(16,20,25,0.95); border:1px solid rgba(197,203,206,0.2); border-radius:4px; min-width:140px; display:none; flex-direction:column; z-index:20; }}
+                .menu-item{{ padding:6px 8px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; gap:8px; }}
+                .menu-item:hover{{ background:rgba(42,46,57,0.8); }}
+                .menu-item .dot{{ width:10px; height:10px; border-radius:50%; display:inline-block; }}
               </style>
               <script>{js}</script>
             </head>
             <body>
-              <div id='chart'>
+              <div id='wrap'>
+                <div id='chart'></div>
                 <div id='magnifier'><div id='magnifier-line'></div></div>
-              </div>
-              <div id='overlay'>
-                <div class='menu'>
-                  <div class='menu-btn' id='menu-btn'>Studies ▾</div>
-                  <div class='menu-list' id='menu-list'></div>
+                <div id='overlay'>
+                  <div class='menu'>
+                    <div class='menu-btn' id='menu-btn'>Studies ▾</div>
+                    <div class='menu-list' id='menu-list'></div>
+                  </div>
+                  <div class='legend' id='header-info' style='pointer-events:none;'></div>
+                  <div class='legend' id='legend' style='display:none;'></div>
                 </div>
-                <div class='legend' id='header-info' style='pointer-events:none;'></div>
-                <div class='legend' id='legend' style='display:none;'></div>
+                <div id='tooltip'></div>
               </div>
-              <div class='legend' id='tooltip' style='display:none;'></div>
               <script>
                 window.onerror=(msg)=>{{document.title='JSERR: '+msg;}};
-                function utcToET(time){{
-                  const date=new Date(time*1000);
+                function utcToET_hhmmss(seconds){{
+                  const date=new Date(seconds*1000);
                   const et=new Date(date.toLocaleString('en-US',{{timeZone:'America/New_York'}}));
                   const hh=et.getHours().toString().padStart(2,'0');
                   const mm=et.getMinutes().toString().padStart(2,'0');
-                  return `${{hh}}:${{mm}}`;
+                  const ss=et.getSeconds().toString().padStart(2,'0');
+                  return `${{hh}}:${{mm}}:${{ss}}`;
+                }}
+                function formatTimeET(seconds, tenths){{
+                  const t=utcToET_hhmmss(seconds);
+                  const d=(tenths===undefined||tenths===null)?0:tenths;
+                  return `${{t}}.${{d}}`;
                 }}
                 const options={options_json};
-                options.localization.timeFormatter=utcToET;
+                options.localization.timeFormatter=utcToET_hhmmss;
                 const container=document.getElementById('chart');
                 const chart=LightweightCharts.createChart(container, options);
                 const candleSeries=chart.addCandlestickSeries({candle_json});
@@ -129,6 +143,8 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 const menuState={{VOLUME:true,VWAP:true,EMA9:true,EMA20:true}};
                 let lastPriceLine=null;
                 let lastHeader=null;
+                const barStore=new Map();
+                window.__symbol = window.__symbol || '';
                 function volumePoint(bar){{
                   if(!bar||bar.time===undefined){{return null;}}
                   const up=bar.close===undefined||bar.open===undefined?true:(bar.close>=bar.open);
@@ -187,26 +203,46 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 buildMenu();
                 const toolTip=document.getElementById('tooltip');
                 const magnifier=document.getElementById('magnifier');
+                const wrap=document.getElementById('wrap');
                 const MAG_WIDTH=120;
-                const PAD=8;
+                const PAD=10;
                 function clamp(v,min,max){{return Math.max(min, Math.min(max, v));}}
                 chart.subscribeCrosshairMove(param=>{{
                   if(!param || param.time===undefined || !param.point){{toolTip.style.display='none';magnifier.style.display='none';return;}}
+                  const wrapW=wrap.clientWidth;
+                  const bandLeft=clamp(param.point.x - MAG_WIDTH/2, 0, wrapW - MAG_WIDTH);
+                  magnifier.style.left=`${{bandLeft}}px`;
+                  magnifier.style.display='block';
+                  const ts=typeof param.time==='number'?param.time:param.time.timestamp;
                   const priceVal=(param.seriesPrices && (param.seriesPrices.get?param.seriesPrices.get(candleSeries):param.seriesPrices[candleSeries]))||param.price|| (lastHeader?lastHeader.last:undefined);
                   const volVal = (param.seriesPrices && (param.seriesPrices.get?param.seriesPrices.get(volumeSeries):param.seriesPrices[volumeSeries])) || (lastHeader?lastHeader.barVol:undefined);
-                  const ts=typeof param.time==='number'?param.time:param.time.timestamp;
-                  const priceRow = priceVal!==undefined ? `<div class='legend-row'><span>Price</span><span>${{Number(priceVal).toFixed(2)}}</span></div>` : '';
-                  const volRow = volVal!==undefined ? `<div class='legend-row'><span>Vol</span><span>${{Number(volVal).toLocaleString()}}</span></div>` : '';
-                  toolTip.innerHTML=`<div class='legend-row'><span>Time</span><span>${{utcToET(ts)}}</span></div>${{priceRow}}${{volRow}}`;
-                  const bandLeft=clamp(param.point.x - MAG_WIDTH/2, 0, container.clientWidth - MAG_WIDTH);
-                  magnifier.style.left=`${{bandLeft}}px`;
-                  magnifier.style.width=`${{MAG_WIDTH}}px`;
-                  magnifier.style.display='block';
-                  const left=clamp(bandLeft + MAG_WIDTH/2 - toolTip.clientWidth/2, PAD, container.clientWidth - toolTip.clientWidth - PAD);
-                  const top=PAD;
-                  toolTip.style.left=`${{left}}px`;
-                  toolTip.style.top=`${{top}}px`;
+                  const bar=barStore.get(ts);
+                  let tenths=0;
+                  if(bar){{
+                    if(bar.tenths!==undefined){{tenths=bar.tenths;}}
+                    else if(bar.time_ms!==undefined){{tenths=Math.floor((bar.time_ms%1000)/100);}}
+                    else if(bar.timeMs!==undefined){{tenths=Math.floor((bar.timeMs%1000)/100);}}
+                  }}
+                  const closePx = (bar&&bar.close!==undefined)?bar.close:priceVal;
+                  const vol = (bar&&bar.volume!==undefined)?bar.volume:volVal;
+                  const up = (bar&&bar.open!==undefined&&bar.close!==undefined)?(bar.close>=bar.open):true;
+                  const accent = up ? '#26a69a' : '#ef5350';
+                  toolTip.innerHTML = `
+                    <div class="tt-symbol" style="color:${{accent}}">${{window.__symbol}}</div>
+                    <div class="tt-price">${{closePx!==undefined?Number(closePx).toFixed(2):'--'}}</div>
+                    <div class="tt-time">${{formatTimeET(ts, tenths)}}</div>
+                    <div class="tt-meta">
+                      <div class="tt-k">Vol</div><div class="tt-v">${{vol!==undefined?Number(vol).toLocaleString():'--'}}</div>
+                      <div class="tt-k">O</div><div class="tt-v">${{(bar&&bar.open!==undefined)?Number(bar.open).toFixed(2):'--'}}</div>
+                      <div class="tt-k">H</div><div class="tt-v">${{(bar&&bar.high!==undefined)?Number(bar.high).toFixed(2):'--'}}</div>
+                      <div class="tt-k">L</div><div class="tt-v">${{(bar&&bar.low!==undefined)?Number(bar.low).toFixed(2):'--'}}</div>
+                      <div class="tt-k">C</div><div class="tt-v">${{(bar&&bar.close!==undefined)?Number(bar.close).toFixed(2):'--'}}</div>
+                    </div>
+                  `;
                   toolTip.style.display='block';
+                  const left=clamp((bandLeft + MAG_WIDTH/2) - toolTip.clientWidth/2, PAD, wrapW - toolTip.clientWidth - PAD);
+                  toolTip.style.left=`${{left}}px`;
+                  toolTip.style.top=`${{PAD}}px`;
                 }});
                 function renderHeader(hdr){{
                   const el=document.getElementById('header-info');
@@ -222,8 +258,11 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                   el.innerHTML=parts.join(' | ');
                   lastHeader=hdr;
                 }}
+                window.lwc_setSymbol=function(s){{window.__symbol=s||'';}};
                 window.lwc_setData=function(data){{
                   const bars=data||[];
+                  barStore.clear();
+                  bars.forEach(b=>{{ if(b && b.time!==undefined) barStore.set(b.time,b); }});
                   candleSeries.setData(bars);
                   const vol=bars.map(volumePoint).filter(v=>v);
                   volumeSeries.setData(vol);
@@ -231,6 +270,7 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 }};
                 window.lwc_update=function(bar){{
                   if(!bar){{return;}}
+                  if(bar.time!==undefined){{barStore.set(bar.time, bar);}}
                   candleSeries.update(bar);
                   const vb=volumePoint(bar);
                   if(vb){{volumeSeries.update(vb);}}
