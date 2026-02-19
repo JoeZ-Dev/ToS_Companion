@@ -66,6 +66,8 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
             "VWAP": {"color": "#b455ff", "lineWidth": 1, "lastValueVisible": False, "priceLineVisible": False},
             "EMA9": {"color": "#f5c542", "lineWidth": 1, "lastValueVisible": False, "priceLineVisible": False},
             "EMA20": {"color": "#4aa3ff", "lineWidth": 1, "lastValueVisible": False, "priceLineVisible": False},
+            "MACD": {"color": "#4aa3ff", "lineWidth": 1, "lastValueVisible": False, "priceLineVisible": False},
+            "MACD_SIGNAL": {"color": "#f5c542", "lineWidth": 1, "lastValueVisible": False, "priceLineVisible": False},
         }
         options_json = json.dumps(options)
         candle_json = json.dumps(candle_opts)
@@ -135,39 +137,18 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 options.localization.timeFormatter=utcToET_hhmmss;
                 const container=document.getElementById('chart');
                 const chart=LightweightCharts.createChart(container, options);
-                const pricePane=chart.panes?chart.panes()[0]:null;
-                const candleSeries=(pricePane||chart).addSeries(LightweightCharts.CandlestickSeries, {candle_json});
-                const volumeSeries=chart.addSeries(LightweightCharts.HistogramSeries, {volume_json}, 1);
-                chart.priceScale('').applyOptions({{visible:false}});
+                const candleSeries=chart.addSeries(LightweightCharts.CandlestickSeries, {candle_json});
+                const volumeSeries=chart.addSeries(LightweightCharts.HistogramSeries, {volume_json});
+                chart.priceScale('').applyOptions({visible:false});
                 const lineStyles={line_styles_json};
-                const lineSeriesMap={{}};
-                const menuState={{VOLUME:true,VWAP:true,EMA9:true,EMA20:true}};
+                const lineSeriesMap={};
+                const macdSeriesMap={};
+                const menuState={VOLUME:true,VWAP:true,EMA9:true,EMA20:true};
                 let lastPriceLine=null;
                 let lastHeader=null;
                 const barStore=new Map();
-                const volumeVals=[];
                 window.__symbol = window.__symbol || '';
-                function trackVolume(v){{
-                  if(v===undefined||v===null){{return;}}
-                  const num=Number(v);
-                  if(!Number.isFinite(num)){{return;}}
-                  const vol=Math.max(0, num);
-                  volumeVals.push(vol);
-                  if(volumeVals.length>800){{volumeVals.splice(0, volumeVals.length-800);}}
-                }}
-                function updateVolumeScale(){{
-                  if(!volumeVals.length){{return;}}
-                  const sorted=[...volumeVals].sort((a,b)=>a-b);
-                  const min=sorted[0];
-                  const idx=Math.floor(Math.max(0, sorted.length-1)*0.95);
-                  const p95=sorted[idx];
-                  const max=Math.max(p95, min+1);
-                  try {{
-                    const ps=volumeSeries.priceScale();
-                    ps.setAutoScale(false);
-                    ps.setVisibleRange({{from:min,to:max}});
-                  }} catch(_e) {{}}
-                }}
+                const MACD_PANE_INDEX=1;
                 function volumePoint(bar){{
                   if(!bar||bar.time===undefined){{return null;}}
                   const up=bar.close===undefined||bar.open===undefined?true:(bar.close>=bar.open);
@@ -181,15 +162,27 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                   if(lastPriceLine){{candleSeries.removePriceLine(lastPriceLine);}}
                   lastPriceLine=candleSeries.createPriceLine({{price:bar.close,color,lineWidth:1,lineStyle:LightweightCharts.LineStyle.Dotted,axisLabelVisible:true}});
                 }}
-                function ensureLineSeries(name){{
-                  if(lineSeriesMap[name]){{return lineSeriesMap[name];}}
+                function ensureLineSeries(name, paneIndex=0){{
+                  const key=`${{name}}_${{paneIndex}}`;
+                  if(lineSeriesMap[key]){{return lineSeriesMap[key];}}
                   const style=lineStyles[name]||{{color:'#cccccc',lineWidth:1}};
-                  lineSeriesMap[name]=(pricePane||chart).addSeries(LightweightCharts.LineSeries, style, 0);
-                  return lineSeriesMap[name];
+                  lineSeriesMap[key]=chart.addSeries(LightweightCharts.LineSeries, style, paneIndex);
+                  return lineSeriesMap[key];
+                }}
+                function ensureMacdSeries(name){{
+                  if(macdSeriesMap[name]){{return macdSeriesMap[name];}}
+                  if(name==='MACD_HIST'){{
+                    macdSeriesMap[name]=chart.addSeries(LightweightCharts.HistogramSeries, {{color:'#4aa3ff', base:0}}, MACD_PANE_INDEX);
+                  }} else if(name==='MACD_SIGNAL'){{
+                    macdSeriesMap[name]=chart.addSeries(LightweightCharts.LineSeries, {{color:'#f5c542', lineWidth:1}}, MACD_PANE_INDEX);
+                  }} else {{
+                    macdSeriesMap[name]=chart.addSeries(LightweightCharts.LineSeries, {{color:'#ffffff', lineWidth:1}}, MACD_PANE_INDEX);
+                  }}
+                  return macdSeriesMap[name];
                 }}
                 function setSeriesVisible(name, visible){{
                   if(name==='VOLUME'){{volumeSeries.applyOptions({{visible:visible}}); menuState.VOLUME=visible; return;}}
-                  const s=ensureLineSeries(name);
+                  const s=ensureLineSeries(name, 0);
                   s.applyOptions({{visible:visible}});
                   menuState[name]=visible;
                 }}
@@ -285,12 +278,10 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 window.lwc_setData=function(data){{
                   const bars=data||[];
                   barStore.clear();
-                  volumeVals.length=0;
-                  bars.forEach(b=>{{ if(b && b.time!==undefined) barStore.set(b.time,b); if(b && b.volume!==undefined){{trackVolume(b.volume);}} }});
+                  bars.forEach(b=>{{ if(b && b.time!==undefined) barStore.set(b.time,b); }});
                   candleSeries.setData(bars);
                   const vol=bars.map(volumePoint).filter(v=>v);
                   volumeSeries.setData(vol);
-                  updateVolumeScale();
                   if(bars.length>0){{updateLastPriceLine(bars[bars.length-1]);}}
                 }};
                 window.lwc_update=function(bar){{
@@ -298,12 +289,14 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                   if(bar.time!==undefined){{barStore.set(bar.time, bar);}}
                   candleSeries.update(bar);
                   const vb=volumePoint(bar);
-                  if(vb){{volumeSeries.update(vb); trackVolume(vb.value); updateVolumeScale();}}
+                  if(vb){{volumeSeries.update(vb);}}
                   updateLastPriceLine(bar);
                 }};
                 window.lwc_setSeries=function(name, points){{
-                  const s=ensureLineSeries(name);
-                  s.setData(points||[]);
+                  let target;
+                  if(name.startsWith('MACD')){{target=ensureMacdSeries(name);}}
+                  else {{target=ensureLineSeries(name, 0);}}
+                  target.setData(points||[]);
                 }};
                 window.lwc_setHeader=function(hdr){{renderHeader(hdr);}};
               </script>

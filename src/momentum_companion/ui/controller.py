@@ -254,6 +254,12 @@ class UIController:
                 self._chart_adapter.set_series("EMA9", series_to_points(studies["ema9"], times))
             if "ema20" in studies:
                 self._chart_adapter.set_series("EMA20", series_to_points(studies["ema20"], times))
+            if "macd" in studies:
+                self._chart_adapter.set_series("MACD", series_to_points(studies["macd"], times))
+            if "macd_signal" in studies:
+                self._chart_adapter.set_series("MACD_SIGNAL", series_to_points(studies["macd_signal"], times))
+            if "macd_hist" in studies:
+                self._chart_adapter.set_series("MACD_HIST", series_to_points(studies["macd_hist"], times))
         except Exception:  # noqa: BLE001
             from momentum_companion.utils.logging import logging
 

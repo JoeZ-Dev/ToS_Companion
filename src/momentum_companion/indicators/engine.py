@@ -16,5 +16,12 @@ class IndicatorsEngine:
         vwap = compute_vwap_anchored(bars_10s, anchor_ts_utc)
         ema9 = compute_ema(bars_10s["close"], 9) if "close" in bars_10s else pd.Series(dtype=float)
         ema20 = compute_ema(bars_10s["close"], 20) if "close" in bars_10s else pd.Series(dtype=float)
-        studies: Dict[str, Any] = {"vwap": vwap, "ema9": ema9, "ema20": ema20}
+        macd_line = pd.Series(dtype=float)
+        macd_signal = pd.Series(dtype=float)
+        macd_hist = pd.Series(dtype=float)
+        if "close" in bars_10s:
+            macd_line = compute_ema(bars_10s["close"], 12) - compute_ema(bars_10s["close"], 26)
+            macd_signal = compute_ema(macd_line, 9)
+            macd_hist = macd_line - macd_signal
+        studies: Dict[str, Any] = {"vwap": vwap, "ema9": ema9, "ema20": ema20, "macd": macd_line, "macd_signal": macd_signal, "macd_hist": macd_hist}
         return studies
