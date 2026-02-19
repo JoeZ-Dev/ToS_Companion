@@ -300,7 +300,7 @@ class UIController:
         forming_bar = locals().get("forming_dict", None)
         self._update_header(window_bars, forming_bar)
         if not self._initial_render_done:
-            self._chart_adapter.set_history(render_bars[-181:])
+            self._chart_adapter.set_history(render_bars)
             self._initial_render_done = True
         else:
             self._chart_adapter.upsert_bar(render_bars[-1])
