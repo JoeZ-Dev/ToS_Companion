@@ -57,6 +57,8 @@ class MainWindow(QtWidgets.QMainWindow):
         ae_layout.addWidget(self.ae_status_label)
         self.ae_row_regime = QtWidgets.QHBoxLayout()
         self.ae_row_context = QtWidgets.QHBoxLayout()
+        self.ae_row_regime.setSpacing(4)
+        self.ae_row_context.setSpacing(4)
         self.ae_pill_market = self._make_pill()
         self.ae_pill_ema = self._make_pill()
         self.ae_pill_vwap = self._make_pill()
@@ -187,8 +189,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not snapshot:
             self._reset_ae_ui()
             return
-        self.ae_status_label.setText("AE: Ready")
-        self.ae_status_label.setStyleSheet("color: #27ae60;")
+        self.ae_status_label.hide()
         self.ae_copy_btn.setEnabled(True)
         regime = snapshot.get("regime") or {}
         vol = snapshot.get("volatility") or {}
@@ -317,6 +318,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _reset_ae_ui(self) -> None:
         self.ae_status_label.setText("AE: Working…")
         self.ae_status_label.setStyleSheet("color: #7f8c8d;")
+        self.ae_status_label.show()
         self.ae_copy_btn.setEnabled(False)
         for pill in [
             self.ae_pill_market,
@@ -340,7 +342,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _make_pill(self) -> QtWidgets.QLabel:
         pill = QtWidgets.QLabel("--")
         pill.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        pill.setMargin(4)
+        pill.setMargin(2)
         pill.setStyleSheet(self._pill_stylesheet("#7f8c8d", "#ffffff"))
         pill.setSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed)
         return pill
@@ -348,7 +350,7 @@ class MainWindow(QtWidgets.QMainWindow):
     @staticmethod
     def _pill_stylesheet(bg: str, fg: str) -> str:
         return (
-            f"QLabel {{ background-color: {bg}; color: {fg}; border-radius: 10px; padding: 3px 6px; "
+            f"QLabel {{ background-color: {bg}; color: {fg}; border-radius: 6px; padding: 2px 5px; "
             f"font-weight: bold; }}"
         )
 
