@@ -110,7 +110,7 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 <div id='magnifier'><div id='magnifier-line'></div></div>
                 <div id='overlay'>
                   <div class='menu'>
-                    <div class='menu-btn' id='menu-btn'>Studies ▾</div>
+                    <div class='menu-btn' id='menu-btn'>Options ▾</div>
                     <div class='menu-list' id='menu-list'></div>
                   </div>
                   <div class='legend' id='header-info' style='pointer-events:none;'></div>
@@ -143,7 +143,7 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 const lineStyles={line_styles_json};
                 const lineSeriesMap={{}};
                 const macdSeriesMap={{}};
-                const menuState={{VOLUME:true,VWAP:true,EMA9:true,EMA20:true}};
+                const menuState={{VOLUME:true,VWAP:true,EMA9:true,EMA20:true,TOOLTIP:true}};
                 let lastPriceLine=null;
                 let lastHeader=null;
                 const barStore=new Map();
@@ -182,13 +182,14 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 }}
                 function setSeriesVisible(name, visible){{
                   if(name==='VOLUME'){{volumeSeries.applyOptions({{visible:visible}}); menuState.VOLUME=visible; return;}}
+                  if(name==='TOOLTIP'){{menuState.TOOLTIP=visible; toolTip.style.display=visible?'block':'none'; return;}}
                   const s=ensureLineSeries(name, 0);
                   s.applyOptions({{visible:visible}});
                   menuState[name]=visible;
                 }}
                 function buildMenu(){{
                   const menu=document.getElementById('menu-list');
-                  const items=[{{name:'VOLUME', label:'Volume', color:'#888888'}},{{name:'VWAP', label:'VWAP', color:lineStyles.VWAP.color}},{{name:'EMA9', label:'EMA9', color:lineStyles.EMA9.color}},{{name:'EMA20', label:'EMA20', color:lineStyles.EMA20.color}}];
+                  const items=[{{name:'VOLUME', label:'Volume', color:'#888888'}},{{name:'VWAP', label:'VWAP', color:lineStyles.VWAP.color}},{{name:'EMA9', label:'EMA9', color:lineStyles.EMA9.color}},{{name:'EMA20', label:'EMA20', color:lineStyles.EMA20.color}},{{name:'TOOLTIP', label:'Tooltip', color:'#aaaaaa'}}];
                   menu.innerHTML='';
                   items.forEach(item=>{{
                     const div=document.createElement('div');

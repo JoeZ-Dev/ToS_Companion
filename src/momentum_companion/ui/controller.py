@@ -46,7 +46,7 @@ class UIController:
         self._display_window_sec = 60 * 60  # 1 hour window
         self._bars_lock = threading.Lock()
         self._render_timer = QtCore.QTimer()
-        self._render_timer.setInterval(100)  # 10fps target
+        self._render_timer.setInterval(50)  # 20fps target
         self._render_timer.timeout.connect(self._render_tick)  # type: ignore[arg-type]
         self._render_timer.start()
         self._dirty = False
