@@ -198,7 +198,9 @@ Raw bars are not stored.
 - MACD: 12/26/9 on 1m.
 - Quote age thresholds: stale_if_quote_age_ms = 5000; no_data_if_quote_age_ms = 60000.
 - macd_min_bars = 30.
-- Market proxy: SPY. is_market_green = (last - prior_close) / prior_close * 100 > 0; if prior_close missing → has_market_data=false, is_market_green=null.
+- Market proxy: SPY. is_market_green:
+  - Premarket (<09:30 ET): (last - prior_close) / prior_close * 100 > 0.
+  - RTH/after (>=09:30 ET): compare last vs 09:30–09:31 1m bar close; if unavailable, fall back to prior_close and set has_market_data=false.
 - RTH open: fetched via REST 1m bars at 09:30 ET; is_above_open uses this. If unavailable: is_above_open=null.
 - Strength score: normalized 0..1 via `normalized_strength = min(1.0, raw_strength / (raw_strength + 1.0))`, raw_strength = touches * (0.5 + 0.5 * recency).
 - Zero-width zones: if zone_low == zone_high, expand band by +/−0.01% of price (deterministic) to avoid zero width.

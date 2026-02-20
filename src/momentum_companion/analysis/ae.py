@@ -451,18 +451,47 @@ class AEEngine:
             return False, None
         has_market = False
         is_green = None
+        now_et = datetime.now(ET_TZ)
         try:
-            resp = self._rest.fetch_price_history(MARKET_PROXY_SYMBOL, None, None, "1d")
-            candles = resp.get("candles") or []
-            # Use last two completed daily bars; if only one, fallback to null
-            completed = [c for c in candles if c.get("close") is not None]
-            if len(completed) >= 2:
-                prior_close = float(completed[-2].get("close"))
-                last_close = float(completed[-1].get("close"))
-                if prior_close > 0:
-                    change_pct = (last_close - prior_close) / prior_close * 100
-                    is_green = change_pct > 0
-                    has_market = True
+            if now_et.time() < datetime(now_et.year, now_et.month, now_et.day, 9, 30, tzinfo=ET_TZ).time():
+                # premarket: use prior close vs last
+                resp = self._rest.fetch_price_history(MARKET_PROXY_SYMBOL, None, None, "1d")
+                candles = resp.get("candles") or []
+                completed = [c for c in candles if c.get("close") is not None]
+                if len(completed) >= 2:
+                    prior_close = float(completed[-2].get("close"))
+                    last_close = float(completed[-1].get("close"))
+                    if prior_close > 0:
+                        change_pct = (last_close - prior_close) / prior_close * 100
+                        is_green = change_pct > 0
+                        has_market = True
+            else:
+                # RTH/after: use 09:30–09:31 1m bar vs latest price (daily last)
+                open_start = datetime(now_et.year, now_et.month, now_et.day, 9, 30, tzinfo=ET_TZ)
+                open_end = open_start + timedelta(minutes=1)
+                bar_resp = self._rest.fetch_price_history(
+                    MARKET_PROXY_SYMBOL, int(open_start.timestamp() * 1000), int(open_end.timestamp() * 1000), "1m"
+                )
+                bar_candles = bar_resp.get("candles") or []
+                open_bar = sorted(bar_candles, key=lambda c: c.get("datetime", 0))[0] if bar_candles else None
+                last_resp = self._rest.fetch_price_history(MARKET_PROXY_SYMBOL, None, None, "1d")
+                last_candles = last_resp.get("candles") or []
+                latest = [c for c in last_candles if c.get("close") is not None]
+                last_price = float(latest[-1].get("close")) if latest else None
+                if open_bar and open_bar.get("close") is not None and last_price is not None:
+                    open_close = float(open_bar.get("close"))
+                    if open_close > 0:
+                        change_pct = (last_price - open_close) / open_close * 100
+                        is_green = change_pct > 0
+                        has_market = True
+                elif latest and len(latest) >= 2:
+                    # fallback to prior close if open bar missing
+                    prior_close = float(latest[-2].get("close"))
+                    last_close = float(latest[-1].get("close"))
+                    if prior_close > 0:
+                        change_pct = (last_close - prior_close) / prior_close * 100
+                        is_green = change_pct > 0
+                        has_market = False
         except Exception:
             has_market = False
             is_green = None
