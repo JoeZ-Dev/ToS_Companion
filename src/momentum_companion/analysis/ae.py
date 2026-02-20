@@ -444,8 +444,6 @@ class AEEngine:
             data_quality = "no_data"
         elif quote_age is not None and quote_age > STALE_IF_QUOTE_AGE_MS:
             data_quality = "stale"
-        if not has_intraday or not session_open_val:
-            data_quality = "partial"
 
         last_price = agg_bars[-1].close if agg_bars else None
         intraday_range_pct = None
@@ -487,12 +485,14 @@ class AEEngine:
         prior_close = profile.get("prior_close") if profile else None
         htf_high = profile.get("htf_high") if profile else None
         has_market_data, is_market_green = self._market_state()
+        if data_quality == "ok" and (not has_intraday or not has_4h or not has_market_data):
+            data_quality = "partial"
 
         res_clusters_rel = _filter_clusters_relative(res_clusters, last_price, "resistance")
         sup_clusters_rel = _filter_clusters_relative(sup_clusters, last_price, "support")
         agg_for_levels = self._minute_agg if intraday_symbol_matches else MinuteBarAggregator()
-        nearest_res = _nearest_level(last_price, res_clusters_rel, agg_for_levels, kind="resistance", fallback_high=htf_high)
-        nearest_sup = _nearest_level(last_price, sup_clusters_rel, agg_for_levels, kind="support", fallback_high=None)
+        nearest_res = _nearest_level(last_price, res_clusters_rel, agg_for_levels, kind="resistance")
+        nearest_sup = _nearest_level(last_price, sup_clusters_rel, agg_for_levels, kind="support")
 
         snapshot_symbol = profile["symbol"] if profile else (resolved_symbol or "")
         snapshot = {
@@ -549,47 +549,21 @@ class AEEngine:
             return False, None
         has_market = False
         is_green = None
-        now_et = datetime.now(ET_TZ)
         try:
-            if now_et.time() < datetime(now_et.year, now_et.month, now_et.day, 9, 30, tzinfo=ET_TZ).time():
-                # premarket: use prior close vs last
-                resp = self._rest.fetch_price_history(MARKET_PROXY_SYMBOL, None, None, "1d")
+            for proxy in [MARKET_PROXY_SYMBOL, "QQQ"]:
+                resp = self._rest.fetch_price_history(proxy, None, None, "1d")
                 candles = resp.get("candles") or []
                 completed = [c for c in candles if c.get("close") is not None]
-                if len(completed) >= 2:
-                    prior_close = float(completed[-2].get("close"))
-                    last_close = float(completed[-1].get("close"))
-                    if prior_close > 0:
-                        change_pct = (last_close - prior_close) / prior_close * 100
-                        is_green = change_pct > 0
-                        has_market = True
-            else:
-                # RTH/after: use 09:30–09:31 1m bar vs latest price (daily last)
-                open_start = datetime(now_et.year, now_et.month, now_et.day, 9, 30, tzinfo=ET_TZ)
-                open_end = open_start + timedelta(minutes=1)
-                bar_resp = self._rest.fetch_price_history(
-                    MARKET_PROXY_SYMBOL, int(open_start.timestamp() * 1000), int(open_end.timestamp() * 1000), "1m"
-                )
-                bar_candles = bar_resp.get("candles") or []
-                open_bar = sorted(bar_candles, key=lambda c: c.get("datetime", 0))[0] if bar_candles else None
-                last_resp = self._rest.fetch_price_history(MARKET_PROXY_SYMBOL, None, None, "1d")
-                last_candles = last_resp.get("candles") or []
-                latest = [c for c in last_candles if c.get("close") is not None]
-                last_price = float(latest[-1].get("close")) if latest else None
-                if open_bar and open_bar.get("close") is not None and last_price is not None:
-                    open_close = float(open_bar.get("close"))
-                    if open_close > 0:
-                        change_pct = (last_price - open_close) / open_close * 100
-                        is_green = change_pct > 0
-                        has_market = True
-                elif latest and len(latest) >= 2:
-                    # fallback to prior close if open bar missing
-                    prior_close = float(latest[-2].get("close"))
-                    last_close = float(latest[-1].get("close"))
-                    if prior_close > 0:
-                        change_pct = (last_close - prior_close) / prior_close * 100
-                        is_green = change_pct > 0
-                        has_market = False
+                if len(completed) < 2:
+                    continue
+                prior_close = float(completed[-2].get("close"))
+                last_close = float(completed[-1].get("close"))
+                if prior_close <= 0:
+                    continue
+                change_pct = (last_close - prior_close) / prior_close * 100
+                is_green = change_pct > 0
+                has_market = True
+                break
         except Exception:
             has_market = False
             is_green = None
@@ -600,18 +574,17 @@ class AEEngine:
 def _filter_clusters_relative(clusters: list[dict], last_price: Optional[float], kind: str) -> list[dict]:
     if last_price is None:
         return clusters[:CLUSTER_CAP]
-    filtered = []
+    filtered: list[dict] = []
     for c in clusters:
         mid = (c["price_zone_low"] + c["price_zone_high"]) / 2
         if kind == "resistance" and mid >= last_price:
             filtered.append(c)
         if kind == "support" and mid <= last_price:
             filtered.append(c)
-    filtered = sorted(filtered, key=lambda c: (abs(((c["price_zone_low"] + c["price_zone_high"]) / 2) - last_price)))
     return filtered[:CLUSTER_CAP]
 
 
-def _nearest_level(last_price: Optional[float], clusters: list[dict], agg: MinuteBarAggregator, kind: str, fallback_high: Optional[float]) -> Optional[dict]:
+def _nearest_level(last_price: Optional[float], clusters: list[dict], agg: MinuteBarAggregator, kind: str) -> Optional[dict]:
     if last_price is None:
         return None
     candidates: list[dict] = []
@@ -629,14 +602,8 @@ def _nearest_level(last_price: Optional[float], clusters: list[dict], agg: Minut
         candidates.append({"price": agg.premarket_high, "source": "premarket_high", "distance_pct": (agg.premarket_high - last_price) / last_price * 100})
     if agg.premarket_low is not None:
         candidates.append({"price": agg.premarket_low, "source": "premarket_low", "distance_pct": (agg.premarket_low - last_price) / last_price * 100})
-    if agg.session_high is not None:
-        candidates.append({"price": agg.session_high, "source": "session_high", "distance_pct": (agg.session_high - last_price) / last_price * 100})
-    if agg.session_low is not None:
-        candidates.append({"price": agg.session_low, "source": "session_low", "distance_pct": (agg.session_low - last_price) / last_price * 100})
     if kind == "resistance":
         above = [c for c in candidates if c["price"] >= last_price]
-        if not above and fallback_high is not None:
-            above = [{"price": fallback_high, "source": "htf_high", "distance_pct": (fallback_high - last_price) / last_price * 100}]
         if not above:
             return None
         return sorted(above, key=lambda x: x["price"])[0]
