@@ -83,6 +83,7 @@ class UIController:
 
     def _on_symbol_entered(self) -> None:
         symbol = self._window.symbol_input.text().strip().upper()
+        self._window.symbol_input.setText(symbol)
         if not symbol:
             return
         self._pending_symbol = symbol
