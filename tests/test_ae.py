@@ -2,7 +2,7 @@ import pytest
 
 pd = pytest.importorskip("pandas")  # noqa: F401
 
-from momentum_companion.analysis.ae import AEEngine, OneMinuteBar
+from momentum_companion.analysis.ae import AEEngine, OneMinuteBar, _compute_micro_metrics
 
 
 def _make_engine_with_profile(symbol="SYM"):
@@ -55,3 +55,36 @@ def test_cluster_selection_relative_to_price():
     ns = snap["levels"]["nearest_support"]
     assert nr is not None and nr["price"] >= 10.0 and nr["distance_pct"] >= 0
     assert ns is not None and ns["price"] <= 10.0 and ns["distance_pct"] <= 0
+
+
+def test_compute_micro_metrics_coil_state():
+    bars = []
+    # First 10 bars wide range
+    for i in range(10):
+        bars.append(OneMinuteBar(ts=i * 60, open=10.0, high=10.5, low=9.5, close=10.0, volume=100, is_extended=False))
+    # Last 5 bars tight range
+    for j in range(5):
+        bars.append(OneMinuteBar(ts=(10 + j) * 60, open=10.0, high=10.1, low=9.9, close=10.0, volume=100, is_extended=False))
+    micro = _compute_micro_metrics(bars, 10.0)
+    assert micro["micro_resistance_15m"] == 10.5
+    assert micro["micro_support_15m"] == 9.5
+    assert pytest.approx(micro["range_5m_pct"], rel=1e-3) == 2.0
+    assert pytest.approx(micro["range_15m_pct"], rel=1e-3) == 10.0
+    assert pytest.approx(micro["compression_ratio"], rel=1e-3) == 0.2
+    assert micro["micro_state"] == "COIL"
+    assert pytest.approx(micro["dist_to_micro_r_pct"], rel=1e-3) == 5.0
+
+
+def test_micro_metrics_in_snapshot():
+    eng = _make_engine_with_profile()
+    eng._session_open_rth["SYM"] = 10.0
+    bars = []
+    for i in range(10):
+        bars.append(OneMinuteBar(ts=i * 60, open=10.0, high=10.5, low=9.5, close=10.0, volume=100, is_extended=False))
+    for j in range(5):
+        bars.append(OneMinuteBar(ts=(10 + j) * 60, open=10.0, high=10.1, low=9.9, close=10.0, volume=100, is_extended=False))
+    eng._minute_agg._bars = bars
+    snap = eng._build_snapshot()
+    micro = snap["micro"]
+    assert micro["micro_state"] == "COIL"
+    assert micro["micro_resistance_15m"] == 10.5

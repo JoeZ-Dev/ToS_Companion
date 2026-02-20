@@ -96,19 +96,24 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ae_pill_vol = self._make_pill()
         self.ae_pill_gap = self._make_pill()
         self.ae_pill_res_prox = self._make_pill()
-        for pill in [self.ae_pill_range, self.ae_pill_vol, self.ae_pill_gap, self.ae_pill_res_prox]:
+        self.ae_pill_state = self._make_pill()
+        self.ae_pill_micro_r = self._make_pill()
+        for pill in [self.ae_pill_state, self.ae_pill_range, self.ae_pill_vol, self.ae_pill_gap, self.ae_pill_micro_r, self.ae_pill_res_prox]:
             self.ae_row_context.addWidget(pill)
         self.ae_row_context.addStretch()
 
         self.ae_levels_line1 = QtWidgets.QLabel("")
         self.ae_levels_line2 = QtWidgets.QLabel("")
+        self.ae_levels_line3 = QtWidgets.QLabel("")
         self.ae_levels_line1.setWordWrap(False)
         self.ae_levels_line2.setWordWrap(False)
+        self.ae_levels_line3.setWordWrap(False)
 
         ae_layout.addLayout(self.ae_row_regime)
         ae_layout.addLayout(self.ae_row_context)
         ae_layout.addWidget(self.ae_levels_line1)
         ae_layout.addWidget(self.ae_levels_line2)
+        ae_layout.addWidget(self.ae_levels_line3)
         self.ae_copy_btn = QtWidgets.QPushButton("Copy Data")
         self.ae_copy_btn.setFlat(True)
         self.ae_copy_btn.setStyleSheet("text-decoration: underline; color: #2980b9;")
@@ -250,6 +255,7 @@ class MainWindow(QtWidgets.QMainWindow):
         levels = snapshot.get("levels") or {}
         session = snapshot.get("session") or {}
         data_quality = snapshot.get("data_quality")
+        micro = snapshot.get("micro") or {}
 
         # Row A pills
         self._set_pill(
@@ -294,6 +300,14 @@ class MainWindow(QtWidgets.QMainWindow):
         )
 
         # Row B pills
+        micro_state = micro.get("micro_state")
+        self._set_pill(
+            self.ae_pill_state,
+            f"State: {micro_state if micro_state else '--'}",
+            self._color_for_state(micro_state),
+            tooltip="COIL = tight short-term range vs 15m range.\nEXPAND = short-term range widening.\nBased on 5m/15m range from 1m bars.",
+            visible=bool(micro_state),
+        )
         range_pct = vol.get("intraday_range_pct")
         range_text = f"Range {_fmt_pct1(range_pct)}%"
         if range_pct is not None and range_pct > 60:
@@ -324,6 +338,17 @@ class MainWindow(QtWidgets.QMainWindow):
         next_r_pct = levels.get("distance_to_next_cluster_pct")
         last_price = snapshot.get("last_price")
         res_price = (levels.get("nearest_resistance") or {}).get("price")
+        micro_dist = micro.get("dist_to_micro_r_pct")
+        if micro_dist is not None and micro_dist <= 1.0:
+            self._set_pill(
+                self.ae_pill_micro_r,
+                f"Micro R: {_fmt_pct1(micro_dist)}%",
+                self._color_for_micro_r(micro_dist),
+                tooltip="Distance to 15-minute swing high (micro resistance).",
+                visible=True,
+            )
+        else:
+            self._set_pill(self.ae_pill_micro_r, "Micro R: --", "#7f8c8d", visible=False)
         if in_r_zone:
             self._set_pill(
                 self.ae_pill_res_prox,
@@ -372,6 +397,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if pm_txt:
             line2_parts.append(pm_txt)
         self.ae_levels_line2.setText("  |  ".join(line2_parts))
+        micro_line = f"Micro: R {_fmt_price(micro.get('micro_resistance_15m'))} | S {_fmt_price(micro.get('micro_support_15m'))} | 5mRng {_fmt_pct1(micro.get('range_5m_pct'))}% | 15mRng {_fmt_pct1(micro.get('range_15m_pct'))}%"
+        self.ae_levels_line3.setText(micro_line)
 
     def _copy_ae_json(self) -> None:
         if not self._last_ae_snapshot:
@@ -391,9 +418,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self.ae_pill_open,
             self.ae_pill_macd,
             self.ae_pill_quality,
+            self.ae_pill_state,
             self.ae_pill_range,
             self.ae_pill_vol,
             self.ae_pill_gap,
+            self.ae_pill_micro_r,
             self.ae_pill_res_prox,
         ]:
             pill.setText("--")
@@ -402,6 +431,7 @@ class MainWindow(QtWidgets.QMainWindow):
             pill.setToolTip("")
         self.ae_levels_line1.setText("")
         self.ae_levels_line2.setText("")
+        self.ae_levels_line3.setText("")
 
     def _make_pill(self) -> QtWidgets.QLabel:
         pill = QtWidgets.QLabel("--")
@@ -465,6 +495,16 @@ class MainWindow(QtWidgets.QMainWindow):
         return "#7f8c8d"
 
     @staticmethod
+    def _color_for_state(state: str | None) -> str:
+        if state == "EXPAND":
+            return "#27ae60"
+        if state == "COIL":
+            return "#f1c40f"
+        if state == "NEUTRAL":
+            return "#95a5a6"
+        return "#7f8c8d"
+
+    @staticmethod
     def _color_for_range(val: float | None) -> str:
         if val is None:
             return "#7f8c8d"
@@ -512,6 +552,16 @@ class MainWindow(QtWidgets.QMainWindow):
         if val < 10:
             return "#27ae60"
         return "#2ecc71"
+
+    @staticmethod
+    def _color_for_micro_r(val: float | None) -> str:
+        if val is None:
+            return "#7f8c8d"
+        if val < 0.25:
+            return "#c0392b"
+        if val <= 1.0:
+            return "#f39c12"
+        return "#7f8c8d"
 
     def _format_level(self, label: str, lvl: dict) -> str:
         if not lvl or lvl.get("price") is None:

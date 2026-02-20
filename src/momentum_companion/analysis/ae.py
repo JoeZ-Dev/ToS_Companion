@@ -30,6 +30,8 @@ MACD_MIN_BARS = 30
 VOLUME_BASELINE_WINDOW = 30
 EMA9_PERIOD = 9
 SWING_LOOKBACK = 3
+MICRO_WINDOW_5M = 5
+MICRO_WINDOW_15M = 15
 CLUSTER_BAND_PCT = 0.015
 CLUSTER_CAP = 3
 CLUSTER_POOL_CAP = 50
@@ -493,6 +495,7 @@ class AEEngine:
         agg_for_levels = self._minute_agg if intraday_symbol_matches else MinuteBarAggregator()
         nearest_res = _nearest_level(last_price, res_clusters_rel, agg_for_levels, kind="resistance")
         nearest_sup = _nearest_level(last_price, sup_clusters_rel, agg_for_levels, kind="support")
+        micro = _compute_micro_metrics(agg_bars, last_price)
 
         snapshot_symbol = profile["symbol"] if profile else (resolved_symbol or "")
         snapshot = {
@@ -529,6 +532,7 @@ class AEEngine:
             },
             "last_price": last_price,
             "vwap": vwap_val,
+            "micro": micro,
             "session": {
                 "premarket_high": premarket_high_val,
                 "premarket_low": premarket_low_val,
@@ -646,6 +650,62 @@ def _distance_to_next_cluster_pct(last_price: Optional[float], clusters: list[di
         return None
     nxt = mids[0]
     return (nxt - last_price) / last_price * 100
+
+
+def _compute_micro_metrics(bars: list[OneMinuteBar], last_price: Optional[float]) -> dict:
+    if not bars or last_price is None:
+        return {
+            "micro_resistance_15m": None,
+            "micro_support_15m": None,
+            "range_5m_pct": None,
+            "range_15m_pct": None,
+            "compression_ratio": None,
+            "micro_state": None,
+            "dist_to_micro_r_pct": None,
+        }
+    highs = [b.high for b in bars]
+    lows = [b.low for b in bars]
+    micro_res_15 = None
+    micro_sup_15 = None
+    range_5m_pct = None
+    range_15m_pct = None
+    compression_ratio = None
+    micro_state = None
+    dist_to_micro_r_pct = None
+
+    if len(bars) >= MICRO_WINDOW_15M:
+        recent_highs = highs[-MICRO_WINDOW_15M:]
+        recent_lows = lows[-MICRO_WINDOW_15M:]
+        micro_res_15 = max(recent_highs)
+        micro_sup_15 = min(recent_lows)
+    if len(bars) >= MICRO_WINDOW_5M:
+        recent_highs_5 = highs[-MICRO_WINDOW_5M:]
+        recent_lows_5 = lows[-MICRO_WINDOW_5M:]
+        if last_price:
+            range_5m_pct = (max(recent_highs_5) - min(recent_lows_5)) / last_price * 100
+    if len(bars) >= MICRO_WINDOW_15M and last_price:
+        recent_highs_15 = highs[-MICRO_WINDOW_15M:]
+        recent_lows_15 = lows[-MICRO_WINDOW_15M:]
+        range_15m_pct = (max(recent_highs_15) - min(recent_lows_15)) / last_price * 100
+    if range_5m_pct is not None and range_15m_pct is not None and range_15m_pct > 0:
+        compression_ratio = range_5m_pct / range_15m_pct
+        if compression_ratio <= 0.35:
+            micro_state = "COIL"
+        elif compression_ratio >= 0.60:
+            micro_state = "EXPAND"
+        else:
+            micro_state = "NEUTRAL"
+    if micro_res_15 is not None and last_price:
+        dist_to_micro_r_pct = (micro_res_15 - last_price) / last_price * 100
+    return {
+        "micro_resistance_15m": micro_res_15,
+        "micro_support_15m": micro_sup_15,
+        "range_5m_pct": range_5m_pct,
+        "range_15m_pct": range_15m_pct,
+        "compression_ratio": compression_ratio,
+        "micro_state": micro_state,
+        "dist_to_micro_r_pct": dist_to_micro_r_pct,
+    }
 
 
 def _candles_to_df(candles: list[dict]) -> pd.DataFrame:
