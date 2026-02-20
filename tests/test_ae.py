@@ -88,3 +88,26 @@ def test_micro_metrics_in_snapshot():
     micro = snap["micro"]
     assert micro["micro_state"] == "COIL"
     assert micro["micro_resistance_15m"] == 10.5
+
+
+def test_levels_book_influence_scoring():
+    eng = _make_engine_with_profile()
+    eng._session_open_rth["SYM"] = 10.0
+    bars = []
+    # 30 bars, with 5 touching a resistance zone at 10.0-10.1
+    for i in range(25):
+        bars.append(OneMinuteBar(ts=i * 60, open=9.5, high=9.7, low=9.4, close=9.6, volume=100, is_extended=False))
+    for i in range(25, 30):
+        # touches and slight rejections
+        bars.append(OneMinuteBar(ts=i * 60, open=9.9, high=10.1, low=9.8, close=9.9, volume=150, is_extended=False))
+    eng._minute_agg._bars = bars
+    eng._profile_cache["SYM"]["resistance_clusters"] = [
+        {"price_zone_low": 10.0, "price_zone_high": 10.1, "strength_score": 0.9}
+    ]
+    snap = eng._build_snapshot()
+    levels_book = snap["levels_book"]
+    assert levels_book
+    top = levels_book[0]
+    assert top["dynamic_influence"] > top["base_strength"]
+    # distance decay should keep distance small
+    assert abs(top["distance_pct"]) < 5

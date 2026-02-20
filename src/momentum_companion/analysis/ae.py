@@ -541,6 +541,13 @@ class AEEngine:
                 "gap_pct": ((session_open_val - prior_close) / prior_close * 100) if prior_close and session_open_val else None,
             },
         }
+        snapshot["levels_book"] = _build_levels_book(
+            last_price=last_price,
+            bars=agg_bars[-30:],
+            res_clusters=res_clusters,
+            sup_clusters=sup_clusters,
+            micro=micro,
+        )
         if snapshot_symbol:
             self._snapshot_cache[snapshot_symbol] = snapshot
         return snapshot
@@ -650,6 +657,137 @@ def _distance_to_next_cluster_pct(last_price: Optional[float], clusters: list[di
         return None
     nxt = mids[0]
     return (nxt - last_price) / last_price * 100
+
+
+def _build_levels_book(
+    last_price: Optional[float],
+    bars: list[OneMinuteBar],
+    res_clusters: list[dict],
+    sup_clusters: list[dict],
+    micro: dict,
+) -> list[dict]:
+    if last_price is None or len(bars) < MICRO_WINDOW_15M:
+        return []
+    levels: list[dict] = []
+    # Macro levels from clusters
+    for c in res_clusters:
+        levels.append(
+            {
+                "low": c["price_zone_low"],
+                "high": c["price_zone_high"],
+                "side": "resistance",
+                "scope": "macro",
+                "base_strength": c.get("strength_score", 0.0),
+            }
+        )
+    for c in sup_clusters:
+        levels.append(
+            {
+                "low": c["price_zone_low"],
+                "high": c["price_zone_high"],
+                "side": "support",
+                "scope": "macro",
+                "base_strength": c.get("strength_score", 0.0),
+            }
+        )
+    # Micro levels (15m swings)
+    micro_res = micro.get("micro_resistance_15m")
+    micro_sup = micro.get("micro_support_15m")
+    if micro_res is not None:
+        levels.append(
+            {
+                "low": micro_res,
+                "high": micro_res,
+                "side": "resistance",
+                "scope": "micro",
+                "base_strength": 0.3,
+            }
+        )
+    if micro_sup is not None:
+        levels.append(
+            {
+                "low": micro_sup,
+                "high": micro_sup,
+                "side": "support",
+                "scope": "micro",
+                "base_strength": 0.3,
+            }
+        )
+    if not levels:
+        return []
+    median_vol = float(pd.Series([b.volume for b in bars]).median()) if bars else 0.0
+    touch_bars_cache: dict[int, OneMinuteBar] = {b.ts: b for b in bars}
+
+    def distance_pct(level: dict) -> float:
+        mid = (level["low"] + level["high"]) / 2
+        return (mid - last_price) / last_price * 100
+
+    def bar_volume_multiple(bar: OneMinuteBar) -> float:
+        if median_vol <= 0:
+            return 0.0
+        return (bar.volume or 0.0) / median_vol
+
+    enriched: list[dict] = []
+    for lvl in levels:
+        mid = (lvl["low"] + lvl["high"]) / 2
+        side = lvl["side"]
+        # cross behavior: resistance becomes support if price above
+        if side == "resistance" and last_price > lvl["high"]:
+            side = "support"
+        lvl_touch_bars: list[OneMinuteBar] = []
+        rejection_bars = 0
+        clean_breaks = 0
+        for b in bars:
+            touches_zone = (b.high >= lvl["low"] and b.low <= lvl["high"])
+            if touches_zone:
+                lvl_touch_bars.append(b)
+                upper_wick = b.high - max(b.open, b.close)
+                lower_wick = min(b.open, b.close) - b.low
+                body = abs(b.close - b.open)
+                if side == "resistance" and upper_wick > body:
+                    rejection_bars += 1
+                if side == "support" and lower_wick > body:
+                    rejection_bars += 1
+            close_above = b.close > lvl["high"] * 1.005
+            close_below = b.close < lvl["low"] * 0.995
+            vol_mult_bar = bar_volume_multiple(b)
+            if side == "resistance" and close_above and vol_mult_bar >= 2.0:
+                clean_breaks += 1
+            if side == "support" and close_below and vol_mult_bar >= 2.0:
+                clean_breaks += 1
+        touch_score = min(len(lvl_touch_bars) / 3.0, 1.0)
+        rejection_score = min(rejection_bars / 3.0, 1.0)
+        avg_touch_vol = (
+            sum([b.volume for b in lvl_touch_bars]) / len(lvl_touch_bars) if lvl_touch_bars else 0.0
+        )
+        volume_score = 0.0
+        if median_vol > 0 and avg_touch_vol > 0:
+            volume_score = min(avg_touch_vol / median_vol, 2.0) / 2.0
+        clean_break_penalty = min(clean_breaks / 2.0, 1.0)
+        dist_pct = distance_pct(lvl)
+        distance_decay = min(abs(dist_pct) / 10.0, 1.0)
+        dynamic_influence = (
+            lvl["base_strength"]
+            + 0.15 * touch_score
+            + 0.15 * rejection_score
+            + 0.10 * volume_score
+            - 0.20 * clean_break_penalty
+            - 0.10 * distance_decay
+        )
+        dynamic_influence = max(0.0, min(1.0, dynamic_influence))
+        enriched.append(
+            {
+                "low": lvl["low"],
+                "high": lvl["high"],
+                "side": side,
+                "scope": lvl["scope"],
+                "base_strength": lvl["base_strength"],
+                "dynamic_influence": dynamic_influence,
+                "distance_pct": dist_pct,
+            }
+        )
+    enriched.sort(key=lambda d: (-d["dynamic_influence"], abs(d["distance_pct"])))
+    return enriched
 
 
 def _compute_micro_metrics(bars: list[OneMinuteBar], last_price: Optional[float]) -> dict:
