@@ -622,7 +622,11 @@ def _nearest_level(last_price: Optional[float], clusters: list[dict], agg: Minut
     below = [c for c in candidates if c["price"] <= last_price]
     if not below:
         return None
-    return sorted(below, key=lambda x: x["price"], reverse=True)[0]
+    best = sorted(below, key=lambda x: x["price"], reverse=True)[0]
+    rounded_price = round(best["price"], 3)
+    best["price"] = rounded_price
+    best["distance_pct"] = (rounded_price - last_price) / last_price * 100
+    return best
 
 
 def _in_resistance_zone(last_price: Optional[float], clusters: list[dict]) -> bool:
