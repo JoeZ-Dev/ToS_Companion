@@ -30,6 +30,7 @@ class MainWindow(QtWidgets.QMainWindow):
         top.setSpacing(6)
         top.addWidget(QtWidgets.QLabel("Symbol:"))
         self.symbol_input = QtWidgets.QLineEdit()
+        self.symbol_input.setInputMask(">AAAAA;_")
         top.addWidget(self.symbol_input)
         self.connection_label = QtWidgets.QLabel("Connection: UNKNOWN")
         top.addWidget(self.connection_label)
@@ -45,8 +46,6 @@ class MainWindow(QtWidgets.QMainWindow):
         chart_area = QtWidgets.QVBoxLayout()
         chart_area.setContentsMargins(0, 0, 0, 0)
         chart_area.setSpacing(4)
-        self.quote_label = QtWidgets.QLabel("Quote: --")
-        chart_area.addWidget(self.quote_label)
         self.chart_widget = LightweightChartWidget()
         chart_area.addWidget(self.chart_widget)
         chart_area.setStretchFactor(self.chart_widget, 1)
@@ -62,6 +61,8 @@ class MainWindow(QtWidgets.QMainWindow):
         middle.addLayout(chart_area, 3)
 
         side_panel = QtWidgets.QVBoxLayout()
+        side_panel.setContentsMargins(0, 0, 0, 0)
+        side_panel.setSpacing(4)
 
         ae_group = QtWidgets.QGroupBox("AE Snapshot")
         ae_layout = QtWidgets.QVBoxLayout()
@@ -123,6 +124,15 @@ class MainWindow(QtWidgets.QMainWindow):
         llm_layout.addWidget(self.llm_flash)
         llm_group.setLayout(llm_layout)
         side_panel.addWidget(llm_group)
+
+        fundamentals_group = QtWidgets.QGroupBox("Fundamentals")
+        fundamentals_layout = QtWidgets.QVBoxLayout()
+        fundamentals_layout.setContentsMargins(6, 4, 6, 6)
+        fundamentals_layout.setSpacing(4)
+        self.quote_label = QtWidgets.QLabel("Quote: --")
+        fundamentals_layout.addWidget(self.quote_label)
+        fundamentals_group.setLayout(fundamentals_layout)
+        side_panel.addWidget(fundamentals_group)
 
         status_group = QtWidgets.QGroupBox("Status")
         status_layout = QtWidgets.QVBoxLayout()
