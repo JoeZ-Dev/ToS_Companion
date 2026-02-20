@@ -82,7 +82,8 @@ class UIController:
             self._window.symbol_input.returnPressed.connect(self._on_symbol_entered)  # type: ignore[attr-defined]
 
     def _on_symbol_entered(self) -> None:
-        symbol = self._window.symbol_input.text().strip().upper()
+        raw = self._window.symbol_input.text()
+        symbol = raw.strip().upper()
         self._window.symbol_input.setText(symbol)
         if not symbol:
             return

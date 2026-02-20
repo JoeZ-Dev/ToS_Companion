@@ -32,7 +32,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.symbol_input = QtWidgets.QLineEdit()
         self.symbol_input.setPlaceholderText("SYM")
         self.symbol_input.setMaxLength(10)
-        self.symbol_input.setValidator(QtGui.QRegularExpressionValidator(QtCore.QRegularExpression("[A-Z]{0,10}")))
+        self.symbol_input.setValidator(None)
         top.addWidget(self.symbol_input)
         self.connection_label = QtWidgets.QLabel("Connection: UNKNOWN")
         top.addWidget(self.connection_label)
