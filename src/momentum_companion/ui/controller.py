@@ -20,6 +20,7 @@ from momentum_companion.data.price_update import PriceUpdate
 from momentum_companion.indicators.engine import IndicatorsEngine
 import pandas as pd
 from momentum_companion.analysis.ae import AEEngine
+from momentum_companion.utils.logging import logging
 
 
 class UIController:
@@ -65,6 +66,7 @@ class UIController:
         self._last_quote: dict[str, Any] = {"bid": None, "ask": None, "last": None, "total_volume": None}
         self._ae_engine = ae_engine or AEEngine(rest_client, Path(db_path) if db_path else None)
         self._last_ae_snapshot: dict | None = None
+        self._logger = logging.getLogger(__name__)
 
     def handle_flash(self, symbol: str, rec: dict, payload: dict) -> None:
         """Trigger flash alert in UI."""
@@ -189,6 +191,14 @@ class UIController:
         last = event.get("last")
         ts_ms = event.get("ts_ms")
         try:
+            self._logger.debug(
+                "Quote received: ts=%s bid=%s ask=%s last=%s vol=%s",
+                ts_ms,
+                bid,
+                ask,
+                last,
+                event.get("volume"),
+            )
             if ts_ms and last is not None:
                 if self._ae_engine:
                     self._ae_engine.record_quote_ts(ts_ms)
