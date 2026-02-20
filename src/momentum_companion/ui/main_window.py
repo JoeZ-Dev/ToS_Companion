@@ -350,7 +350,7 @@ class MainWindow(QtWidgets.QMainWindow):
     @staticmethod
     def _pill_stylesheet(bg: str, fg: str) -> str:
         return (
-            f"QLabel {{ background-color: {bg}; color: {fg}; border-radius: 6px; padding: 2px 5px; "
+            f"QLabel {{ background-color: {bg}; color: {fg}; border-radius: 4px; padding: 1px 4px; "
             f"font-weight: bold; }}"
         )
 
