@@ -105,18 +105,22 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ae_levels_line1 = QtWidgets.QLabel("")
         self.ae_levels_line2 = QtWidgets.QLabel("")
         self.ae_levels_line3 = QtWidgets.QLabel("")
+        self.ae_levels_line4 = QtWidgets.QLabel("")
         self.ae_levels_line1.setWordWrap(False)
         self.ae_levels_line2.setWordWrap(False)
         self.ae_levels_line3.setWordWrap(False)
+        self.ae_levels_line4.setWordWrap(False)
         self.ae_levels_line1.setToolTip("Nearest structural resistance/support with distance % and source.")
         self.ae_levels_line2.setToolTip("Opening Range (09:30–09:40 ET) and Premarket (04:00–09:30 ET) highs/lows.")
         self.ae_levels_line3.setToolTip("Micro context: 15m swing R/S and recent 5m/15m ranges from 1m bars.")
+        self.ae_levels_line4.setToolTip("Top influenced levels (macro/micro) ranked by dynamic_influence.")
 
         ae_layout.addLayout(self.ae_row_regime)
         ae_layout.addLayout(self.ae_row_context)
         ae_layout.addWidget(self.ae_levels_line1)
         ae_layout.addWidget(self.ae_levels_line2)
         ae_layout.addWidget(self.ae_levels_line3)
+        ae_layout.addWidget(self.ae_levels_line4)
         self.ae_copy_btn = QtWidgets.QPushButton("Copy Data")
         self.ae_copy_btn.setFlat(True)
         self.ae_copy_btn.setStyleSheet("text-decoration: underline; color: #2980b9;")
@@ -259,6 +263,7 @@ class MainWindow(QtWidgets.QMainWindow):
         session = snapshot.get("session") or {}
         data_quality = snapshot.get("data_quality")
         micro = snapshot.get("micro") or {}
+        levels_book = snapshot.get("levels_book") or []
 
         # Row A pills
         self._set_pill(
@@ -402,6 +407,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ae_levels_line2.setText("  |  ".join(line2_parts))
         micro_line = f"Micro: R {_fmt_price(micro.get('micro_resistance_15m'))} | S {_fmt_price(micro.get('micro_support_15m'))} | 5mRng {_fmt_pct1(micro.get('range_5m_pct'))}% | 15mRng {_fmt_pct1(micro.get('range_15m_pct'))}%"
         self.ae_levels_line3.setText(micro_line)
+        influ_parts = []
+        for idx, lvl in enumerate(levels_book[:3], 1):
+            side = "R" if lvl.get("side") == "resistance" else "S"
+            price = _fmt_price(lvl.get("high") if lvl.get("high") is not None else lvl.get("low"))
+            inf = _fmt_influence(lvl.get("dynamic_influence"))
+            influ_parts.append(f"{idx}) {side} {price} ({inf})")
+        self.ae_levels_line4.setText("Influence: " + " | ".join(influ_parts) if influ_parts else "")
 
     def _copy_ae_json(self) -> None:
         if not self._last_ae_snapshot:
@@ -435,6 +447,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ae_levels_line1.setText("")
         self.ae_levels_line2.setText("")
         self.ae_levels_line3.setText("")
+        self.ae_levels_line4.setText("")
 
     def _make_pill(self) -> QtWidgets.QLabel:
         pill = QtWidgets.QLabel("--")
@@ -613,6 +626,11 @@ def _fmt_pct1_signed(val: float | None) -> str:
 
 
 def _fmt_price(val: float | None) -> str:
+    if val is None:
+        return "--"
+    return f"{val:.2f}"
+
+def _fmt_influence(val: float | None) -> str:
     if val is None:
         return "--"
     return f"{val:.2f}"

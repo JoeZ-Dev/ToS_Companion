@@ -64,6 +64,12 @@ On symbol load:
 - `is_above_4h_ema` (from structural extract)
 - `is_market_green` (SPY % change > 0)
 - `is_above_open` (RTH only) computed from REST RTH open (09:30 ET). If RTH open missing: null.
+- Micro intraday context (uses completed 1m bars only):
+  - 15m swing highs/lows (micro resistance/support) = max high/min low over last 15 completed 1m bars (null if <15 bars).
+  - 5m and 15m ranges in % of last price: `(maxHigh - minLow) / last_price * 100` over last 5/15 completed 1m bars (null if insufficient bars or last_price missing).
+  - Compression ratio = range_5m_pct / range_15m_pct (if both present and 15m range > 0).
+  - Micro state: `COIL` if compression_ratio <= 0.35; `EXPAND` if >= 0.60; else `NEUTRAL`; null if ratio null.
+  - Distance to micro resistance = (micro_resistance_15m - last_price) / last_price * 100 (null if missing).
 
 Expose as raw booleans/numerics only.
 
@@ -125,6 +131,15 @@ Degrade to `partial` if higher timeframe data missing; `stale/no_data` by quote 
   "volume": {
     "volume_multiple": 2.4
   },
+  "micro": {
+    "micro_resistance_15m": 19.8,
+    "micro_support_15m": 19.1,
+    "range_5m_pct": 0.9,
+    "range_15m_pct": 3.2,
+    "compression_ratio": 0.28,
+    "micro_state": "COIL",
+    "dist_to_micro_r_pct": 0.5
+  },
   "levels": {
     "resistance_clusters": [
       {
@@ -155,6 +170,26 @@ Degrade to `partial` if higher timeframe data missing; `stale/no_data` by quote 
     "in_resistance_zone": false,
     "distance_to_next_cluster_pct": 3.4
   },
+  "levels_book": [
+    {
+      "low": 19.8,
+      "high": 20.1,
+      "side": "resistance",
+      "scope": "macro",
+      "base_strength": 0.82,
+      "dynamic_influence": 0.86,
+      "distance_pct": 1.5
+    },
+    {
+      "low": 19.8,
+      "high": 19.8,
+      "side": "resistance",
+      "scope": "micro",
+      "base_strength": 0.3,
+      "dynamic_influence": 0.44,
+      "distance_pct": 0.5
+    }
+  ],
   "last_price": 19.7,
   "vwap": 19.5,
   "session": {
@@ -174,6 +209,8 @@ No trade readiness or suggestions. All fields deterministic.
 - Premarket: 04:00–09:30 ET. `premarket_high/low` null before 04:00; fixed after 09:30.
 - Opening range: 09:30–09:40 ET. `opening_range_high/low` null until 09:40; then fixed.
 - VWAP anchor: 04:00–20:00 ET. Before 04:00, VWAP is null; after 20:00, hold last value.
+- Micro ranges/windows: 5m = last 5 completed 1m bars; 15m = last 15 completed 1m bars.
+- Levels influence: uses last 30 completed 1m bars for touch/rejection/break counting; distance decay clipped at 10%.
 
 ## AE-1.0 (Structural Profile)
 
@@ -198,6 +235,15 @@ Raw bars are not stored.
 - MACD: 12/26/9 on 1m.
 - Quote age thresholds: stale_if_quote_age_ms = 5000; no_data_if_quote_age_ms = 60000.
 - macd_min_bars = 30.
+- Micro swing windows: 5 bars (5m), 15 bars (15m).
+- Levels influence weights (deterministic):
+  - base_strength (macro cluster strength_score; micro fixed 0.3)
+  - touch_score weight 0.15 (touches/3 capped 1.0)
+  - rejection_score weight 0.15 (rejections/3 capped 1.0; wick > body touching zone)
+  - volume_score weight 0.10 (avg touch vol / median vol capped at 2.0 then /2)
+  - clean_break_penalty weight -0.20 (clean breaks/2 capped 1.0; close >0.5% beyond with vol_mult>=2)
+  - distance_decay weight -0.10 (|distance_pct|/10 capped 1.0)
+  - Final dynamic_influence clipped to [0,1]; levels_book sorted by dynamic_influence desc then abs(distance_pct) asc.
 - Market proxy: SPY. is_market_green:
   - Premarket (<09:30 ET): (last - prior_close) / prior_close * 100 > 0.
   - RTH/after (>=09:30 ET): compare last vs 09:30–09:31 1m bar close; if unavailable, fall back to prior_close and set has_market_data=false.
