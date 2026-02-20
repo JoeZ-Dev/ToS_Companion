@@ -178,17 +178,19 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                   lineSeriesMap[key]=chart.addSeries(LightweightCharts.LineSeries, style, paneIndex);
                   return lineSeriesMap[key];
                 }}
-                function ensureMacdSeries(name){{
-                  if(macdSeriesMap[name]){{return macdSeriesMap[name];}}
-                  if(name==='MACD_HIST'){{
-                    macdSeriesMap[name]=chart.addSeries(LightweightCharts.HistogramSeries, {{color:'#1abc9c', base:0, lastValueVisible:false, priceLineVisible:false}}, MACD_PANE_INDEX);
-                  }} else if(name==='MACD_SIGNAL'){{
-                    macdSeriesMap[name]=chart.addSeries(LightweightCharts.LineSeries, {{color:'#d2b48c', lineWidth:1, lastValueVisible:false, priceLineVisible:false}}, MACD_PANE_INDEX);
-                  }} else {{
-                    macdSeriesMap[name]=chart.addSeries(LightweightCharts.LineSeries, {{color:'#1abc9c', lineWidth:1, lastValueVisible:false, priceLineVisible:false}}, MACD_PANE_INDEX);
-                  }}
+                function ensureMacdSeries(name){
+                  if(macdSeriesMap[name]){return macdSeriesMap[name];}
+                  if(name==='MACD_HIST'){
+                    macdSeriesMap[name]=chart.addSeries(LightweightCharts.HistogramSeries, {color:'#1abc9c', base:0, lastValueVisible:false, priceLineVisible:false}, MACD_PANE_INDEX);
+                  } else if(name==='MACD_SIGNAL'){
+                    if(!macdSeriesMap['MACD_HIST']){macdSeriesMap['MACD_HIST']=chart.addSeries(LightweightCharts.HistogramSeries, {color:'#1abc9c', base:0, lastValueVisible:false, priceLineVisible:false}, MACD_PANE_INDEX);}
+                    macdSeriesMap[name]=chart.addSeries(LightweightCharts.LineSeries, {color:'#d2b48c', lineWidth:1, lastValueVisible:false, priceLineVisible:false}, MACD_PANE_INDEX);
+                  } else {
+                    if(!macdSeriesMap['MACD_HIST']){macdSeriesMap['MACD_HIST']=chart.addSeries(LightweightCharts.HistogramSeries, {color:'#1abc9c', base:0, lastValueVisible:false, priceLineVisible:false}, MACD_PANE_INDEX);}
+                    macdSeriesMap[name]=chart.addSeries(LightweightCharts.LineSeries, {color:'#1abc9c', lineWidth:1, lastValueVisible:false, priceLineVisible:false}, MACD_PANE_INDEX);
+                  }
                   return macdSeriesMap[name];
-                }}
+                }
                 function setSeriesVisible(name, visible){{
                   if(name==='VOLUME'){{volumeSeries.applyOptions({{visible:visible}}); menuState.VOLUME=visible; return;}}
                   if(name==='TOOLTIP'){{menuState.TOOLTIP=visible; toolTip.style.display=visible?'block':'none'; return;}}
@@ -308,6 +310,12 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                   updateLastPriceLine(bar);
                 }};
                 window.lwc_setSeries=function(name, points){{
+                  if(name.startsWith('MACD_HIST')){{
+                    const target=ensureMacdSeries('MACD_HIST');
+                    const mapped=(points||[]).map(p=>Object.assign({}, p, {{color: (p.value||0)>=0 ? '#27ae60' : '#c0392b'}}));
+                    target.setData(mapped);
+                    return;
+                  }}
                   let target;
                   if(name.startsWith('MACD')){{target=ensureMacdSeries(name);}}
                   else {{target=ensureLineSeries(name, 0);}}
