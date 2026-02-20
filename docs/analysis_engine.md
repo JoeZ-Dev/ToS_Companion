@@ -91,6 +91,8 @@ Snapshot fields:
 - `has_4h_data` (bool)
 - `has_intraday_data` (bool)
 - `has_market_data` (bool)
+- `has_premarket_levels` (bool)
+- `has_opening_range` (bool)
 
 Degrade to `partial` if higher timeframe data missing; `stale/no_data` by quote age rules.
 - Quote age thresholds: `stale_if_quote_age_ms = 5000`; `no_data_if_quote_age_ms = 60000`.
@@ -103,8 +105,11 @@ Degrade to `partial` if higher timeframe data missing; `stale/no_data` by quote 
 {
   "symbol": "AAPL",
   "as_of_ts_ms": 1700000000000,
+  "as_of_et": "2026-02-07T09:30:00-05:00",
   "status": "ok",
   "data_quality": "ok",
+  "has_premarket_levels": true,
+  "has_opening_range": true,
   "regime": {
     "is_above_4h_ema": true,
     "is_above_open": true,
@@ -149,6 +154,8 @@ Degrade to `partial` if higher timeframe data missing; `stale/no_data` by quote 
     "in_resistance_zone": false,
     "distance_to_next_cluster_pct": 3.4
   },
+  "last_price": 19.7,
+  "vwap": 19.5,
   "session": {
     "premarket_high": 19.2,
     "premarket_low": 18.7,
@@ -188,6 +195,11 @@ Raw bars are not stored.
 - Opening range window: first 10 minutes RTH.
 - VWAP anchor: 04:00–20:00 ET.
 - MACD: 12/26/9 on 1m.
+- Quote age thresholds: stale_if_quote_age_ms = 5000; no_data_if_quote_age_ms = 60000.
+- macd_min_bars = 30.
+- Market proxy: SPY. is_market_green = (last - prior_close) / prior_close * 100 > 0; if prior_close missing → has_market_data=false, is_market_green=null.
+- Strength score: normalized 0..1 via `normalized_strength = min(1.0, raw_strength / (raw_strength + 1.0))`, raw_strength = touches * (0.5 + 0.5 * recency).
+- Zero-width zones: if zone_low == zone_high, expand band by +/−0.01% of price (deterministic) to avoid zero width.
 
 ## Implementation Plan (high level)
 

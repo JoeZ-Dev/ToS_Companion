@@ -37,6 +37,10 @@ HALF_LIFE_DAILY = 60
 VOLATILITY_THRESHOLD = 1.0
 STALE_IF_QUOTE_AGE_MS = 5_000
 NO_DATA_IF_QUOTE_AGE_MS = 60_000
+STRENGTH_DENOM = 1.0  # used to normalize raw strength
+ZERO_WIDTH_BAND_PCT = 0.0001  # 0.01% expansion for zero-width zones
+
+MARKET_PROXY_SYMBOL = "SPY"
 
 
 @dataclass
@@ -152,6 +156,8 @@ def _cluster_swings(prices: pd.Series, lookback: int, band_pct: float, cap: int,
         if used[i]:
             continue
         band = price * band_pct
+        if band == 0:
+            band = price * ZERO_WIDTH_BAND_PCT
         members = swings[(swings >= price - band) & (swings <= price + band)]
         for j, _ in enumerate(swings):
             if swings.index[j] in members.index:
@@ -161,8 +167,9 @@ def _cluster_swings(prices: pd.Series, lookback: int, band_pct: float, cap: int,
         touches = len(members)
         age = len(prices) - idx
         recency = math.exp(-age / half_life) if half_life > 0 else 0
-        strength = touches * (0.5 + 0.5 * recency)
-        zones.append({"price_zone_low": float(zone_low), "price_zone_high": float(zone_high), "strength_score": float(strength)})
+        raw_strength = touches * (0.5 + 0.5 * recency)
+        normalized_strength = min(1.0, raw_strength / (raw_strength + STRENGTH_DENOM))
+        zones.append({"price_zone_low": float(zone_low), "price_zone_high": float(zone_high), "strength_score": float(normalized_strength)})
     zones = sorted(zones, key=lambda z: z["strength_score"], reverse=True)[:cap]
     return zones
 
@@ -201,12 +208,14 @@ class AEEngine:
         half_life = HALF_LIFE_4H if source_tf == "4h" else HALF_LIFE_DAILY
         res_clusters = _cluster_swings(bars["high"], SWING_LOOKBACK, CLUSTER_BAND_PCT, CLUSTER_CAP, half_life, "resistance")
         sup_clusters = _cluster_swings(bars["low"], SWING_LOOKBACK, CLUSTER_BAND_PCT, CLUSTER_CAP, half_life, "support")
+        htf_high = float(bars["high"].max())
         now_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         profile = {
             "symbol": symbol,
             "created_at_utc": now_utc,
             "is_above_4h_ema": is_above_ema,
             "prior_close": prior_close,
+            "htf_high": htf_high,
             "resistance_clusters": [{"timeframe_source": source_tf, **z} for z in res_clusters],
             "support_clusters": [{"timeframe_source": source_tf, **z} for z in sup_clusters],
         }
@@ -302,25 +311,32 @@ class AEEngine:
         res_clusters = profile["resistance_clusters"] if profile else []
         sup_clusters = profile["support_clusters"] if profile else []
         prior_close = profile.get("prior_close") if profile else None
+        htf_high = profile.get("htf_high") if profile else None
         has_market_data, is_market_green = self._market_state()
 
-        nearest_res = _nearest_level(last_price, res_clusters, self._minute_agg, kind="resistance")
-        nearest_sup = _nearest_level(last_price, sup_clusters, self._minute_agg, kind="support")
+        res_clusters_rel = _filter_clusters_relative(res_clusters, last_price, "resistance")
+        sup_clusters_rel = _filter_clusters_relative(sup_clusters, last_price, "support")
+        nearest_res = _nearest_level(last_price, res_clusters_rel, self._minute_agg, kind="resistance", fallback_high=htf_high)
+        nearest_sup = _nearest_level(last_price, sup_clusters_rel, self._minute_agg, kind="support", fallback_high=None)
 
         snapshot = {
             "symbol": profile["symbol"] if profile else "",
             "as_of_ts_ms": now_ms,
+            "as_of_et": datetime.now(ET_TZ).isoformat(),
             "status": status,
             "data_quality": data_quality,
             "has_4h_data": has_4h,
             "has_intraday_data": has_intraday,
             "has_market_data": has_market_data,
+            "has_premarket_levels": bool(self._minute_agg.premarket_high is not None and self._minute_agg.premarket_low is not None),
+            "has_opening_range": bool(self._minute_agg.or_high is not None and self._minute_agg.or_low is not None),
             "regime": {
                 "is_above_4h_ema": is_above_4h,
                 "is_above_open": is_above_open,
                 "is_above_vwap": is_above_vwap,
                 "is_market_green": is_market_green,
                 "macd_regime": macd_regime,
+                "macd_ready": len(self._minute_agg.bars) >= MACD_MIN_BARS,
             },
             "volatility": {
                 "intraday_range_pct": intraday_range_pct,
@@ -328,13 +344,15 @@ class AEEngine:
             },
             "volume": {"volume_multiple": vol_mult},
             "levels": {
-                "resistance_clusters": res_clusters,
-                "support_clusters": sup_clusters,
+                "resistance_clusters": res_clusters_rel,
+                "support_clusters": sup_clusters_rel,
                 "nearest_resistance": nearest_res,
                 "nearest_support": nearest_sup,
                 "in_resistance_zone": _in_resistance_zone(last_price, res_clusters),
                 "distance_to_next_cluster_pct": _distance_to_next_cluster_pct(last_price, res_clusters),
             },
+            "last_price": last_price,
+            "vwap": vwap_val,
             "session": {
                 "premarket_high": self._minute_agg.premarket_high,
                 "premarket_low": self._minute_agg.premarket_low,
@@ -371,45 +389,52 @@ class AEEngine:
         return has_market, is_green
 
 
-def _nearest_level(last_price: Optional[float], clusters: list[dict], agg: MinuteBarAggregator, kind: str) -> Optional[dict]:
+def _filter_clusters_relative(clusters: list[dict], last_price: Optional[float], kind: str) -> list[dict]:
+    if last_price is None:
+        return clusters
+    filtered = []
+    for c in clusters:
+        mid = (c["price_zone_low"] + c["price_zone_high"]) / 2
+        if kind == "resistance" and mid >= last_price:
+            filtered.append(c)
+        if kind == "support" and mid <= last_price:
+            filtered.append(c)
+    return filtered[:CLUSTER_CAP]
+
+
+def _nearest_level(last_price: Optional[float], clusters: list[dict], agg: MinuteBarAggregator, kind: str, fallback_high: Optional[float]) -> Optional[dict]:
     if last_price is None:
         return None
-    candidates: list[tuple[float, dict]] = []
+    candidates: list[dict] = []
     for c in clusters:
-        if kind == "resistance":
-            mid = (c["price_zone_low"] + c["price_zone_high"]) / 2
-            if mid >= last_price:
-                candidates.append((mid, {"price": mid, "source": "cluster_resistance", "distance_pct": (mid - last_price) / last_price * 100}))
-        else:
-            mid = (c["price_zone_low"] + c["price_zone_high"]) / 2
-            if mid <= last_price:
-                candidates.append((mid, {"price": mid, "source": "cluster_support", "distance_pct": (mid - last_price) / last_price * 100}))
-    if agg.vwap() is not None:
-        if kind == "resistance" and agg.vwap() >= last_price:
-            v = agg.vwap()
-            candidates.append((v, {"price": v, "source": "vwap", "distance_pct": (v - last_price) / last_price * 100}))
-        if kind == "support" and agg.vwap() <= last_price:
-            v = agg.vwap()
-            candidates.append((v, {"price": v, "source": "vwap", "distance_pct": (v - last_price) / last_price * 100}))
+        mid = (c["price_zone_low"] + c["price_zone_high"]) / 2
+        candidates.append({"price": mid, "source": f"cluster_{kind}", "distance_pct": (mid - last_price) / last_price * 100})
+    v = agg.vwap()
+    if v is not None:
+        candidates.append({"price": v, "source": "vwap", "distance_pct": (v - last_price) / last_price * 100})
     if agg.or_high is not None:
-        candidates.append((agg.or_high, {"price": agg.or_high, "source": "ORH", "distance_pct": (agg.or_high - last_price) / last_price * 100}))
+        candidates.append({"price": agg.or_high, "source": "ORH", "distance_pct": (agg.or_high - last_price) / last_price * 100})
     if agg.or_low is not None:
-        candidates.append((agg.or_low, {"price": agg.or_low, "source": "ORL", "distance_pct": (agg.or_low - last_price) / last_price * 100}))
+        candidates.append({"price": agg.or_low, "source": "ORL", "distance_pct": (agg.or_low - last_price) / last_price * 100})
     if agg.premarket_high is not None:
-        candidates.append((agg.premarket_high, {"price": agg.premarket_high, "source": "premarket_high", "distance_pct": (agg.premarket_high - last_price) / last_price * 100}))
+        candidates.append({"price": agg.premarket_high, "source": "premarket_high", "distance_pct": (agg.premarket_high - last_price) / last_price * 100})
     if agg.premarket_low is not None:
-        candidates.append((agg.premarket_low, {"price": agg.premarket_low, "source": "premarket_low", "distance_pct": (agg.premarket_low - last_price) / last_price * 100}))
+        candidates.append({"price": agg.premarket_low, "source": "premarket_low", "distance_pct": (agg.premarket_low - last_price) / last_price * 100})
+    if agg.session_high is not None:
+        candidates.append({"price": agg.session_high, "source": "session_high", "distance_pct": (agg.session_high - last_price) / last_price * 100})
+    if agg.session_low is not None:
+        candidates.append({"price": agg.session_low, "source": "session_low", "distance_pct": (agg.session_low - last_price) / last_price * 100})
     if kind == "resistance":
-        candidates = [c for c in candidates if c[0] >= last_price]
-        if not candidates:
+        above = [c for c in candidates if c["price"] >= last_price]
+        if not above and fallback_high is not None:
+            above = [{"price": fallback_high, "source": "htf_high", "distance_pct": (fallback_high - last_price) / last_price * 100}]
+        if not above:
             return None
-        price, data = sorted(candidates, key=lambda x: x[0])[0]
-        return data
-    candidates = [c for c in candidates if c[0] <= last_price]
-    if not candidates:
+        return sorted(above, key=lambda x: x["price"])[0]
+    below = [c for c in candidates if c["price"] <= last_price]
+    if not below:
         return None
-    price, data = sorted(candidates, key=lambda x: x[0], reverse=True)[0]
-    return data
+    return sorted(below, key=lambda x: x["price"], reverse=True)[0]
 
 
 def _in_resistance_zone(last_price: Optional[float], clusters: list[dict]) -> bool:
