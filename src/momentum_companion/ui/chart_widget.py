@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import textwrap
 
-from PySide6 import QtWebEngineWidgets
+from PySide6 import QtWebEngineWidgets, QtCore
 
 ASSET_JS = Path(__file__).parent / "assets" / "lightweight-charts.standalone.production.js"
 
@@ -15,6 +15,13 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
     def __init__(self) -> None:
         super().__init__()
         self._init_chart()
+
+    def resizeEvent(self, event: QtCore.QResizeEvent) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        size = event.size()
+        width = size.width()
+        height = size.height()
+        self.page().runJavaScript(f"if(window.chart){{chart.resize({width}, {height});}}")
 
     def _init_chart(self) -> None:
         js = ASSET_JS.read_text(encoding="utf-8")
@@ -37,7 +44,7 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 "rightOffset": 6,
                 "barSpacing": 6,
             },
-            "priceScale": {"scaleMargins": {"top": 0.05, "bottom": 0.2}},
+            "priceScale": {"scaleMargins": {"top": 0.05, "bottom": 0.17}},
             "crosshair": {
                 "mode": 1,
                 "vertLine": {"color": "rgba(224,227,235,0.12)", "width": 1, "style": 0},
@@ -58,7 +65,7 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
         volume_opts = {
             "priceFormat": {"type": "volume"},
             "priceScaleId": "",
-            "scaleMargins": {"top": 0.8, "bottom": 0},
+            "scaleMargins": {"top": 0.83, "bottom": 0},
             "lastValueVisible": False,
             "priceLineVisible": False,
         }
@@ -101,6 +108,7 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 .menu-item{{ padding:6px 8px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; gap:8px; }}
                 .menu-item:hover{{ background:rgba(42,46,57,0.8); }}
                 .menu-item .dot{{ width:10px; height:10px; border-radius:50%; display:inline-block; }}
+                #macd-label{{ position:absolute; left:8px; top:82%; color:#9fb3c8; font:11px 'Segoe UI',sans-serif; opacity:0.8; pointer-events:none; z-index:25; letter-spacing:0.5px; }}
               </style>
               <script>{js}</script>
             </head>
@@ -116,6 +124,7 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                   <div class='legend' id='header-info' style='pointer-events:none;'></div>
                   <div class='legend' id='legend' style='display:none;'></div>
                 </div>
+                <div id='macd-label'>MACD</div>
                 <div id='tooltip'></div>
               </div>
               <script>
