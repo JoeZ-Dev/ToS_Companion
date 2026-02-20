@@ -200,31 +200,31 @@ class MainWindow(QtWidgets.QMainWindow):
         # Row A pills
         self._set_pill(
             self.ae_pill_market,
-            self._pill_text("Market", self._label_bool(regime.get("is_market_green"), "Green", "Red")),
+            "Market",
             self._color_for_bool(regime.get("is_market_green")),
             tooltip="Broad market proxy (SPY/QQQ).\nGreen = proxy up vs baseline; Red = down.\nSource: regime.is_market_green",
         )
         self._set_pill(
             self.ae_pill_ema,
-            self._pill_text("4H EMA", self._label_bool(regime.get("is_above_4h_ema"), "Above 4H EMA", "Below 4H EMA")),
+            "4H EMA",
             self._color_for_bool(regime.get("is_above_4h_ema")),
             tooltip="Higher-timeframe trend filter.\nAbove = last HTF close above EMA(9); Below = under EMA.\nSource: regime.is_above_4h_ema",
         )
         self._set_pill(
             self.ae_pill_vwap,
-            self._pill_text("VWAP", self._label_bool(regime.get("is_above_vwap"), "Above VWAP", "Below VWAP")),
+            "VWAP",
             self._color_for_bool(regime.get("is_above_vwap")),
             tooltip="Session VWAP anchored 04:00–20:00 ET.\nAbove = price > VWAP; Below = price < VWAP.\nSource: regime.is_above_vwap + vwap + last_price",
         )
         self._set_pill(
             self.ae_pill_open,
-            self._pill_text("Open", self._label_bool(regime.get("is_above_open"), "Above Open", "Below Open")),
+            "Open",
             self._color_for_bool(regime.get("is_above_open")),
             tooltip="RTH open reference from 09:30 bar open.\nAbove = last_price > session_open_rth.\nSource: regime.is_above_open",
         )
         macd_ready = bool(regime.get("macd_ready"))
         macd_regime = regime.get("macd_regime")
-        macd_text = "MACD: Warming Up" if not macd_ready else f"MACD: {macd_regime.title() if macd_regime else '--'}"
+        macd_text = "MACD"
         macd_color = "#7f8c8d" if not macd_ready else self._color_for_macd(macd_regime)
         macd_tooltip = (
             "Needs at least 30 completed 1m bars to compute.\nSource: regime.macd_ready"
@@ -234,7 +234,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._set_pill(self.ae_pill_macd, macd_text, macd_color, tooltip=macd_tooltip)
         self._set_pill(
             self.ae_pill_quality,
-            f"Quality: {data_quality or '--'}",
+            "Quality",
             self._color_for_quality(data_quality),
             tooltip="Data freshness / completeness.\nok = live; stale/no_data = quote too old; partial = missing key datasets.\nSource: data_quality",
         )
@@ -243,21 +243,21 @@ class MainWindow(QtWidgets.QMainWindow):
         range_pct = vol.get("intraday_range_pct")
         self._set_pill(
             self.ae_pill_range,
-            f"Range: {_fmt_pct(range_pct)}%",
+            f"Range {_fmt_pct1(range_pct)}%",
             self._color_for_range(range_pct),
             tooltip="Intraday volatility: (session_high - session_low) / session_open.\nHigher range = more movement (momentum suitability).\nSource: volatility.intraday_range_pct",
         )
         vol_mult = volume.get("volume_multiple")
         self._set_pill(
             self.ae_pill_vol,
-            f"Vol: {_fmt_num(vol_mult)}x",
+            f"Vol {_fmt_num(vol_mult)}x",
             self._color_for_volmult(vol_mult),
             tooltip="Relative 1m volume vs median of last 30 1m bars.\n>1.0x = above typical; <1.0x = below typical.\nSource: volume.volume_multiple",
         )
         gap_pct = session.get("gap_pct")
         self._set_pill(
             self.ae_pill_gap,
-            f"Gap: {_fmt_pct(gap_pct)}%",
+            f"Gap {_fmt_pct1(gap_pct)}%",
             self._color_for_gap(gap_pct),
             tooltip="Gap vs prior close: (session_open - prior_close) / prior_close.\nLarge gaps can increase volatility and risk.\nSource: session.gap_pct",
             visible=gap_pct is not None,
@@ -275,7 +275,7 @@ class MainWindow(QtWidgets.QMainWindow):
         elif next_r_pct is not None:
             self._set_pill(
                 self.ae_pill_res_prox,
-                f"Next R: {_fmt_pct(next_r_pct)}%",
+                f"Next R {_fmt_pct1(next_r_pct)}%",
                 self._color_for_next_res(next_r_pct),
                 tooltip="Resistance proximity based on structural clusters and/or key levels.\nNext R = distance to nearest resistance cluster above price.\nSource: levels.distance_to_next_cluster_pct",
                 visible=True,
@@ -340,7 +340,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _make_pill(self) -> QtWidgets.QLabel:
         pill = QtWidgets.QLabel("--")
         pill.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        pill.setMargin(6)
+        pill.setMargin(4)
         pill.setStyleSheet(self._pill_stylesheet("#7f8c8d", "#ffffff"))
         pill.setSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed)
         return pill
@@ -348,7 +348,7 @@ class MainWindow(QtWidgets.QMainWindow):
     @staticmethod
     def _pill_stylesheet(bg: str, fg: str) -> str:
         return (
-            f"QLabel {{ background-color: {bg}; color: {fg}; border-radius: 10px; padding: 4px 8px; "
+            f"QLabel {{ background-color: {bg}; color: {fg}; border-radius: 10px; padding: 3px 6px; "
             f"font-weight: bold; }}"
         )
 
@@ -468,6 +468,12 @@ def _fmt_pct(val: float | None) -> str:
 
 
 def _fmt_num(val: float | None) -> str:
+    if val is None:
+        return "--"
+    return f"{val:.1f}"
+
+
+def _fmt_pct1(val: float | None) -> str:
     if val is None:
         return "--"
     return f"{val:.1f}"
