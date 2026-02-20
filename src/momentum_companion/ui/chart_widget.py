@@ -181,13 +181,13 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 function ensureMacdSeries(name){
                   if(macdSeriesMap[name]){return macdSeriesMap[name];}
                   if(name==='MACD_HIST'){
-                    macdSeriesMap[name]=chart.addSeries(LightweightCharts.HistogramSeries, {color:'#1abc9c', base:0, lastValueVisible:false, priceLineVisible:false}, MACD_PANE_INDEX);
+                    macdSeriesMap[name]=chart.addSeries(LightweightCharts.HistogramSeries, {{color:'#1abc9c', base:0, lastValueVisible:false, priceLineVisible:false}}, MACD_PANE_INDEX);
                   } else if(name==='MACD_SIGNAL'){
-                    if(!macdSeriesMap['MACD_HIST']){macdSeriesMap['MACD_HIST']=chart.addSeries(LightweightCharts.HistogramSeries, {color:'#1abc9c', base:0, lastValueVisible:false, priceLineVisible:false}, MACD_PANE_INDEX);}
-                    macdSeriesMap[name]=chart.addSeries(LightweightCharts.LineSeries, {color:'#d2b48c', lineWidth:1, lastValueVisible:false, priceLineVisible:false}, MACD_PANE_INDEX);
+                    if(!macdSeriesMap['MACD_HIST']){{macdSeriesMap['MACD_HIST']=chart.addSeries(LightweightCharts.HistogramSeries, {{color:'#1abc9c', base:0, lastValueVisible:false, priceLineVisible:false}}, MACD_PANE_INDEX);}}
+                    macdSeriesMap[name]=chart.addSeries(LightweightCharts.LineSeries, {{color:'#d2b48c', lineWidth:1, lastValueVisible:false, priceLineVisible:false}}, MACD_PANE_INDEX);
                   } else {
-                    if(!macdSeriesMap['MACD_HIST']){macdSeriesMap['MACD_HIST']=chart.addSeries(LightweightCharts.HistogramSeries, {color:'#1abc9c', base:0, lastValueVisible:false, priceLineVisible:false}, MACD_PANE_INDEX);}
-                    macdSeriesMap[name]=chart.addSeries(LightweightCharts.LineSeries, {color:'#1abc9c', lineWidth:1, lastValueVisible:false, priceLineVisible:false}, MACD_PANE_INDEX);
+                    if(!macdSeriesMap['MACD_HIST']){{macdSeriesMap['MACD_HIST']=chart.addSeries(LightweightCharts.HistogramSeries, {{color:'#1abc9c', base:0, lastValueVisible:false, priceLineVisible:false}}, MACD_PANE_INDEX);}}
+                    macdSeriesMap[name]=chart.addSeries(LightweightCharts.LineSeries, {{color:'#1abc9c', lineWidth:1, lastValueVisible:false, priceLineVisible:false}}, MACD_PANE_INDEX);
                   }
                   return macdSeriesMap[name];
                 }
