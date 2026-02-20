@@ -452,11 +452,13 @@ class AEEngine:
         has_market = False
         is_green = None
         try:
-            resp = self._rest.fetch_price_history("SPY", None, None, "1d")
+            resp = self._rest.fetch_price_history(MARKET_PROXY_SYMBOL, None, None, "1d")
             candles = resp.get("candles") or []
-            if len(candles) >= 2:
-                prior_close = float(candles[-2].get("close"))
-                last_close = float(candles[-1].get("close"))
+            # Use last two completed daily bars; if only one, fallback to null
+            completed = [c for c in candles if c.get("close") is not None]
+            if len(completed) >= 2:
+                prior_close = float(completed[-2].get("close"))
+                last_close = float(completed[-1].get("close"))
                 if prior_close > 0:
                     change_pct = (last_close - prior_close) / prior_close * 100
                     is_green = change_pct > 0
