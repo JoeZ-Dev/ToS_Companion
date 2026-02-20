@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from PySide6 import QtWidgets
+import json
+from PySide6 import QtWidgets, QtGui, QtCore
 
 from momentum_companion.ui.chart_widget import LightweightChartWidget
 
@@ -38,16 +39,30 @@ class MainWindow(QtWidgets.QMainWindow):
         chart_area.addWidget(self.quote_label)
         self.chart_widget = LightweightChartWidget()
         chart_area.addWidget(self.chart_widget)
-        middle.addLayout(chart_area, 3)
-
-        side_panel = QtWidgets.QVBoxLayout()
         ticket_group = QtWidgets.QGroupBox("Order Ticket")
         ticket_layout = QtWidgets.QFormLayout()
         ticket_layout.addRow("Side:", QtWidgets.QComboBox())
         ticket_layout.addRow("Qty:", QtWidgets.QLineEdit())
         ticket_layout.addRow("Limit Price:", QtWidgets.QLineEdit())
         ticket_group.setLayout(ticket_layout)
-        side_panel.addWidget(ticket_group)
+        chart_area.addWidget(ticket_group)
+        middle.addLayout(chart_area, 3)
+
+        side_panel = QtWidgets.QVBoxLayout()
+
+        ae_group = QtWidgets.QGroupBox("AE Snapshot")
+        ae_layout = QtWidgets.QVBoxLayout()
+        self.ae_text = QtWidgets.QLabel("AE: --")
+        self.ae_text.setWordWrap(True)
+        self.ae_text.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
+        ae_layout.addWidget(self.ae_text)
+        self.ae_copy_btn = QtWidgets.QPushButton("Copy Data")
+        self.ae_copy_btn.setFlat(True)
+        self.ae_copy_btn.setStyleSheet("text-decoration: underline; color: #2980b9;")
+        self.ae_copy_btn.clicked.connect(self._copy_ae_json)
+        ae_layout.addWidget(self.ae_copy_btn, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
+        ae_group.setLayout(ae_layout)
+        side_panel.addWidget(ae_group)
 
         llm_group = QtWidgets.QGroupBox("LLM Panel")
         llm_layout = QtWidgets.QVBoxLayout()
@@ -88,6 +103,7 @@ class MainWindow(QtWidgets.QMainWindow):
         root.addLayout(controls)
 
         self.setCentralWidget(central)
+        self._last_ae_snapshot: dict | None = None
 
     def set_state(self, state: str) -> None:
         """Update state label to show AUTH_REQUIRED / STREAM_DOWN / UNKNOWN_WORKING_ORDERS / LLM_INVALID_OUTPUT."""
@@ -129,3 +145,44 @@ class MainWindow(QtWidgets.QMainWindow):
     def flash_alert(self, message: str) -> None:
         """Show flash-worthy alert."""
         self.llm_flash.setText(message)
+
+    def update_ae_panel(self, snapshot: dict | None) -> None:
+        """Render AE snapshot in compact sections."""
+        self._last_ae_snapshot = snapshot
+        if not snapshot:
+            self.ae_text.setText("AE: --")
+            return
+        regime = snapshot.get("regime") or {}
+        vol = snapshot.get("volatility") or {}
+        volume = snapshot.get("volume") or {}
+        levels = snapshot.get("levels") or {}
+        session = snapshot.get("session") or {}
+        parts = []
+        parts.append(f"Status: {snapshot.get('status')} | Quality: {snapshot.get('data_quality')}")
+        parts.append(f"Regime: 4hEMA={regime.get('is_above_4h_ema')} open={regime.get('is_above_open')} vwap={regime.get('is_above_vwap')} mkt_green={regime.get('is_market_green')} macd={regime.get('macd_regime')}")
+        parts.append(f"Vol: range%={_fmt_pct(vol.get('intraday_range_pct'))} volatile={vol.get('is_volatile_enough')} | VolMult={_fmt_num(volume.get('volume_multiple'))}")
+        nr = levels.get("nearest_resistance") or {}
+        ns = levels.get("nearest_support") or {}
+        parts.append(f"Nearest R: {nr.get('price')} ({nr.get('source')}) dist%={_fmt_pct(nr.get('distance_pct'))}")
+        parts.append(f"Nearest S: {ns.get('price')} ({ns.get('source')}) dist%={_fmt_pct(ns.get('distance_pct'))}")
+        parts.append(f"In R zone: {levels.get('in_resistance_zone')} | Next cluster dist%={_fmt_pct(levels.get('distance_to_next_cluster_pct'))}")
+        parts.append(f"Session: gap%={_fmt_pct(session.get('gap_pct'))} PMH={session.get('premarket_high')} PML={session.get('premarket_low')} ORH={session.get('opening_range_high')} ORL={session.get('opening_range_low')}")
+        self.ae_text.setText("\n".join(parts))
+
+    def _copy_ae_json(self) -> None:
+        if not self._last_ae_snapshot:
+            return
+        clipboard = QtWidgets.QApplication.clipboard()
+        clipboard.setText(json.dumps(self._last_ae_snapshot, indent=2))
+
+
+def _fmt_pct(val: float | None) -> str:
+    if val is None:
+        return "--"
+    return f"{val:.2f}"
+
+
+def _fmt_num(val: float | None) -> str:
+    if val is None:
+        return "--"
+    return f"{val:.1f}"

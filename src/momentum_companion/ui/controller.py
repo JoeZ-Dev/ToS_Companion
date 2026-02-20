@@ -196,6 +196,8 @@ class UIController:
                             snap = self._ae_engine.ingest_10s_bar(completed)
                             if snap:
                                 self._last_ae_snapshot = snap
+                                if hasattr(self._window, "update_ae_panel"):
+                                    self._window.update_ae_panel(snap)  # type: ignore[attr-defined]
                     forming = self._aggregator.forming_bar()
                     sig = (
                         forming.ts if forming else None,
@@ -345,6 +347,8 @@ class UIController:
             self._initial_render_done = True
         else:
             self._chart_adapter.upsert_bar(render_bars[-1])
+        if self._last_ae_snapshot and hasattr(self._window, "update_ae_panel"):
+            self._window.update_ae_panel(self._last_ae_snapshot)  # type: ignore[attr-defined]
 
     def _render_tick(self) -> None:
         if not self._dirty:
