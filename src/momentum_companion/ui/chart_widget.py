@@ -312,7 +312,7 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 window.lwc_setSeries=function(name, points){{
                   if(name.startsWith('MACD_HIST')){{
                     const target=ensureMacdSeries('MACD_HIST');
-                    const mapped=(points||[]).map(p=>Object.assign({}, p, {{color: (p.value||0)>=0 ? '#27ae60' : '#c0392b'}}));
+                    const mapped=(points||[]).map(p=>{{const c=(p.value||0)>=0 ? '#27ae60' : '#c0392b'; return {{...p, color:c}};}});
                     target.setData(mapped);
                     return;
                   }}
