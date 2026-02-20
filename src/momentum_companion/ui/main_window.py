@@ -416,12 +416,26 @@ class MainWindow(QtWidgets.QMainWindow):
         micro_line = f"Micro: R {_fmt_price(micro.get('micro_resistance_15m'))} | S {_fmt_price(micro.get('micro_support_15m'))} | 5mRng {_fmt_pct1(micro.get('range_5m_pct'))}% | 15mRng {_fmt_pct1(micro.get('range_15m_pct'))}%"
         self.ae_levels_line3.setText(micro_line)
         influ_parts = []
-        for idx, lvl in enumerate(levels_book[:3], 1):
-            side = "R" if lvl.get("side") == "resistance" else "S"
-            price = _fmt_price(lvl.get("high") if lvl.get("high") is not None else lvl.get("low"))
-            inf = _fmt_influence(lvl.get("dynamic_influence"))
-            influ_parts.append(f"{idx}) {side} {price} ({inf})")
-        self.ae_levels_line4.setText("Influence: " + " | ".join(influ_parts) if influ_parts else "")
+        res_levels = [lvl for lvl in levels_book if lvl.get("side") == "resistance"]
+        sup_levels = [lvl for lvl in levels_book if lvl.get("side") == "support"]
+
+        def fmt_levels(levels: list[dict], prefix: str) -> str:
+            items = []
+            for idx, lvl in enumerate(levels[:3], 1):
+                price_val = lvl.get("high") if lvl.get("high") is not None else lvl.get("low")
+                price = _fmt_price(price_val)
+                inf = _fmt_influence(lvl.get("dynamic_influence"))
+                items.append(f"{idx}) {price} ({inf})")
+            return f"{prefix}: " + " | ".join(items) if items else ""
+
+        res_text = fmt_levels(res_levels, "R")
+        sup_text = fmt_levels(sup_levels, "S")
+        line4_text = "Influence"
+        if res_text:
+            line4_text += f" {res_text}"
+        if sup_text:
+            line4_text += ("  " if res_text else " ") + sup_text
+        self.ae_levels_line4.setText(line4_text if (res_text or sup_text) else "")
 
     def _copy_ae_json(self) -> None:
         if not self._last_ae_snapshot:
