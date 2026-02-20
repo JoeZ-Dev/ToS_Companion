@@ -549,6 +549,7 @@ class AEEngine:
             return False, None
         has_market = False
         is_green = None
+        now_et = datetime.now(ET_TZ)
         try:
             for proxy in [MARKET_PROXY_SYMBOL, "QQQ"]:
                 resp = self._rest.fetch_price_history(proxy, None, None, "1d")
@@ -560,7 +561,18 @@ class AEEngine:
                 last_close = float(completed[-1].get("close"))
                 if prior_close <= 0:
                     continue
-                change_pct = (last_close - prior_close) / prior_close * 100
+                baseline = prior_close
+                open_start = datetime(now_et.year, now_et.month, now_et.day, 9, 30, tzinfo=ET_TZ)
+                open_end = open_start + timedelta(minutes=1)
+                if now_et.time() >= open_start.time():
+                    bar_resp = self._rest.fetch_price_history(proxy, int(open_start.timestamp() * 1000), int(open_end.timestamp() * 1000), "1m")
+                    bar_candles = bar_resp.get("candles") or []
+                    open_bar = sorted(bar_candles, key=lambda c: c.get("datetime", 0))[0] if bar_candles else None
+                    if open_bar and open_bar.get("open") is not None:
+                        baseline = float(open_bar.get("open"))
+                if baseline <= 0:
+                    continue
+                change_pct = (last_close - baseline) / baseline * 100
                 is_green = change_pct > 0
                 has_market = True
                 break
