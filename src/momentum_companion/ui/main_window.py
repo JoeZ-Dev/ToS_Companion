@@ -186,13 +186,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.quote_label.setText(" | ".join(parts))
         self._logger.debug("Quote label set to: %s", " | ".join(parts))
 
-    @QtCore.Slot(object, object, object, object)
-    def render_quote(self, ts_ms: object, bid: object, ask: object, last: object) -> None:
+    @QtCore.Slot(float, float, float, float)
+    def render_quote(self, ts_ms: float, bid: float, ask: float, last: float) -> None:
         """Thread-safe slot to update quote and connection labels."""
         self.connection_label.setText("Connection: STREAMING")
         if ts_ms:
-            self.last_update_label.setText(f"Last Update: {ts_ms}")
-        self.update_quote_display(bid if bid is not None else None, ask if ask is not None else None, last if last is not None else None, ts_ms if ts_ms is not None else None)
+            self.last_update_label.setText(f"Last Update: {int(ts_ms)}")
+        self.update_quote_display(bid, ask, last, int(ts_ms) if ts_ms else None)
 
     def apply_llm_recommendation(self, rec: dict) -> None:
         """Render basic LLM recommendation text."""

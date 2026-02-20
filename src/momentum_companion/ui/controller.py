@@ -242,10 +242,10 @@ class UIController:
             self._window,
             "render_quote",
             QtCore.Qt.ConnectionType.QueuedConnection,
-            QtCore.Q_ARG(object, ts_ms),
-            QtCore.Q_ARG(object, bid),
-            QtCore.Q_ARG(object, ask),
-            QtCore.Q_ARG(object, last),
+            QtCore.Q_ARG(float, float(ts_ms) if ts_ms is not None else 0.0),
+            QtCore.Q_ARG(float, float(bid) if bid is not None else 0.0),
+            QtCore.Q_ARG(float, float(ask) if ask is not None else 0.0),
+            QtCore.Q_ARG(float, float(last) if last is not None else 0.0),
         )
 
     def _update_labels_ui(self, ts_ms: int | None, bid: float | None, ask: float | None, last: float | None) -> None:
