@@ -97,6 +97,10 @@ class UIController:
         self._load_history(symbol)
         if self._ae_engine:
             self._ae_engine.compute_profile(symbol)
+            snap = self._ae_engine.seed_intraday_from_history(symbol)
+            if snap and hasattr(self._window, "update_ae_panel"):
+                self._last_ae_snapshot = snap
+                self._window.update_ae_panel(snap)  # type: ignore[attr-defined]
         self._subscribe_stream(symbol)
         self._window.symbol_input.setDisabled(False)
 

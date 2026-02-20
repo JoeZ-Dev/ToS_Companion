@@ -191,6 +191,9 @@ class AEEngine:
     def reset_intraday(self) -> None:
         self._minute_agg = MinuteBarAggregator()
         self._snapshot_cache.clear()
+        self._last_quote_ms = None
+        self._market_cache = None
+        self._seeded = False
 
     def record_quote_ts(self, ts_ms: int) -> None:
         self._last_quote_ms = ts_ms
@@ -273,6 +276,57 @@ class AEEngine:
         if completed_minute is None:
             return None
         return self._build_snapshot()
+
+    def seed_intraday_from_history(self, symbol: str) -> Optional[dict]:
+        """
+        Seed minute aggregator from REST 1m history (preferred: today 04:00 ET → now).
+        Returns initial snapshot if successful.
+        """
+        if not self._rest:
+            return None
+        try:
+            now_et = datetime.now(ET_TZ)
+            start_et = datetime(now_et.year, now_et.month, now_et.day, 4, 0, tzinfo=ET_TZ)
+            start_ms = int(start_et.timestamp() * 1000)
+            end_ms = int(now_et.timestamp() * 1000)
+            resp = self._rest.fetch_price_history(symbol, start_ms, end_ms, "1m")
+            candles = resp.get("candles") or []
+            seeded = 0
+            for c in sorted(candles, key=lambda x: x.get("datetime", 0)):
+                ts = c.get("datetime")
+                if ts is None:
+                    continue
+                b = OneMinuteBar(
+                    ts=int(ts // 1000),
+                    open=c.get("open"),
+                    high=c.get("high"),
+                    low=c.get("low"),
+                    close=c.get("close"),
+                    volume=c.get("volume") or 0.0,
+                    is_extended=0,
+                )
+                self._minute_agg._bars.append(b)
+                self._minute_agg._volumes.append(b.volume)
+                self._minute_agg.session_high = b.high if self._minute_agg.session_high is None else max(self._minute_agg.session_high, b.high)
+                self._minute_agg.session_low = b.low if self._minute_agg.session_low is None else min(self._minute_agg.session_low, b.low)
+                seeded += 1
+            if seeded == 0:
+                return None
+            # Compute VWAP from seeded bars within anchor window
+            vnum = 0.0
+            vden = 0.0
+            for b in self._minute_agg._bars:
+                ts_et = datetime.fromtimestamp(b.ts, tz=timezone.utc).astimezone(ET_TZ)
+                tod = timedelta(hours=ts_et.hour, minutes=ts_et.minute, seconds=ts_et.second)
+                if tod >= VWAP_ANCHOR_START and tod <= VWAP_ANCHOR_END:
+                    vnum += b.close * b.volume
+                    vden += b.volume
+            self._minute_agg.vwap_num = vnum
+            self._minute_agg.vwap_den = vden
+            self._seeded = True
+            return self._build_snapshot()
+        except Exception:
+            return None
 
     def _build_snapshot(self) -> dict:
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
