@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import logging
 
 from momentum_companion.data.schema import init_db
 from momentum_companion.state.app_state import AppStateStore
@@ -13,7 +14,7 @@ def bootstrap(instance_id: str) -> tuple[Path, AppStateStore, JournalWriter]:
     """Initialize DB, app_state, and journal writer per specs."""
     db_path = instance_db_path(instance_id)
     init_db(db_path)
-    setup_logging(str(log_path()))
+    setup_logging(str(log_path()), level=logging.DEBUG)
     app_state = AppStateStore(str(db_path))
     journal = JournalWriter(db_path)
     return db_path, app_state, journal
