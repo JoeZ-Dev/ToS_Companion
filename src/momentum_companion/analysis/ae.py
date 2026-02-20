@@ -62,6 +62,7 @@ class MinuteBarAggregator:
         self._current: Optional[OneMinuteBar] = None
         self._bars: list[OneMinuteBar] = []
         self._volumes: list[float] = []
+        self.last_seeded_minute_ts: Optional[int] = None
         self.session_high: Optional[float] = None
         self.session_low: Optional[float] = None
         self.vwap_num: float = 0.0
@@ -82,10 +83,7 @@ class MinuteBarAggregator:
         if self._current is None or ts_minute > self._current.ts:
             if self._current is not None:
                 completed = self._current
-                self._bars.append(self._current)
-                self._volumes.append(self._current.volume)
-                if len(self._volumes) > 300:
-                    self._volumes = self._volumes[-300:]
+                self._store_completed_minute(self._current)
             self._current = OneMinuteBar(
                 ts=ts_minute,
                 open=bar.open,
@@ -104,6 +102,49 @@ class MinuteBarAggregator:
 
         self._update_session_stats(bar)
         return completed
+
+    def _store_completed_minute(self, bar: OneMinuteBar) -> None:
+        replaced = False
+        if self.last_seeded_minute_ts is not None and bar.ts == self.last_seeded_minute_ts:
+            self._remove_seeded_minute_from_vwap(bar.ts)
+            if self._bars and self._bars[-1].ts == bar.ts:
+                self._bars[-1] = bar
+                if self._volumes:
+                    self._volumes[-1] = bar.volume
+                else:
+                    self._volumes.append(bar.volume)
+                replaced = True
+            else:
+                for idx, existing in enumerate(self._bars):
+                    if existing.ts == bar.ts:
+                        self._bars[idx] = bar
+                        if idx < len(self._volumes):
+                            self._volumes[idx] = bar.volume
+                        else:
+                            self._volumes.append(bar.volume)
+                        replaced = True
+                        break
+            self.last_seeded_minute_ts = None
+        if not replaced:
+            self._bars.append(bar)
+            self._volumes.append(bar.volume)
+        if len(self._volumes) > 300:
+            self._volumes = self._volumes[-300:]
+
+    def _remove_seeded_minute_from_vwap(self, ts: int) -> None:
+        target_bar: Optional[OneMinuteBar] = None
+        for b in reversed(self._bars):
+            if b.ts == ts:
+                target_bar = b
+                break
+        if target_bar is None:
+            return
+        ts_et = datetime.fromtimestamp(target_bar.ts, tz=timezone.utc).astimezone(ET_TZ)
+        tod = timedelta(hours=ts_et.hour, minutes=ts_et.minute, seconds=ts_et.second)
+        if tod < VWAP_ANCHOR_START or tod > VWAP_ANCHOR_END:
+            return
+        self.vwap_num = max(0.0, self.vwap_num - target_bar.close * target_bar.volume)
+        self.vwap_den = max(0.0, self.vwap_den - target_bar.volume)
 
     def _update_session_stats(self, bar: TenSecondBar) -> None:
         ts_et = datetime.fromtimestamp(bar.ts, tz=timezone.utc).astimezone(ET_TZ)
@@ -187,6 +228,8 @@ class AEEngine:
         self._last_quote_ms: Optional[int] = None
         self._market_cache: Optional[tuple[int, bool, Optional[bool]]] = None  # (ts_ms, has_market_data, is_market_green)
         self._session_open_rth: dict[str, Optional[float]] = {}
+        self._active_symbol: Optional[str] = None
+        self._seeded = False
 
     def reset_intraday(self) -> None:
         self._minute_agg = MinuteBarAggregator()
@@ -194,6 +237,7 @@ class AEEngine:
         self._last_quote_ms = None
         self._market_cache = None
         self._seeded = False
+        self._active_symbol = None
 
     def record_quote_ts(self, ts_ms: int) -> None:
         self._last_quote_ms = ts_ms
@@ -285,6 +329,15 @@ class AEEngine:
         if not self._rest:
             return None
         try:
+            self._active_symbol = symbol
+            self._minute_agg.premarket_high = None
+            self._minute_agg.premarket_low = None
+            self._minute_agg.or_high = None
+            self._minute_agg.or_low = None
+            self._minute_agg.session_open = None
+            self._minute_agg.session_high = None
+            self._minute_agg.session_low = None
+            self._minute_agg.last_seeded_minute_ts = None
             now_et = datetime.now(ET_TZ)
             start_et = datetime(now_et.year, now_et.month, now_et.day, 4, 0, tzinfo=ET_TZ)
             start_ms = int(start_et.timestamp() * 1000)
@@ -292,6 +345,7 @@ class AEEngine:
             resp = self._rest.fetch_price_history(symbol, start_ms, end_ms, "1m")
             candles = resp.get("candles") or []
             seeded = 0
+            last_seed_ts = None
             for c in sorted(candles, key=lambda x: x.get("datetime", 0)):
                 ts = c.get("datetime")
                 if ts is None:
@@ -307,11 +361,11 @@ class AEEngine:
                 )
                 self._minute_agg._bars.append(b)
                 self._minute_agg._volumes.append(b.volume)
-                self._minute_agg.session_high = b.high if self._minute_agg.session_high is None else max(self._minute_agg.session_high, b.high)
-                self._minute_agg.session_low = b.low if self._minute_agg.session_low is None else min(self._minute_agg.session_low, b.low)
                 seeded += 1
+                last_seed_ts = b.ts
             if seeded == 0:
                 return None
+            self._minute_agg.last_seeded_minute_ts = last_seed_ts
             # Compute VWAP from seeded bars within anchor window
             vnum = 0.0
             vden = 0.0
@@ -323,41 +377,86 @@ class AEEngine:
                     vden += b.volume
             self._minute_agg.vwap_num = vnum
             self._minute_agg.vwap_den = vden
+            self._reconstruct_session_state_from_seeded()
             self._seeded = True
-            return self._build_snapshot()
+            return self._build_snapshot(symbol)
         except Exception:
             return None
 
-    def _build_snapshot(self) -> dict:
+    def _reconstruct_session_state_from_seeded(self) -> None:
+        agg = self._minute_agg
+        agg.session_high = None
+        agg.session_low = None
+        agg.premarket_high = None
+        agg.premarket_low = None
+        agg.or_high = None
+        agg.or_low = None
+        agg.session_open = None
+        for b in agg._bars:
+            ts_et = datetime.fromtimestamp(b.ts, tz=timezone.utc).astimezone(ET_TZ)
+            tod = timedelta(hours=ts_et.hour, minutes=ts_et.minute, seconds=ts_et.second)
+            price_high = b.high
+            price_low = b.low
+            if tod >= PREMARKET_START and tod < RTH_START:
+                agg.premarket_high = price_high if agg.premarket_high is None else max(agg.premarket_high, price_high)
+                agg.premarket_low = price_low if agg.premarket_low is None else min(agg.premarket_low, price_low)
+            if tod >= RTH_START:
+                if agg.session_open is None:
+                    agg.session_open = b.open
+                if tod < RTH_START + timedelta(minutes=OPENING_RANGE_MINUTES):
+                    agg.or_high = price_high if agg.or_high is None else max(agg.or_high, price_high)
+                    agg.or_low = price_low if agg.or_low is None else min(agg.or_low, price_low)
+            agg.session_high = price_high if agg.session_high is None else max(agg.session_high, price_high)
+            agg.session_low = price_low if agg.session_low is None else min(agg.session_low, price_low)
+
+    def _resolve_symbol(self, symbol: Optional[str]) -> Optional[str]:
+        if symbol:
+            return symbol
+        if self._active_symbol:
+            return self._active_symbol
+        if len(self._profile_cache) == 1:
+            return list(self._profile_cache.keys())[0]
+        return None
+
+    def _build_snapshot(self, symbol: Optional[str] = None) -> dict:
+        resolved_symbol = self._resolve_symbol(symbol)
+        profile = self._profile_cache.get(resolved_symbol) if resolved_symbol else None
+
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         quote_age = None
         if self._last_quote_ms is not None:
             quote_age = now_ms - self._last_quote_ms
         status = "ok"
         data_quality = "ok"
-        has_intraday = bool(self._minute_agg.bars)
-        has_4h = bool(self._profile_cache)
-        has_market = False
+        intraday_symbol_matches = resolved_symbol is None or self._active_symbol is None or resolved_symbol == self._active_symbol
+        agg_bars = self._minute_agg.bars if intraday_symbol_matches else []
+        has_intraday = bool(agg_bars)
+        has_4h = profile is not None
+        session_open_val = self._minute_agg.session_open if intraday_symbol_matches else None
+        session_high_val = self._minute_agg.session_high if intraday_symbol_matches else None
+        session_low_val = self._minute_agg.session_low if intraday_symbol_matches else None
+        premarket_high_val = self._minute_agg.premarket_high if intraday_symbol_matches else None
+        premarket_low_val = self._minute_agg.premarket_low if intraday_symbol_matches else None
+        or_high_val = self._minute_agg.or_high if intraday_symbol_matches else None
+        or_low_val = self._minute_agg.or_low if intraday_symbol_matches else None
+        vwap_val = self._minute_agg.vwap() if intraday_symbol_matches else None
         if quote_age is not None and quote_age > NO_DATA_IF_QUOTE_AGE_MS:
             data_quality = "no_data"
         elif quote_age is not None and quote_age > STALE_IF_QUOTE_AGE_MS:
             data_quality = "stale"
-        if not has_intraday or not self._minute_agg.session_open:
+        if not has_intraday or not session_open_val:
             data_quality = "partial"
 
-        last_price = self._minute_agg.bars[-1].close if self._minute_agg.bars else None
-        vwap_val = self._minute_agg.vwap()
+        last_price = agg_bars[-1].close if agg_bars else None
         intraday_range_pct = None
         is_volatile = None
-        if self._minute_agg.session_high and self._minute_agg.session_low and self._minute_agg.session_open:
-            intraday_range_pct = (
-                (self._minute_agg.session_high - self._minute_agg.session_low) / self._minute_agg.session_open * 100
-            )
+        if session_high_val and session_low_val and session_open_val:
+            intraday_range_pct = ((session_high_val - session_low_val) / session_open_val * 100)
             is_volatile = intraday_range_pct > VOLATILITY_THRESHOLD
 
         macd_regime = None
-        if len(self._minute_agg.bars) >= MACD_MIN_BARS:
-            closes = pd.Series([b.close for b in self._minute_agg.bars])
+        if len(agg_bars) >= MACD_MIN_BARS:
+            closes = pd.Series([b.close for b in agg_bars])
             ema_fast = closes.ewm(span=MACD_FAST, adjust=False).mean()
             ema_slow = closes.ewm(span=MACD_SLOW, adjust=False).mean()
             macd_line = ema_fast - ema_slow
@@ -372,20 +471,16 @@ class AEEngine:
                 macd_regime = "neutral"
 
         vol_mult = None
-        baseline = self._minute_agg.rolling_volume_median()
-        if baseline is not None and baseline > 0 and self._minute_agg.bars:
-            vol_mult = self._minute_agg.bars[-1].volume / baseline
+        baseline = self._minute_agg.rolling_volume_median() if intraday_symbol_matches else None
+        if baseline is not None and baseline > 0 and agg_bars:
+            vol_mult = agg_bars[-1].volume / baseline
 
         is_above_open = None
-        session_symbol = ""
-        if self._profile_cache:
-            session_symbol = next(iter(self._profile_cache.values())).get("symbol", "")
-        rth_open = self._session_open_rth.get(session_symbol)
+        rth_open = self._session_open_rth.get(resolved_symbol) if resolved_symbol else None
         if rth_open is not None and last_price is not None:
             is_above_open = last_price > rth_open
         is_above_vwap = vwap_val is not None and last_price is not None and last_price > vwap_val
 
-        profile = next(iter(self._profile_cache.values()), None)
         is_above_4h = profile["is_above_4h_ema"] if profile else None
         res_clusters = profile["resistance_clusters"] if profile else []
         sup_clusters = profile["support_clusters"] if profile else []
@@ -395,11 +490,13 @@ class AEEngine:
 
         res_clusters_rel = _filter_clusters_relative(res_clusters, last_price, "resistance")
         sup_clusters_rel = _filter_clusters_relative(sup_clusters, last_price, "support")
-        nearest_res = _nearest_level(last_price, res_clusters_rel, self._minute_agg, kind="resistance", fallback_high=htf_high)
-        nearest_sup = _nearest_level(last_price, sup_clusters_rel, self._minute_agg, kind="support", fallback_high=None)
+        agg_for_levels = self._minute_agg if intraday_symbol_matches else MinuteBarAggregator()
+        nearest_res = _nearest_level(last_price, res_clusters_rel, agg_for_levels, kind="resistance", fallback_high=htf_high)
+        nearest_sup = _nearest_level(last_price, sup_clusters_rel, agg_for_levels, kind="support", fallback_high=None)
 
+        snapshot_symbol = profile["symbol"] if profile else (resolved_symbol or "")
         snapshot = {
-            "symbol": profile["symbol"] if profile else "",
+            "symbol": snapshot_symbol,
             "as_of_ts_ms": now_ms,
             "as_of_et": datetime.now(ET_TZ).isoformat(),
             "status": status,
@@ -407,15 +504,15 @@ class AEEngine:
             "has_4h_data": has_4h,
             "has_intraday_data": has_intraday,
             "has_market_data": has_market_data,
-            "has_premarket_levels": bool(self._minute_agg.premarket_high is not None and self._minute_agg.premarket_low is not None),
-            "has_opening_range": bool(self._minute_agg.or_high is not None and self._minute_agg.or_low is not None),
+            "has_premarket_levels": bool(premarket_high_val is not None and premarket_low_val is not None),
+            "has_opening_range": bool(or_high_val is not None and or_low_val is not None),
             "regime": {
                 "is_above_4h_ema": is_above_4h,
                 "is_above_open": is_above_open,
                 "is_above_vwap": is_above_vwap,
                 "is_market_green": is_market_green,
                 "macd_regime": macd_regime,
-                "macd_ready": len(self._minute_agg.bars) >= MACD_MIN_BARS,
+                "macd_ready": len(agg_bars) >= MACD_MIN_BARS,
             },
             "volatility": {
                 "intraday_range_pct": intraday_range_pct,
@@ -433,14 +530,15 @@ class AEEngine:
             "last_price": last_price,
             "vwap": vwap_val,
             "session": {
-                "premarket_high": self._minute_agg.premarket_high,
-                "premarket_low": self._minute_agg.premarket_low,
-                "opening_range_high": self._minute_agg.or_high,
-                "opening_range_low": self._minute_agg.or_low,
-                "gap_pct": ((self._minute_agg.session_open - prior_close) / prior_close * 100) if prior_close and self._minute_agg.session_open else None,
+                "premarket_high": premarket_high_val,
+                "premarket_low": premarket_low_val,
+                "opening_range_high": or_high_val,
+                "opening_range_low": or_low_val,
+                "gap_pct": ((session_open_val - prior_close) / prior_close * 100) if prior_close and session_open_val else None,
             },
         }
-        self._snapshot_cache[profile["symbol"]] = snapshot if profile else snapshot
+        if snapshot_symbol:
+            self._snapshot_cache[snapshot_symbol] = snapshot
         return snapshot
 
     def _market_state(self) -> tuple[bool, Optional[bool]]:
