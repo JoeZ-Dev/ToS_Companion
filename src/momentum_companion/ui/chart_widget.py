@@ -172,11 +172,11 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 function ensureMacdSeries(name){{
                   if(macdSeriesMap[name]){{return macdSeriesMap[name];}}
                   if(name==='MACD_HIST'){{
-                    macdSeriesMap[name]=chart.addSeries(LightweightCharts.HistogramSeries, {{color:'#4aa3ff', base:0}}, MACD_PANE_INDEX);
+                    macdSeriesMap[name]=chart.addSeries(LightweightCharts.HistogramSeries, {{color:'#4aa3ff', base:0, lastValueVisible:false, priceLineVisible:false}}, MACD_PANE_INDEX);
                   }} else if(name==='MACD_SIGNAL'){{
-                    macdSeriesMap[name]=chart.addSeries(LightweightCharts.LineSeries, {{color:'#f5c542', lineWidth:1}}, MACD_PANE_INDEX);
+                    macdSeriesMap[name]=chart.addSeries(LightweightCharts.LineSeries, {{color:'#f5c542', lineWidth:1, lastValueVisible:false, priceLineVisible:false}}, MACD_PANE_INDEX);
                   }} else {{
-                    macdSeriesMap[name]=chart.addSeries(LightweightCharts.LineSeries, {{color:'#ffffff', lineWidth:1}}, MACD_PANE_INDEX);
+                    macdSeriesMap[name]=chart.addSeries(LightweightCharts.LineSeries, {{color:'#ffffff', lineWidth:1, lastValueVisible:false, priceLineVisible:false}}, MACD_PANE_INDEX);
                   }}
                   return macdSeriesMap[name];
                 }}
@@ -226,6 +226,7 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 function clamp(v,min,max){{return Math.max(min, Math.min(max, v));}}
                 chart.subscribeCrosshairMove(param=>{{
                   if(!param || param.time===undefined || !param.point){{toolTip.style.display='none';magnifier.style.display='none';return;}}
+                  if(!menuState.TOOLTIP){{toolTip.style.display='none';}}
                   const wrapW=wrap.clientWidth;
                   const bandLeft=clamp(param.point.x - MAG_WIDTH/2, 0, wrapW - MAG_WIDTH);
                   magnifier.style.left=`${{bandLeft}}px`;
@@ -244,22 +245,26 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                   const vol = (bar&&bar.volume!==undefined)?bar.volume:volVal;
                   const up = (bar&&bar.open!==undefined&&bar.close!==undefined)?(bar.close>=bar.open):true;
                   const accent = up ? '#26a69a' : '#ef5350';
-                  toolTip.innerHTML = `
-                    <div class="tt-symbol" style="color:${{accent}}">${{window.__symbol}}</div>
-                    <div class="tt-price">${{closePx!==undefined?Number(closePx).toFixed(2):'--'}}</div>
-                    <div class="tt-time">${{formatTimeET(ts, tenths)}}</div>
-                    <div class="tt-meta">
-                      <div class="tt-k">Vol</div><div class="tt-v">${{vol!==undefined?Number(vol).toLocaleString():'--'}}</div>
-                      <div class="tt-k">O</div><div class="tt-v">${{(bar&&bar.open!==undefined)?Number(bar.open).toFixed(2):'--'}}</div>
-                      <div class="tt-k">H</div><div class="tt-v">${{(bar&&bar.high!==undefined)?Number(bar.high).toFixed(2):'--'}}</div>
-                      <div class="tt-k">L</div><div class="tt-v">${{(bar&&bar.low!==undefined)?Number(bar.low).toFixed(2):'--'}}</div>
-                      <div class="tt-k">C</div><div class="tt-v">${{(bar&&bar.close!==undefined)?Number(bar.close).toFixed(2):'--'}}</div>
-                    </div>
-                  `;
-                  toolTip.style.display='block';
-                  const left=clamp((bandLeft + MAG_WIDTH/2) - toolTip.clientWidth/2, PAD, wrapW - toolTip.clientWidth - PAD);
-                  toolTip.style.left=`${{left}}px`;
-                  toolTip.style.top=`${{PAD}}px`;
+                  if(menuState.TOOLTIP){{
+                    toolTip.innerHTML = `
+                      <div class="tt-symbol" style="color:${{accent}}">${{window.__symbol}}</div>
+                      <div class="tt-price">${{closePx!==undefined?Number(closePx).toFixed(2):'--'}}</div>
+                      <div class="tt-time">${{formatTimeET(ts, tenths)}}</div>
+                      <div class="tt-meta">
+                        <div class="tt-k">Vol</div><div class="tt-v">${{vol!==undefined?Number(vol).toLocaleString():'--'}}</div>
+                        <div class="tt-k">O</div><div class="tt-v">${{(bar&&bar.open!==undefined)?Number(bar.open).toFixed(2):'--'}}</div>
+                        <div class="tt-k">H</div><div class="tt-v">${{(bar&&bar.high!==undefined)?Number(bar.high).toFixed(2):'--'}}</div>
+                        <div class="tt-k">L</div><div class="tt-v">${{(bar&&bar.low!==undefined)?Number(bar.low).toFixed(2):'--'}}</div>
+                        <div class="tt-k">C</div><div class="tt-v">${{(bar&&bar.close!==undefined)?Number(bar.close).toFixed(2):'--'}}</div>
+                      </div>
+                    `;
+                    toolTip.style.display='block';
+                    const left=clamp((bandLeft + MAG_WIDTH/2) - toolTip.clientWidth/2, PAD, wrapW - toolTip.clientWidth - PAD);
+                    toolTip.style.left=`${{left}}px`;
+                    toolTip.style.top=`${{PAD}}px`;
+                  }} else {{
+                    toolTip.style.display='none';
+                  }}
                 }});
                 function renderHeader(hdr){{
                   const el=document.getElementById('header-info');
