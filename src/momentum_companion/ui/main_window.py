@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from PySide6 import QtWidgets, QtGui, QtCore
+from momentum_companion.utils.logging import logging
 
 from momentum_companion.ui.chart_widget import LightweightChartWidget
 
@@ -13,6 +14,7 @@ class MainWindow(QtWidgets.QMainWindow):
         super().__init__()
         self.setWindowTitle("Momentum Trading Companion")
         self.resize(1400, 900)
+        self._logger = logging.getLogger(__name__)
         self._build_layout()
 
     def _build_layout(self) -> None:
@@ -182,6 +184,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if ts_ms:
             parts.append(f"ts: {ts_ms}")
         self.quote_label.setText(" | ".join(parts))
+        self._logger.debug("Quote label set to: %s", " | ".join(parts))
 
     def apply_llm_recommendation(self, rec: dict) -> None:
         """Render basic LLM recommendation text."""

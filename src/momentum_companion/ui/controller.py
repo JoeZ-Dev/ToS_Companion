@@ -241,6 +241,7 @@ class UIController:
         QtCore.QTimer.singleShot(0, partial(self._update_labels_ui, ts_ms, bid, ask, last))
 
     def _update_labels_ui(self, ts_ms: int | None, bid: float | None, ask: float | None, last: float | None) -> None:
+        self._logger.debug("UI label update: ts=%s bid=%s ask=%s last=%s", ts_ms, bid, ask, last)
         self._window.connection_label.setText("Connection: STREAMING")
         if ts_ms:
             self._window.last_update_label.setText(f"Last Update: {ts_ms}")
