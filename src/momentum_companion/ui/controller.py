@@ -89,6 +89,8 @@ class UIController:
         self._initial_render_done = False
         if self._ae_engine:
             self._ae_engine.reset_intraday()
+            if hasattr(self._window, "update_ae_panel"):
+                self._window.update_ae_panel(None)  # type: ignore[attr-defined]
         self._window.symbol_input.setDisabled(True)
         self._window.connection_label.setText("Connection: REQUESTED")
         self._window.banner.setText(f"Requested symbol: {symbol}")

@@ -150,8 +150,10 @@ class MainWindow(QtWidgets.QMainWindow):
         """Render AE snapshot in compact sections."""
         self._last_ae_snapshot = snapshot
         if not snapshot:
-            self.ae_text.setText("AE: --")
+            self.ae_text.setText("AE: Loading…")
+            self.ae_copy_btn.setEnabled(False)
             return
+        self.ae_copy_btn.setEnabled(True)
         regime = snapshot.get("regime") or {}
         vol = snapshot.get("volatility") or {}
         volume = snapshot.get("volume") or {}
