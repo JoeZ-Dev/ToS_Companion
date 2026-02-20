@@ -106,20 +106,11 @@ class UIController:
             self._window.banner.setText("")
             end_ms = int(time.time() * 1000)
             start_ms = end_ms - (self._display_window_sec * 1000)
-            resp = self._rest_client.fetch_price_history(symbol, start_ms, end_ms, "day")
-            candles = resp.get("candles") or []
-            self._bars = [
-                {
-                    "time": int(c.get("datetime") // 1000),
-                    "open": c.get("open"),
-                    "high": c.get("high"),
-                    "low": c.get("low"),
-                    "close": c.get("close"),
-                    "volume": c.get("volume") or 0,
-                }
-                for c in candles
-                if c.get("datetime") is not None
-            ]
+            bars = self._fetch_candles(symbol, start_ms, end_ms, "day")
+            if not bars:
+                # Fallback: daily 1d bars to seed chart if intraday empty
+                bars = self._fetch_candles(symbol, None, None, "1d")
+            self._bars = bars
             if self._bars:
                 self._chart_adapter.set_history(self._bars)
                 self._update_studies(self._bars)
@@ -134,6 +125,22 @@ class UIController:
         except Exception as exc:  # noqa: BLE001
             self._window.banner.setText(f"History load failed for {symbol}")
             self._window.connection_label.setText("Connection: HISTORY ERROR")
+
+    def _fetch_candles(self, symbol: str, start_ms: int | None, end_ms: int | None, freq: str) -> list[dict]:
+        resp = self._rest_client.fetch_price_history(symbol, start_ms, end_ms, freq)
+        candles = resp.get("candles") or []
+        return [
+            {
+                "time": int(c.get("datetime") // 1000),
+                "open": c.get("open"),
+                "high": c.get("high"),
+                "low": c.get("low"),
+                "close": c.get("close"),
+                "volume": c.get("volume") or 0,
+            }
+            for c in candles
+            if c.get("datetime") is not None
+        ]
 
     def _subscribe_stream(self, symbol: str) -> None:
         client = self._ensure_stream_client()
