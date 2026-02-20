@@ -134,6 +134,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.quote_label = QtWidgets.QLabel("Quote: --")
         fundamentals_layout.addWidget(self.quote_label)
         fundamentals_group.setLayout(fundamentals_layout)
+        fundamentals_group.setStyleSheet(
+            "QGroupBox { margin-top: 8px; } QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 2px 6px; }"
+        )
         side_panel.addWidget(fundamentals_group)
 
         status_group = QtWidgets.QGroupBox("Status")
