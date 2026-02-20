@@ -323,7 +323,9 @@ class AEEngine:
             vol_mult = self._minute_agg.bars[-1].volume / baseline
 
         is_above_open = None
-        session_symbol = profile["symbol"] if profile else ""
+        session_symbol = ""
+        if self._profile_cache:
+            session_symbol = next(iter(self._profile_cache.values())).get("symbol", "")
         rth_open = self._session_open_rth.get(session_symbol)
         if rth_open is not None and last_price is not None:
             is_above_open = last_price > rth_open
