@@ -5,6 +5,7 @@ import time
 import threading
 from functools import partial
 import statistics
+from pathlib import Path
 from PySide6 import QtCore
 
 from momentum_companion.llm.service import LLMService
@@ -18,6 +19,7 @@ from momentum_companion.data.bar_aggregator import BarAggregator10s, TenSecondBa
 from momentum_companion.data.price_update import PriceUpdate
 from momentum_companion.indicators.engine import IndicatorsEngine
 import pandas as pd
+from momentum_companion.analysis.ae import AEEngine
 
 
 class UIController:
@@ -30,6 +32,8 @@ class UIController:
         rest_client: SchwabRestClient | None = None,
         stream_client: SchwabStreamClient | None = None,
         token_provider: TokenProvider | None = None,
+        db_path: str | None = None,
+        ae_engine: AEEngine | None = None,
     ) -> None:
         self._window = window
         self._llm_service = llm_service
@@ -59,6 +63,8 @@ class UIController:
         self._initial_render_done = False
         self._indicators = IndicatorsEngine()
         self._last_quote: dict[str, Any] = {"bid": None, "ask": None, "last": None, "total_volume": None}
+        self._ae_engine = ae_engine or AEEngine(rest_client, Path(db_path) if db_path else None)
+        self._last_ae_snapshot: dict | None = None
 
     def handle_flash(self, symbol: str, rec: dict, payload: dict) -> None:
         """Trigger flash alert in UI."""
@@ -81,10 +87,14 @@ class UIController:
         self._aggregator = BarAggregator10s()
         self._bars = []
         self._initial_render_done = False
+        if self._ae_engine:
+            self._ae_engine.reset_intraday()
         self._window.symbol_input.setDisabled(True)
         self._window.connection_label.setText("Connection: REQUESTED")
         self._window.banner.setText(f"Requested symbol: {symbol}")
         self._load_history(symbol)
+        if self._ae_engine:
+            self._ae_engine.compute_profile(symbol)
         self._subscribe_stream(symbol)
         self._window.symbol_input.setDisabled(False)
 
@@ -167,12 +177,18 @@ class UIController:
         ts_ms = event.get("ts_ms")
         try:
             if ts_ms and last is not None:
+                if self._ae_engine:
+                    self._ae_engine.record_quote_ts(ts_ms)
                 pu = PriceUpdate(timestamp=int(ts_ms // 1000), price=last, size=event.get("volume"), source="L1")
                 with self._bars_lock:
                     completed = self._aggregator.ingest_price(pu)
                     if completed:
                         self._append_bar_locked(completed)
                         self._request_render()
+                        if self._ae_engine:
+                            snap = self._ae_engine.ingest_10s_bar(completed)
+                            if snap:
+                                self._last_ae_snapshot = snap
                     forming = self._aggregator.forming_bar()
                     sig = (
                         forming.ts if forming else None,

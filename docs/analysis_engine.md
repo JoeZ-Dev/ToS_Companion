@@ -93,6 +93,9 @@ Snapshot fields:
 - `has_market_data` (bool)
 
 Degrade to `partial` if higher timeframe data missing; `stale/no_data` by quote age rules.
+- Quote age thresholds: `stale_if_quote_age_ms = 5000`; `no_data_if_quote_age_ms = 60000`.
+- Minimum 1m bars for MACD regime to be non-null: `macd_min_bars = 30`.
+- Market proxy: use SPY (fallback QQQ if SPY unavailable). `is_market_green = (last - prior_close) / prior_close * 100 > 0` using prior_close; if unavailable set `has_market_data = false` and `is_market_green = null`.
 
 ## AE-1.1 Snapshot Schema (JSON)
 
@@ -140,7 +143,7 @@ Degrade to `partial` if higher timeframe data missing; `stale/no_data` by quote 
     },
     "nearest_support": {
       "price": 18.5,
-      "source": "VWAP",
+      "source": "cluster_support",
       "distance_pct": -2.5
     },
     "in_resistance_zone": false,
@@ -157,6 +160,12 @@ Degrade to `partial` if higher timeframe data missing; `stale/no_data` by quote 
 ```
 
 No trade readiness or suggestions. All fields deterministic.
+
+## Time Windows (America/New_York)
+
+- Premarket: 04:00–09:30 ET. `premarket_high/low` null before 04:00; fixed after 09:30.
+- Opening range: 09:30–09:40 ET. `opening_range_high/low` null until 09:40; then fixed.
+- VWAP anchor: 04:00–20:00 ET. Before 04:00, VWAP is null; after 20:00, hold last value.
 
 ## AE-1.0 (Structural Profile)
 

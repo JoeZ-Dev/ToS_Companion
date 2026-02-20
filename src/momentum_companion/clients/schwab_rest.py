@@ -90,7 +90,8 @@ class SchwabRestClient:
         self, symbol: str, start_ms: Optional[int], end_ms: Optional[int], freq: str
     ) -> Dict[str, Any]:
         """Retrieve historical candles used for AE inputs."""
-        params: Dict[str, Any] = {"symbol": symbol, "periodType": "day", "period": 1, "frequencyType": "minute", "frequency": 1}
+        params: Dict[str, Any] = {"symbol": symbol}
+        params.update(self._freq_params(freq))
         if start_ms is not None:
             params["startDate"] = start_ms
         if end_ms is not None:
@@ -99,8 +100,17 @@ class SchwabRestClient:
         return resp.json()
 
     def _freq_params(self, freq: str) -> Dict[str, Any]:
-        # Minimal placeholder; spec-driven mapping for 1m/5m/1h/4h retrieval to be added.
-        return {"periodType": "day", "period": 1, "frequencyType": "minute", "frequency": 1}
+        if freq == "1m":
+            return {"periodType": "day", "period": 1, "frequencyType": "minute", "frequency": 1}
+        if freq == "5m":
+            return {"periodType": "day", "period": 5, "frequencyType": "minute", "frequency": 5}
+        if freq == "1h":
+            return {"periodType": "month", "period": 1, "frequencyType": "minute", "frequency": 60}
+        if freq == "4h":
+            return {"periodType": "month", "period": 6, "frequencyType": "minute", "frequency": 240}
+        if freq == "1d":
+            return {"periodType": "year", "period": 1, "frequencyType": "daily", "frequency": 1}
+        raise ValueError(f"Unsupported freq {freq}")
 
     def _request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         resp = self._client.request(method, url, headers=self._headers(), **kwargs)

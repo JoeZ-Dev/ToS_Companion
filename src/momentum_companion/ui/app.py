@@ -14,6 +14,7 @@ from momentum_companion.ui.main_window import MainWindow
 from momentum_companion.ui.controller import UIController
 from momentum_companion.llm.service import LLMService
 from momentum_companion.llm.coach import LLMCoach
+from momentum_companion.analysis.ae import AEEngine
 
 
 def main(instance_id: str) -> None:
@@ -24,11 +25,20 @@ def main(instance_id: str) -> None:
 
     token_provider = TokenProvider(state_callback=state_cb)
     rest = SchwabRestClient(base_url="https://api.schwabapi.com/trader/v1", auth_token_provider=token_provider)
+    ae_engine = AEEngine(rest, db_path)
     emm = EMMEngine(rest, journal)
     trig = SyntheticTriggerEngine(None)
     executor = TradeExecutor(rest, emm, trig, journal, state_callback=state_cb)
     llm_service = LLMService(LLMCoach(), journal=journal, state_callback=state_cb, flash_callback=None)
-    controller = UIController(window, llm_service, rest_client=rest, stream_client=None, token_provider=token_provider)
+    controller = UIController(
+        window,
+        llm_service,
+        rest_client=rest,
+        stream_client=None,
+        token_provider=token_provider,
+        db_path=str(db_path),
+        ae_engine=ae_engine,
+    )
     # wire flash callback
     llm_service._flash_callback = controller.handle_flash  # type: ignore[attr-defined]
     window.show()
