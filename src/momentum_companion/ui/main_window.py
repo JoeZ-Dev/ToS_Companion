@@ -18,10 +18,14 @@ class MainWindow(QtWidgets.QMainWindow):
     def _build_layout(self) -> None:
         central = QtWidgets.QWidget()
         root = QtWidgets.QVBoxLayout()
+        root.setContentsMargins(8, 6, 8, 6)
+        root.setSpacing(6)
         central.setLayout(root)
 
         # Top bar
         top = QtWidgets.QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(6)
         top.addWidget(QtWidgets.QLabel("Symbol:"))
         self.symbol_input = QtWidgets.QLineEdit()
         top.addWidget(self.symbol_input)
@@ -34,17 +38,24 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Middle split: chart + side panel
         middle = QtWidgets.QHBoxLayout()
+        middle.setContentsMargins(0, 0, 0, 0)
+        middle.setSpacing(8)
         chart_area = QtWidgets.QVBoxLayout()
+        chart_area.setContentsMargins(0, 0, 0, 0)
+        chart_area.setSpacing(4)
         self.quote_label = QtWidgets.QLabel("Quote: --")
         chart_area.addWidget(self.quote_label)
         self.chart_widget = LightweightChartWidget()
         chart_area.addWidget(self.chart_widget)
+        chart_area.setStretchFactor(self.chart_widget, 1)
         ticket_group = QtWidgets.QGroupBox("Order Ticket")
         ticket_layout = QtWidgets.QFormLayout()
+        ticket_layout.setContentsMargins(6, 4, 6, 6)
         ticket_layout.addRow("Side:", QtWidgets.QComboBox())
         ticket_layout.addRow("Qty:", QtWidgets.QLineEdit())
         ticket_layout.addRow("Limit Price:", QtWidgets.QLineEdit())
         ticket_group.setLayout(ticket_layout)
+        ticket_group.setSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Fixed)
         chart_area.addWidget(ticket_group)
         middle.addLayout(chart_area, 3)
 
@@ -127,6 +138,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Controls + states
         controls = QtWidgets.QHBoxLayout()
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.setSpacing(6)
         self.reconnect_btn = QtWidgets.QPushButton("Reconnect")
         controls.addWidget(self.reconnect_btn)
         controls.addWidget(QtWidgets.QPushButton("Cancel All"))
