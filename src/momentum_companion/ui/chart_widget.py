@@ -37,7 +37,7 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 "rightOffset": 6,
                 "barSpacing": 6,
             },
-            "priceScale": {"scaleMargins": {"top": 0.05, "bottom": 0.25}},
+            "priceScale": {"scaleMargins": {"top": 0.05, "bottom": 0.2}},
             "crosshair": {
                 "mode": 1,
                 "vertLine": {"color": "rgba(224,227,235,0.12)", "width": 1, "style": 0},
@@ -58,16 +58,16 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
         volume_opts = {
             "priceFormat": {"type": "volume"},
             "priceScaleId": "",
-            "scaleMargins": {"top": 0.7, "bottom": 0},
+            "scaleMargins": {"top": 0.8, "bottom": 0},
             "lastValueVisible": False,
             "priceLineVisible": False,
         }
         line_styles = {
-            "VWAP": {"color": "#b455ff", "lineWidth": 1, "lastValueVisible": False, "priceLineVisible": False},
+            "VWAP": {"color": "rgba(180,85,255,0.7)", "lineWidth": 2, "lastValueVisible": False, "priceLineVisible": False},
             "EMA9": {"color": "#f5c542", "lineWidth": 1, "lastValueVisible": False, "priceLineVisible": False},
             "EMA20": {"color": "#4aa3ff", "lineWidth": 1, "lastValueVisible": False, "priceLineVisible": False},
-            "MACD": {"color": "#4aa3ff", "lineWidth": 1, "lastValueVisible": False, "priceLineVisible": False},
-            "MACD_SIGNAL": {"color": "#f5c542", "lineWidth": 1, "lastValueVisible": False, "priceLineVisible": False},
+            "MACD": {"color": "#1abc9c", "lineWidth": 1, "lastValueVisible": False, "priceLineVisible": False},
+            "MACD_SIGNAL": {"color": "#d2b48c", "lineWidth": 1, "lastValueVisible": False, "priceLineVisible": False},
         }
         options_json = json.dumps(options)
         candle_json = json.dumps(candle_opts)
@@ -172,11 +172,11 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 function ensureMacdSeries(name){{
                   if(macdSeriesMap[name]){{return macdSeriesMap[name];}}
                   if(name==='MACD_HIST'){{
-                    macdSeriesMap[name]=chart.addSeries(LightweightCharts.HistogramSeries, {{color:'#4aa3ff', base:0, lastValueVisible:false, priceLineVisible:false}}, MACD_PANE_INDEX);
+                    macdSeriesMap[name]=chart.addSeries(LightweightCharts.HistogramSeries, {{color:'#1abc9c', base:0, lastValueVisible:false, priceLineVisible:false}}, MACD_PANE_INDEX);
                   }} else if(name==='MACD_SIGNAL'){{
-                    macdSeriesMap[name]=chart.addSeries(LightweightCharts.LineSeries, {{color:'#f5c542', lineWidth:1, lastValueVisible:false, priceLineVisible:false}}, MACD_PANE_INDEX);
+                    macdSeriesMap[name]=chart.addSeries(LightweightCharts.LineSeries, {{color:'#d2b48c', lineWidth:1, lastValueVisible:false, priceLineVisible:false}}, MACD_PANE_INDEX);
                   }} else {{
-                    macdSeriesMap[name]=chart.addSeries(LightweightCharts.LineSeries, {{color:'#ffffff', lineWidth:1, lastValueVisible:false, priceLineVisible:false}}, MACD_PANE_INDEX);
+                    macdSeriesMap[name]=chart.addSeries(LightweightCharts.LineSeries, {{color:'#1abc9c', lineWidth:1, lastValueVisible:false, priceLineVisible:false}}, MACD_PANE_INDEX);
                   }}
                   return macdSeriesMap[name];
                 }}
