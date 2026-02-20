@@ -32,6 +32,7 @@ EMA9_PERIOD = 9
 SWING_LOOKBACK = 3
 CLUSTER_BAND_PCT = 0.015
 CLUSTER_CAP = 3
+CLUSTER_POOL_CAP = 50
 HALF_LIFE_4H = 40
 HALF_LIFE_DAILY = 60
 VOLATILITY_THRESHOLD = 1.0
@@ -185,6 +186,7 @@ class AEEngine:
         self._minute_agg = MinuteBarAggregator()
         self._last_quote_ms: Optional[int] = None
         self._market_cache: Optional[tuple[int, bool, Optional[bool]]] = None  # (ts_ms, has_market_data, is_market_green)
+        self._session_open_rth: dict[str, Optional[float]] = {}
 
     def reset_intraday(self) -> None:
         self._minute_agg = MinuteBarAggregator()
@@ -206,9 +208,10 @@ class AEEngine:
         is_above_ema = bool(bars["close"].iloc[-1] > ema.iloc[-1])
         prior_close = float(bars["close"].iloc[-1])
         half_life = HALF_LIFE_4H if source_tf == "4h" else HALF_LIFE_DAILY
-        res_clusters = _cluster_swings(bars["high"], SWING_LOOKBACK, CLUSTER_BAND_PCT, CLUSTER_CAP, half_life, "resistance")
-        sup_clusters = _cluster_swings(bars["low"], SWING_LOOKBACK, CLUSTER_BAND_PCT, CLUSTER_CAP, half_life, "support")
+        res_clusters = _cluster_swings(bars["high"], SWING_LOOKBACK, CLUSTER_BAND_PCT, CLUSTER_POOL_CAP, half_life, "resistance")
+        sup_clusters = _cluster_swings(bars["low"], SWING_LOOKBACK, CLUSTER_BAND_PCT, CLUSTER_POOL_CAP, half_life, "support")
         htf_high = float(bars["high"].max())
+        session_open_rth = self._fetch_rth_open(symbol)
         now_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         profile = {
             "symbol": symbol,
@@ -216,12 +219,14 @@ class AEEngine:
             "is_above_4h_ema": is_above_ema,
             "prior_close": prior_close,
             "htf_high": htf_high,
+            "session_open_rth": session_open_rth,
             "resistance_clusters": [{"timeframe_source": source_tf, **z} for z in res_clusters],
             "support_clusters": [{"timeframe_source": source_tf, **z} for z in sup_clusters],
         }
         self._profile_cache[symbol] = profile
         if self._db_path:
             self._store_profile(symbol, profile)
+        self._session_open_rth[symbol] = session_open_rth
         return profile
 
     def _store_profile(self, symbol: str, profile: dict) -> None:
@@ -246,6 +251,22 @@ class AEEngine:
         resp = self._rest.fetch_price_history(symbol, None, None, "1d")
         candles = resp.get("candles") or []
         return _candles_to_df(candles), "daily"
+
+    def _fetch_rth_open(self, symbol: str) -> Optional[float]:
+        if not self._rest:
+            return None
+        try:
+            now_et = datetime.now(ET_TZ)
+            start = datetime(now_et.year, now_et.month, now_et.day, 9, 30, tzinfo=ET_TZ)
+            end = start + timedelta(minutes=1)
+            resp = self._rest.fetch_price_history(symbol, int(start.timestamp() * 1000), int(end.timestamp() * 1000), "1m")
+            candles = resp.get("candles") or []
+            if not candles:
+                return None
+            candle = sorted(candles, key=lambda c: c.get("datetime", 0))[0]
+            return float(candle.get("open")) if candle.get("open") is not None else None
+        except Exception:
+            return None
 
     def ingest_10s_bar(self, bar: TenSecondBar) -> Optional[dict]:
         completed_minute = self._minute_agg.ingest_10s(bar)
@@ -302,8 +323,10 @@ class AEEngine:
             vol_mult = self._minute_agg.bars[-1].volume / baseline
 
         is_above_open = None
-        if self._minute_agg.session_open and self._minute_agg.bars:
-            is_above_open = last_price is not None and last_price > self._minute_agg.session_open
+        session_symbol = profile["symbol"] if profile else ""
+        rth_open = self._session_open_rth.get(session_symbol)
+        if rth_open is not None and last_price is not None:
+            is_above_open = last_price > rth_open
         is_above_vwap = vwap_val is not None and last_price is not None and last_price > vwap_val
 
         profile = next(iter(self._profile_cache.values()), None)
@@ -391,7 +414,7 @@ class AEEngine:
 
 def _filter_clusters_relative(clusters: list[dict], last_price: Optional[float], kind: str) -> list[dict]:
     if last_price is None:
-        return clusters
+        return clusters[:CLUSTER_CAP]
     filtered = []
     for c in clusters:
         mid = (c["price_zone_low"] + c["price_zone_high"]) / 2
@@ -399,6 +422,7 @@ def _filter_clusters_relative(clusters: list[dict], last_price: Optional[float],
             filtered.append(c)
         if kind == "support" and mid <= last_price:
             filtered.append(c)
+    filtered = sorted(filtered, key=lambda c: (abs(((c["price_zone_low"] + c["price_zone_high"]) / 2) - last_price)))
     return filtered[:CLUSTER_CAP]
 
 

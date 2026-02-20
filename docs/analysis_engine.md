@@ -62,7 +62,8 @@ On symbol load:
 - `is_volatile_enough` = `intraday_range_pct` > fixed threshold (constant)
 - `macd_regime` on 1m closes: `bullish|bearish|neutral` (standard 12/26/9 MACD)
 - `is_above_4h_ema` (from structural extract)
-- `is_market_green` (SPY/QQQ % change > 0)
+- `is_market_green` (SPY % change > 0)
+- `is_above_open` (RTH only) computed from REST RTH open (09:30 ET). If RTH open missing: null.
 
 Expose as raw booleans/numerics only.
 
@@ -198,6 +199,7 @@ Raw bars are not stored.
 - Quote age thresholds: stale_if_quote_age_ms = 5000; no_data_if_quote_age_ms = 60000.
 - macd_min_bars = 30.
 - Market proxy: SPY. is_market_green = (last - prior_close) / prior_close * 100 > 0; if prior_close missing → has_market_data=false, is_market_green=null.
+- RTH open: fetched via REST 1m bars at 09:30 ET; is_above_open uses this. If unavailable: is_above_open=null.
 - Strength score: normalized 0..1 via `normalized_strength = min(1.0, raw_strength / (raw_strength + 1.0))`, raw_strength = touches * (0.5 + 0.5 * recency).
 - Zero-width zones: if zone_low == zone_high, expand band by +/−0.01% of price (deterministic) to avoid zero width.
 
