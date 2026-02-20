@@ -237,8 +237,12 @@ class UIController:
             from momentum_companion.utils.logging import logging
 
             logging.getLogger(__name__).error("Quote handling failed: %s", exc, exc_info=True)
-        # UI label updates on main thread
-        QtCore.QTimer.singleShot(0, partial(self._update_labels_ui, ts_ms, bid, ask, last))
+        # UI label updates on main thread via queued invoke
+        QtCore.QMetaObject.invokeMethod(
+            self._window,
+            lambda bid=bid, ask=ask, last=last, ts_ms=ts_ms: self._update_labels_ui(ts_ms, bid, ask, last),
+            QtCore.Qt.ConnectionType.QueuedConnection,
+        )
 
     def _update_labels_ui(self, ts_ms: int | None, bid: float | None, ask: float | None, last: float | None) -> None:
         self._logger.debug("UI label update: ts=%s bid=%s ask=%s last=%s", ts_ms, bid, ask, last)
