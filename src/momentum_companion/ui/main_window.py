@@ -108,6 +108,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ae_levels_line1.setWordWrap(False)
         self.ae_levels_line2.setWordWrap(False)
         self.ae_levels_line3.setWordWrap(False)
+        self.ae_levels_line1.setToolTip("Nearest structural resistance/support with distance % and source.")
+        self.ae_levels_line2.setToolTip("Opening Range (09:30–09:40 ET) and Premarket (04:00–09:30 ET) highs/lows.")
+        self.ae_levels_line3.setToolTip("Micro context: 15m swing R/S and recent 5m/15m ranges from 1m bars.")
 
         ae_layout.addLayout(self.ae_row_regime)
         ae_layout.addLayout(self.ae_row_context)
