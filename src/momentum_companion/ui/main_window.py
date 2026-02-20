@@ -52,6 +52,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         ae_group = QtWidgets.QGroupBox("AE Snapshot")
         ae_layout = QtWidgets.QVBoxLayout()
+        self.ae_status_label = QtWidgets.QLabel("AE: --")
+        self.ae_status_label.setStyleSheet("color: #7f8c8d;")
+        ae_layout.addWidget(self.ae_status_label)
         self.ae_row_regime = QtWidgets.QHBoxLayout()
         self.ae_row_context = QtWidgets.QHBoxLayout()
         self.ae_pill_market = self._make_pill()
@@ -184,6 +187,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if not snapshot:
             self._reset_ae_ui()
             return
+        self.ae_status_label.setText("AE: Ready")
+        self.ae_status_label.setStyleSheet("color: #27ae60;")
         self.ae_copy_btn.setEnabled(True)
         regime = snapshot.get("regime") or {}
         vol = snapshot.get("volatility") or {}
@@ -310,6 +315,8 @@ class MainWindow(QtWidgets.QMainWindow):
         clipboard.setText(json.dumps(self._last_ae_snapshot, indent=2))
 
     def _reset_ae_ui(self) -> None:
+        self.ae_status_label.setText("AE: Working…")
+        self.ae_status_label.setStyleSheet("color: #7f8c8d;")
         self.ae_copy_btn.setEnabled(False)
         for pill in [
             self.ae_pill_market,
@@ -350,6 +357,12 @@ class MainWindow(QtWidgets.QMainWindow):
         pill.setStyleSheet(self._pill_stylesheet(color, "#ffffff"))
         pill.setToolTip(tooltip)
         pill.setVisible(visible)
+
+    @staticmethod
+    def _pill_text(label: str, value: str) -> str:
+        if value and value != "--":
+            return f"{label}: {value}"
+        return label
 
     @staticmethod
     def _label_bool(val: bool | None, true_label: str, false_label: str) -> str:
