@@ -240,8 +240,12 @@ class UIController:
         # UI label updates on main thread via queued invoke
         QtCore.QMetaObject.invokeMethod(
             self._window,
-            lambda bid=bid, ask=ask, last=last, ts_ms=ts_ms: self._update_labels_ui(ts_ms, bid, ask, last),
+            "render_quote",
             QtCore.Qt.ConnectionType.QueuedConnection,
+            QtCore.Q_ARG(object, ts_ms),
+            QtCore.Q_ARG(object, bid),
+            QtCore.Q_ARG(object, ask),
+            QtCore.Q_ARG(object, last),
         )
 
     def _update_labels_ui(self, ts_ms: int | None, bid: float | None, ask: float | None, last: float | None) -> None:
