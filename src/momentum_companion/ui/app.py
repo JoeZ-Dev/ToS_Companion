@@ -20,6 +20,15 @@ from momentum_companion.analysis.ae import AEEngine
 def main(instance_id: str) -> None:
     db_path, app_state, journal = bootstrap(instance_id)
     app = QtWidgets.QApplication([])
+    app.setStyleSheet(
+        """
+        QWidget { background-color: #000000; color: #c8d1da; }
+        QLabel { color: #c8d1da; }
+        QLineEdit, QComboBox, QPushButton { background-color: #111111; color: #c8d1da; border: 1px solid #333333; }
+        QGroupBox { border: 1px solid #222222; margin-top: 6px; color: #c8d1da; }
+        QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; }
+        """
+    )
     window = MainWindow()
     state_cb = window.set_state
 
