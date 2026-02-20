@@ -105,6 +105,7 @@ class UIController:
             if snap and hasattr(self._window, "update_ae_panel"):
                 self._last_ae_snapshot = snap
                 self._window.update_ae_panel(snap)  # type: ignore[attr-defined]
+        self._load_float(symbol)
         self._subscribe_stream(symbol)
         self._window.symbol_input.setDisabled(False)
 
@@ -186,6 +187,19 @@ class UIController:
             return None
         self._window.connection_label.setText("Connection: CONNECTING")
         return self._stream_client
+
+    def _load_float(self, symbol: str) -> None:
+        """Fetch sharesOutstanding from fundamentals and update the UI."""
+        if not self._rest_client or not hasattr(self._window, "update_float"):
+            return
+        try:
+            data = self._rest_client.fetch_quote_fundamental(symbol)
+            shares = self._parse_shares_outstanding(data, symbol)
+            self._window.update_float(shares)  # type: ignore[attr-defined]
+            self._logger.debug("Loaded float for %s: %s", symbol, shares)
+        except Exception as exc:  # noqa: BLE001
+            self._logger.warning("Failed to load float for %s: %s", symbol, exc)
+            self._window.update_float(None)  # type: ignore[attr-defined]
 
     def _handle_quote(self, event: QuoteEvent) -> None:
         bid = event.get("bid")
@@ -402,3 +416,33 @@ class UIController:
             self._window.connection_label.setText("Connection: RECONNECTING")
         elif state == "CONNECTING":
             self._window.connection_label.setText("Connection: CONNECTING")
+
+    @staticmethod
+    def _parse_shares_outstanding(payload: Any, symbol: str) -> float | None:
+        """Extract sharesOutstanding from Schwab quote/fundamental response."""
+        if not isinstance(payload, dict):
+            return None
+        sym = symbol.upper()
+        candidates: list[dict] = []
+        # Preferred: direct symbol key
+        direct = payload.get(sym)
+        if isinstance(direct, dict):
+            candidates.append(direct)
+        # Common wrapper: quotes map
+        quotes_block = payload.get("quotes")
+        if isinstance(quotes_block, dict):
+            if sym in quotes_block and isinstance(quotes_block[sym], dict):
+                candidates.append(quotes_block[sym])
+            else:
+                candidates.extend([v for v in quotes_block.values() if isinstance(v, dict)])
+        # Fallback: any dict children
+        if not candidates:
+            candidates.extend([v for v in payload.values() if isinstance(v, dict)])
+        for candidate in candidates:
+            fundamental = candidate.get("fundamental") if isinstance(candidate, dict) else None
+            if isinstance(fundamental, dict) and "sharesOutstanding" in fundamental:
+                try:
+                    return float(fundamental.get("sharesOutstanding"))
+                except (TypeError, ValueError):
+                    return None
+        return None

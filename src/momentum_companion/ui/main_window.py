@@ -134,12 +134,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.quote_last = QtWidgets.QLabel("Last: --")
         self.quote_bid = QtWidgets.QLabel("Bid: --")
         self.quote_ask = QtWidgets.QLabel("Ask: --")
+        self.quote_float = QtWidgets.QLabel("Float: --")
         self.quote_last.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
         self.quote_bid.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
         self.quote_ask.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
+        self.quote_float.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
         fundamentals_layout.addWidget(self.quote_last)
         fundamentals_layout.addWidget(self.quote_bid)
         fundamentals_layout.addWidget(self.quote_ask)
+        fundamentals_layout.addWidget(self.quote_float)
         fundamentals_group.setLayout(fundamentals_layout)
         fundamentals_group.setStyleSheet(
             "QGroupBox { margin-top: 8px; } QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 2px 6px; }"
@@ -203,6 +206,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.quote_bid.setText(f"Bid: {bid:.2f}" if bid is not None else "Bid: --")
         self.quote_ask.setText(f"Ask: {ask:.2f}" if ask is not None else "Ask: --")
         self._logger.debug("Quote labels set to last=%s bid=%s ask=%s", last, bid, ask)
+
+    def update_float(self, shares_outstanding: float | None) -> None:
+        """Display float using sharesOutstanding fundamental field."""
+        if shares_outstanding is None:
+            self.quote_float.setText("Float: --")
+            return
+        human = _fmt_human_shares(shares_outstanding)
+        self.quote_float.setText(f"Float: {human}")
 
     @QtCore.Slot(float, float, float, float)
     def render_quote(self, ts_ms: float, bid: float, ask: float, last: float) -> None:
@@ -527,3 +538,16 @@ def _fmt_price(val: float | None) -> str:
     if val is None:
         return "--"
     return f"{val:.2f}"
+
+
+def _fmt_human_shares(val: float) -> str:
+    scaled = float(val)
+    # Round to nearest 100k for readability
+    scaled = round(scaled / 100_000) * 100_000
+    if scaled >= 1_000_000_000:
+        return f"{scaled / 1_000_000_000:.2f}B"
+    if scaled >= 1_000_000:
+        return f"{scaled / 1_000_000:.2f}M"
+    if scaled >= 1_000:
+        return f"{scaled / 1_000:.2f}K"
+    return f"{scaled:.0f}"

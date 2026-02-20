@@ -115,6 +115,13 @@ class SchwabRestClient:
             return {"periodType": "day", "period": 1, "frequencyType": "minute", "frequency": 1}
         raise ValueError(f"Unsupported freq {freq}")
 
+    @with_backoff()
+    def fetch_quote_fundamental(self, symbol: str) -> Dict[str, Any]:
+        """Fetch fundamental block (e.g., sharesOutstanding) for a single symbol."""
+        params = {"fields": "fundamental"}
+        resp = self._request("GET", f"{self._md_base_url}/{symbol}/quotes", params=params)
+        return resp.json()
+
     def _request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         resp = self._client.request(method, url, headers=self._headers(), **kwargs)
         if resp.status_code == 401 and hasattr(self._auth_token_provider, "refresh"):
