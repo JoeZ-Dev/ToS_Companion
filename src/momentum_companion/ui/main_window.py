@@ -131,8 +131,15 @@ class MainWindow(QtWidgets.QMainWindow):
         fundamentals_layout = QtWidgets.QVBoxLayout()
         fundamentals_layout.setContentsMargins(6, 4, 6, 6)
         fundamentals_layout.setSpacing(4)
-        self.quote_label = QtWidgets.QLabel("Quote: --")
-        fundamentals_layout.addWidget(self.quote_label)
+        self.quote_last = QtWidgets.QLabel("Last: --")
+        self.quote_bid = QtWidgets.QLabel("Bid: --")
+        self.quote_ask = QtWidgets.QLabel("Ask: --")
+        self.quote_last.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
+        self.quote_bid.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
+        self.quote_ask.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
+        fundamentals_layout.addWidget(self.quote_last)
+        fundamentals_layout.addWidget(self.quote_bid)
+        fundamentals_layout.addWidget(self.quote_ask)
         fundamentals_group.setLayout(fundamentals_layout)
         fundamentals_group.setStyleSheet(
             "QGroupBox { margin-top: 8px; } QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 2px 6px; }"
@@ -192,14 +199,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def update_quote_display(self, bid: float | None, ask: float | None, last: float | None, ts_ms: int | None) -> None:
         """Display latest L1 values above the chart."""
-        parts = []
-        parts.append(f"Bid: {bid:.2f}" if bid is not None else "Bid: --")
-        parts.append(f"Ask: {ask:.2f}" if ask is not None else "Ask: --")
-        parts.append(f"Last: {last:.2f}" if last is not None else "Last: --")
-        if ts_ms:
-            parts.append(f"ts: {ts_ms}")
-        self.quote_label.setText(" | ".join(parts))
-        self._logger.debug("Quote label set to: %s", " | ".join(parts))
+        self.quote_last.setText(f"Last: {last:.2f}" if last is not None else "Last: --")
+        self.quote_bid.setText(f"Bid: {bid:.2f}" if bid is not None else "Bid: --")
+        self.quote_ask.setText(f"Ask: {ask:.2f}" if ask is not None else "Ask: --")
+        self._logger.debug("Quote labels set to last=%s bid=%s ask=%s", last, bid, ask)
 
     @QtCore.Slot(float, float, float, float)
     def render_quote(self, ts_ms: float, bid: float, ask: float, last: float) -> None:
