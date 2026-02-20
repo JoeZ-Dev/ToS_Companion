@@ -114,6 +114,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ae_levels_line2.setToolTip("Opening Range (09:30–09:40 ET) and Premarket (04:00–09:30 ET) highs/lows.")
         self.ae_levels_line3.setToolTip("Micro context: 15m swing R/S and recent 5m/15m ranges from 1m bars.")
         self.ae_levels_line4.setToolTip("Top influenced levels (macro/micro) ranked by dynamic_influence.")
+        self.ae_levels_line4.setWordWrap(True)
 
         ae_layout.addLayout(self.ae_row_regime)
         ae_layout.addLayout(self.ae_row_context)
@@ -163,6 +164,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         status_group = QtWidgets.QGroupBox("Status")
         status_layout = QtWidgets.QVBoxLayout()
+        status_layout.setContentsMargins(6, 4, 6, 4)
+        status_layout.setSpacing(2)
         self.stream_label = QtWidgets.QLabel("Stream: CONNECTED")
         self.token_label = QtWidgets.QLabel("Auth: OK")
         self.last_update_label = QtWidgets.QLabel("Last Update:")
@@ -170,7 +173,12 @@ class MainWindow(QtWidgets.QMainWindow):
         status_layout.addWidget(self.token_label)
         status_layout.addWidget(self.last_update_label)
         status_group.setLayout(status_layout)
+        status_group.setSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Fixed)
         side_panel.addWidget(status_group)
+        side_panel.setStretchFactor(ae_group, 3)
+        side_panel.setStretchFactor(llm_group, 1)
+        side_panel.setStretchFactor(fundamentals_group, 1)
+        side_panel.setStretchFactor(status_group, 0)
         middle.addLayout(side_panel, 1)
 
         root.addLayout(middle)
