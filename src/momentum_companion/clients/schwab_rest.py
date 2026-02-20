@@ -105,9 +105,10 @@ class SchwabRestClient:
         if freq == "5m":
             return {"periodType": "day", "period": 5, "frequencyType": "minute", "frequency": 5}
         if freq == "1h":
-            return {"periodType": "month", "period": 1, "frequencyType": "minute", "frequency": 60}
+            return {"periodType": "day", "period": 10, "frequencyType": "minute", "frequency": 60}
         if freq == "4h":
-            return {"periodType": "month", "period": 6, "frequencyType": "minute", "frequency": 240}
+            # Schwab pricehistory does not expose 4h directly; use daily as a structural proxy.
+            return {"periodType": "year", "period": 1, "frequencyType": "daily", "frequency": 1}
         if freq == "1d":
             return {"periodType": "year", "period": 1, "frequencyType": "daily", "frequency": 1}
         raise ValueError(f"Unsupported freq {freq}")

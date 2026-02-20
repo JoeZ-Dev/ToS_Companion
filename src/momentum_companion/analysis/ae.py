@@ -177,6 +177,7 @@ class AEEngine:
         self._snapshot_cache: dict[str, dict] = {}
         self._minute_agg = MinuteBarAggregator()
         self._last_quote_ms: Optional[int] = None
+        self._market_cache: Optional[tuple[int, bool, Optional[bool]]] = None  # (ts_ms, has_market_data, is_market_green)
 
     def reset_intraday(self) -> None:
         self._minute_agg = MinuteBarAggregator()
@@ -301,6 +302,7 @@ class AEEngine:
         res_clusters = profile["resistance_clusters"] if profile else []
         sup_clusters = profile["support_clusters"] if profile else []
         prior_close = profile.get("prior_close") if profile else None
+        has_market_data, is_market_green = self._market_state()
 
         nearest_res = _nearest_level(last_price, res_clusters, self._minute_agg, kind="resistance")
         nearest_sup = _nearest_level(last_price, sup_clusters, self._minute_agg, kind="support")
@@ -312,12 +314,12 @@ class AEEngine:
             "data_quality": data_quality,
             "has_4h_data": has_4h,
             "has_intraday_data": has_intraday,
-            "has_market_data": has_market,
+            "has_market_data": has_market_data,
             "regime": {
                 "is_above_4h_ema": is_above_4h,
                 "is_above_open": is_above_open,
                 "is_above_vwap": is_above_vwap,
-                "is_market_green": None,
+                "is_market_green": is_market_green,
                 "macd_regime": macd_regime,
             },
             "volatility": {
@@ -343,6 +345,30 @@ class AEEngine:
         }
         self._snapshot_cache[profile["symbol"]] = snapshot if profile else snapshot
         return snapshot
+
+    def _market_state(self) -> tuple[bool, Optional[bool]]:
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        if self._market_cache and (now_ms - self._market_cache[0] < 60_000):
+            return self._market_cache[1], self._market_cache[2]
+        if not self._rest:
+            return False, None
+        has_market = False
+        is_green = None
+        try:
+            resp = self._rest.fetch_price_history("SPY", None, None, "1d")
+            candles = resp.get("candles") or []
+            if len(candles) >= 2:
+                prior_close = float(candles[-2].get("close"))
+                last_close = float(candles[-1].get("close"))
+                if prior_close > 0:
+                    change_pct = (last_close - prior_close) / prior_close * 100
+                    is_green = change_pct > 0
+                    has_market = True
+        except Exception:
+            has_market = False
+            is_green = None
+        self._market_cache = (now_ms, has_market, is_green)
+        return has_market, is_green
 
 
 def _nearest_level(last_price: Optional[float], clusters: list[dict], agg: MinuteBarAggregator, kind: str) -> Optional[dict]:
