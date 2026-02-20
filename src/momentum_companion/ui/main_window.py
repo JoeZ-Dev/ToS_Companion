@@ -278,7 +278,7 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         macd_ready = bool(regime.get("macd_ready"))
         macd_regime = regime.get("macd_regime")
-        macd_text = "MACD"
+        macd_text = "MACD" if macd_ready else "MACD Warming"
         macd_color = "#7f8c8d" if not macd_ready else self._color_for_macd(macd_regime)
         macd_tooltip = (
             "Needs at least 30 completed 1m bars to compute.\nSource: regime.macd_ready"
@@ -295,29 +295,35 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Row B pills
         range_pct = vol.get("intraday_range_pct")
+        range_text = f"Range {_fmt_pct1(range_pct)}%"
+        if range_pct is not None and range_pct > 60:
+            range_text = f"{range_text} \U0001F525"
         self._set_pill(
             self.ae_pill_range,
-            f"Range {_fmt_pct1(range_pct)}%",
+            range_text,
             self._color_for_range(range_pct),
-            tooltip="Intraday volatility: (session_high - session_low) / session_open.\nHigher range = more movement (momentum suitability).\nSource: volatility.intraday_range_pct",
+            tooltip="Intraday volatility: (session_high - session_low) / session_open.\nHigher range = more movement/opportunity for longs.\nSource: volatility.intraday_range_pct",
         )
         vol_mult = volume.get("volume_multiple")
         self._set_pill(
             self.ae_pill_vol,
             f"Vol {_fmt_num(vol_mult)}x",
             self._color_for_volmult(vol_mult),
-            tooltip="Relative 1m volume vs median of last 30 1m bars.\n>1.0x = above typical; <1.0x = below typical.\nSource: volume.volume_multiple",
+            tooltip="Relative 1m volume vs median of last 30 1m bars.\nWe want 3x+ for strong momentum confirmation.\nSource: volume.volume_multiple",
         )
         gap_pct = session.get("gap_pct")
+        gap_text = f"Gap {_fmt_pct1_signed(gap_pct)}%"
         self._set_pill(
             self.ae_pill_gap,
-            f"Gap {_fmt_pct1(gap_pct)}%",
+            gap_text,
             self._color_for_gap(gap_pct),
-            tooltip="Gap vs prior close: (session_open - prior_close) / prior_close.\nLarge gaps can increase volatility and risk.\nSource: session.gap_pct",
+            tooltip="Gap vs prior close: (session_open - prior_close) / prior_close.\nRunner filter: we mainly care about 30%+ gaps.\nSource: session.gap_pct",
             visible=gap_pct is not None,
         )
         in_r_zone = levels.get("in_resistance_zone")
         next_r_pct = levels.get("distance_to_next_cluster_pct")
+        last_price = snapshot.get("last_price")
+        res_price = (levels.get("nearest_resistance") or {}).get("price")
         if in_r_zone:
             self._set_pill(
                 self.ae_pill_res_prox,
@@ -327,11 +333,16 @@ class MainWindow(QtWidgets.QMainWindow):
                 visible=True,
             )
         elif next_r_pct is not None:
+            text = f"Next R {_fmt_pct1(next_r_pct)}%"
+            if last_price is not None and res_price is not None:
+                delta = res_price - last_price
+                if delta > 0:
+                    text = f"{text} (+${delta:.2f})"
             self._set_pill(
                 self.ae_pill_res_prox,
-                f"Next R {_fmt_pct1(next_r_pct)}%",
+                text,
                 self._color_for_next_res(next_r_pct),
-                tooltip="Resistance proximity based on structural clusters and/or key levels.\nNext R = distance to nearest resistance cluster above price.\nSource: levels.distance_to_next_cluster_pct",
+                tooltip="Resistance proximity for continuation.\nMore distance = more runway for longs.\nSource: levels.distance_to_next_cluster_pct",
                 visible=True,
             )
         else:
@@ -462,16 +473,16 @@ class MainWindow(QtWidgets.QMainWindow):
         if val < 25:
             return "#27ae60"
         if val < 60:
-            return "#f39c12"
-        return "#c0392b"
+            return "#2ecc71"
+        return "#8e44ad"
 
     @staticmethod
     def _color_for_volmult(val: float | None) -> str:
         if val is None:
             return "#7f8c8d"
-        if val < 0.8:
+        if val < 2.0:
             return "#95a5a6"
-        if val <= 1.2:
+        if val < 3.0:
             return "#27ae60"
         return "#2ecc71"
 
@@ -479,9 +490,14 @@ class MainWindow(QtWidgets.QMainWindow):
     def _color_for_gap(val: float | None) -> str:
         if val is None:
             return "#7f8c8d"
-        if abs(val) < 2:
+        abs_gap = abs(val)
+        if abs_gap < 10:
+            return "#95a5a6"
+        if abs_gap < 30:
             return "#27ae60"
-        return "#f39c12"
+        if abs_gap < 60:
+            return "#2ecc71"
+        return "#8e44ad"
 
     @staticmethod
     def _color_for_next_res(val: float | None) -> str:
@@ -491,7 +507,11 @@ class MainWindow(QtWidgets.QMainWindow):
             return "#c0392b"
         if val < 2:
             return "#f39c12"
-        return "#95a5a6"
+        if val < 5:
+            return "#a3d9a5"
+        if val < 10:
+            return "#27ae60"
+        return "#2ecc71"
 
     def _format_level(self, label: str, lvl: dict) -> str:
         if not lvl or lvl.get("price") is None:
@@ -532,6 +552,11 @@ def _fmt_pct1(val: float | None) -> str:
     if val is None:
         return "--"
     return f"{val:.1f}"
+
+def _fmt_pct1_signed(val: float | None) -> str:
+    if val is None:
+        return "--"
+    return f"{val:+.1f}"
 
 
 def _fmt_price(val: float | None) -> str:
