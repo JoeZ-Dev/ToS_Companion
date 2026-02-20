@@ -111,6 +111,8 @@ class SchwabRestClient:
             return {"periodType": "year", "period": 1, "frequencyType": "daily", "frequency": 1}
         if freq == "1d":
             return {"periodType": "year", "period": 1, "frequencyType": "daily", "frequency": 1}
+        if freq == "day":
+            return {"periodType": "day", "period": 1, "frequencyType": "minute", "frequency": 1}
         raise ValueError(f"Unsupported freq {freq}")
 
     def _request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
