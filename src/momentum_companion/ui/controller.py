@@ -6,6 +6,8 @@ import threading
 from functools import partial
 import statistics
 from pathlib import Path
+from datetime import datetime, time as dtime
+from zoneinfo import ZoneInfo
 from PySide6 import QtCore
 
 from momentum_companion.llm.service import LLMService
@@ -67,6 +69,8 @@ class UIController:
         self._ae_engine = ae_engine or AEEngine(rest_client, Path(db_path) if db_path else None)
         self._last_ae_snapshot: dict | None = None
         self._logger = logging.getLogger(__name__)
+        self._et_tz = ZoneInfo("America/New_York")
+        self._intraday_suppressed = False
 
     def handle_flash(self, symbol: str, rec: dict, payload: dict) -> None:
         """Trigger flash alert in UI."""
@@ -115,11 +119,16 @@ class UIController:
             return
         try:
             self._window.banner.setText("")
+            intraday_ok = self._is_intraday_window()
             end_ms = int(time.time() * 1000)
             start_ms = end_ms - (self._display_window_sec * 1000)
-            bars = self._fetch_candles(symbol, start_ms, end_ms, "day")
+            bars = []
+            if intraday_ok:
+                bars = self._fetch_candles(symbol, start_ms, end_ms, "day")
+            else:
+                self._window.banner.setText("Market closed; intraday fetch skipped.")
+                self._intraday_suppressed = True
             if not bars:
-                # Fallback: daily 1d bars to seed chart if intraday empty
                 bars = self._fetch_candles(symbol, None, None, "1d")
             self._bars = bars
             if self._bars:
@@ -154,6 +163,10 @@ class UIController:
         ]
 
     def _subscribe_stream(self, symbol: str) -> None:
+        if not self._is_intraday_window():
+            self._window.connection_label.setText("Connection: STREAM DEFERRED (market closed)")
+            self._window.banner.setText("Stream deferred until market window opens.")
+            return
         client = self._ensure_stream_client()
         if not client:
             return
@@ -401,6 +414,16 @@ class UIController:
         """Mark dirty and schedule a render on the Qt event loop ASAP."""
         self._dirty = True
         QtCore.QTimer.singleShot(0, self._render_tick)
+
+    def _is_intraday_window(self) -> bool:
+        """Returns True if within 04:00–20:00 ET on a trading day (Mon–Fri)."""
+        now_et = datetime.now(self._et_tz)
+        if now_et.weekday() >= 5:  # Saturday/Sunday
+            return False
+        tod = now_et.time()
+        if tod < dtime(hour=4) or tod > dtime(hour=20):
+            return False
+        return True
 
     def _on_stream_state(self, state: str) -> None:
         """Update UI with stream state transitions."""
