@@ -24,6 +24,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._clock_timer.timeout.connect(self._tick_clock)
         self._clock_timer.start()
         self._display_tz = ZoneInfo("America/New_York")
+        self._tz_selector: QtWidgets.QComboBox | None = None
 
     def _build_layout(self) -> None:
         central = QtWidgets.QWidget()
@@ -287,16 +288,35 @@ class MainWindow(QtWidgets.QMainWindow):
                 QLabel { color: #ecf0f1; }
                 QPushButton { background-color: #2c3e50; color: #ecf0f1; padding: 4px 8px; border: 1px solid #34495e; }
                 QPushButton:hover { background-color: #34495e; }
+                QComboBox { background-color: #2c3e50; color: #ecf0f1; padding: 4px; border: 1px solid #34495e; }
+                QComboBox QAbstractItemView { background-color: #111; color: #ecf0f1; selection-background-color: #34495e; }
                 """
             )
             layout = QtWidgets.QVBoxLayout()
-            layout.addWidget(QtWidgets.QLabel("Options placeholder"))
+            tz_row = QtWidgets.QHBoxLayout()
+            tz_row.addWidget(QtWidgets.QLabel("Display Time Zone:"))
+            self._tz_selector = QtWidgets.QComboBox()
+            self._tz_selector.addItems(["Eastern (ET)", "Local", "UTC"])
+            self._tz_selector.currentIndexChanged.connect(self._on_tz_changed)
+            tz_row.addWidget(self._tz_selector)
+            tz_row.addStretch()
+            layout.addLayout(tz_row)
             close_btn = QtWidgets.QPushButton("Close")
             close_btn.clicked.connect(dlg.close)
             layout.addWidget(close_btn, alignment=QtCore.Qt.AlignmentFlag.AlignRight)
             dlg.setLayout(layout)
             self._options_dialog = dlg
         self._options_dialog.show()
+
+    def _on_tz_changed(self, idx: int) -> None:
+        choice = self._tz_selector.currentText() if self._tz_selector else "Eastern (ET)"
+        if choice.startswith("Eastern"):
+            self._display_tz = ZoneInfo("America/New_York")
+        elif choice.startswith("Local"):
+            self._display_tz = datetime.now().astimezone().tzinfo or ZoneInfo("America/New_York")
+        else:
+            self._display_tz = ZoneInfo("UTC")
+        self._tick_clock()
 
     def update_ae_panel(self, snapshot: dict | None) -> None:
         """Render AE snapshot in compact sections."""
