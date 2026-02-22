@@ -71,6 +71,8 @@ class UIController:
         self._logger = logging.getLogger(__name__)
         self._et_tz = ZoneInfo("America/New_York")
         self._intraday_suppressed = False
+        self._last_llm_ts: dict[str, float] = {}
+        self._last_llm_hash: dict[str, str] = {}
 
     def handle_flash(self, symbol: str, rec: dict, payload: dict) -> None:
         """Trigger flash alert in UI."""
@@ -99,6 +101,8 @@ class UIController:
             self._ae_engine.reset_intraday()
             if hasattr(self._window, "update_ae_panel"):
                 self._window.update_ae_panel(None)  # type: ignore[attr-defined]
+        self._last_llm_ts.pop(symbol, None)
+        self._last_llm_hash.pop(symbol, None)
         self._window.symbol_input.setDisabled(True)
         self._window.connection_label.setText("Connection: REQUESTED")
         self._window.banner.setText(f"Requested symbol: {symbol}")
@@ -243,6 +247,7 @@ class UIController:
                                 self._last_ae_snapshot = snap
                                 if hasattr(self._window, "update_ae_panel"):
                                     self._window.update_ae_panel(snap)  # type: ignore[attr-defined]
+                                self._maybe_invoke_llm(snap, event)
                     forming = self._aggregator.forming_bar()
                     sig = (
                         forming.ts if forming else None,
@@ -276,6 +281,53 @@ class UIController:
             QtCore.Q_ARG(float, float(ask) if ask is not None else 0.0),
             QtCore.Q_ARG(float, float(last) if last is not None else 0.0),
         )
+
+    def _maybe_invoke_llm(self, snapshot: dict, quote_event: QuoteEvent) -> None:
+        """Gate and invoke LLM coach off the UI thread."""
+        symbol = snapshot.get("symbol")
+        if not symbol or not self._llm_service:
+            return
+        # Data quality gates
+        if snapshot.get("data_quality") != "ok":
+            return
+        if not snapshot.get("has_intraday_data") or not snapshot.get("has_4h_data") or not snapshot.get("has_market_data"):
+            return
+        # Time gate
+        now_sec = time.time()
+        last_ts = self._last_llm_ts.get(symbol, 0)
+        if now_sec - last_ts < 30:
+            return
+        # Change gate
+        snap_hash = self._snapshot_hash(snapshot)
+        if self._last_llm_hash.get(symbol) == snap_hash:
+            return
+        self._last_llm_ts[symbol] = now_sec
+        self._last_llm_hash[symbol] = snap_hash
+        QtCore.QTimer.singleShot(0, lambda: self._run_llm(snapshot, quote_event))
+
+    def _run_llm(self, snapshot: dict, quote_event: QuoteEvent) -> None:
+        try:
+            session_mode = "RTH" if self._is_intraday_window() else "PRE"
+            rec = self._llm_service.evaluate(snapshot, session_mode, quote_event)  # type: ignore[attr-defined]
+            if hasattr(self._window, "apply_llm_recommendation"):
+                QtCore.QMetaObject.invokeMethod(
+                    self._window,
+                    "apply_llm_recommendation",
+                    QtCore.Qt.ConnectionType.QueuedConnection,
+                    QtCore.Q_ARG(dict, rec),  # type: ignore[arg-type]
+                )
+        except Exception:
+            self._logger.exception("LLM evaluate failed")
+
+    @staticmethod
+    def _snapshot_hash(snapshot: dict) -> str:
+        """Hash key fields to detect meaningful changes."""
+        import hashlib
+        import json
+
+        keys = ["regime", "levels", "micro", "last_price", "vwap", "data_quality"]
+        data = {k: snapshot.get(k) for k in keys}
+        return hashlib.sha256(json.dumps(data, sort_keys=True, default=str).encode()).hexdigest()
 
     def _update_labels_ui(self, ts_ms: int | None, bid: float | None, ask: float | None, last: float | None) -> None:
         self._logger.debug("UI label update: ts=%s bid=%s ask=%s last=%s", ts_ms, bid, ask, last)
