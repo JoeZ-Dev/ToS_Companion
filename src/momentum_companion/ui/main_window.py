@@ -296,7 +296,18 @@ class MainWindow(QtWidgets.QMainWindow):
             tz_row = QtWidgets.QHBoxLayout()
             tz_row.addWidget(QtWidgets.QLabel("Display Time Zone:"))
             self._tz_selector = QtWidgets.QComboBox()
-            self._tz_selector.addItems(["Eastern (ET)", "Local", "UTC"])
+            self._tz_selector.addItems(
+                [
+                    "Eastern (ET)",
+                    "Central (CT)",
+                    "Mountain (MT)",
+                    "Pacific (PT)",
+                    "Alaska (AKT)",
+                    "Hawaii (HST)",
+                    "Local",
+                    "UTC",
+                ]
+            )
             self._tz_selector.currentIndexChanged.connect(self._on_tz_changed)
             tz_row.addWidget(self._tz_selector)
             tz_row.addStretch()
@@ -312,6 +323,16 @@ class MainWindow(QtWidgets.QMainWindow):
         choice = self._tz_selector.currentText() if self._tz_selector else "Eastern (ET)"
         if choice.startswith("Eastern"):
             self._display_tz = ZoneInfo("America/New_York")
+        elif choice.startswith("Central"):
+            self._display_tz = ZoneInfo("America/Chicago")
+        elif choice.startswith("Mountain"):
+            self._display_tz = ZoneInfo("America/Denver")
+        elif choice.startswith("Pacific"):
+            self._display_tz = ZoneInfo("America/Los_Angeles")
+        elif choice.startswith("Alaska"):
+            self._display_tz = ZoneInfo("America/Anchorage")
+        elif choice.startswith("Hawaii"):
+            self._display_tz = ZoneInfo("Pacific/Honolulu")
         elif choice.startswith("Local"):
             self._display_tz = datetime.now().astimezone().tzinfo or ZoneInfo("America/New_York")
         else:
