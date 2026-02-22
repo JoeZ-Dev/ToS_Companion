@@ -89,6 +89,8 @@ class UIController:
             self._window.symbol_input.returnPressed.connect(self._on_symbol_entered)  # type: ignore[attr-defined]
         if hasattr(self._window, "llm_toggle"):
             self._window.llm_toggle.clicked.connect(self._on_llm_toggle)  # type: ignore[attr-defined]
+        if hasattr(self._window, "options_btn"):
+            self._window.options_btn.clicked.connect(self._open_options)  # type: ignore[attr-defined]
 
     def _on_symbol_entered(self) -> None:
         raw = self._window.symbol_input.text()
@@ -503,6 +505,10 @@ class UIController:
             self._window.llm_status.setText("LLM: ON" if checked else "LLM: OFF")
         if hasattr(self._window, "llm_toggle"):
             self._window.llm_toggle.setText("Disable LLM" if checked else "Enable LLM")
+
+    def _open_options(self) -> None:
+        if hasattr(self._window, "show_options_dialog"):
+            self._window.show_options_dialog()
 
     @staticmethod
     def _parse_shares_outstanding(payload: Any, symbol: str) -> float | None:

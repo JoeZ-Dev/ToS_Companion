@@ -16,6 +16,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.resize(1400, 900)
         self._logger = logging.getLogger(__name__)
         self._build_layout()
+        self._options_dialog: QtWidgets.QDialog | None = None
 
     def _build_layout(self) -> None:
         central = QtWidgets.QWidget()
@@ -36,6 +37,8 @@ class MainWindow(QtWidgets.QMainWindow):
         top.addWidget(self.symbol_input)
         self.connection_label = QtWidgets.QLabel("Connection: UNKNOWN")
         top.addWidget(self.connection_label)
+        self.options_btn = QtWidgets.QPushButton("Options")
+        top.addWidget(self.options_btn)
         top.addStretch()
         root.addLayout(top)
 
@@ -263,6 +266,28 @@ class MainWindow(QtWidgets.QMainWindow):
     def flash_alert(self, message: str) -> None:
         """Show flash-worthy alert."""
         self.llm_flash.setText(message)
+
+    def show_options_dialog(self) -> None:
+        if self._options_dialog is None:
+            dlg = QtWidgets.QDialog(self)
+            dlg.setWindowTitle("Options")
+            dlg.setModal(True)
+            dlg.setStyleSheet(
+                """
+                QDialog { background-color: #111; color: #ecf0f1; }
+                QLabel { color: #ecf0f1; }
+                QPushButton { background-color: #2c3e50; color: #ecf0f1; padding: 4px 8px; border: 1px solid #34495e; }
+                QPushButton:hover { background-color: #34495e; }
+                """
+            )
+            layout = QtWidgets.QVBoxLayout()
+            layout.addWidget(QtWidgets.QLabel("Options placeholder"))
+            close_btn = QtWidgets.QPushButton("Close")
+            close_btn.clicked.connect(dlg.close)
+            layout.addWidget(close_btn, alignment=QtCore.Qt.AlignmentFlag.AlignRight)
+            dlg.setLayout(layout)
+            self._options_dialog = dlg
+        self._options_dialog.show()
 
     def update_ae_panel(self, snapshot: dict | None) -> None:
         """Render AE snapshot in compact sections."""
