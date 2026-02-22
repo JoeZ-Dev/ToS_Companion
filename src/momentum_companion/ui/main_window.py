@@ -5,6 +5,8 @@ from PySide6 import QtWidgets, QtGui, QtCore
 from momentum_companion.utils.logging import logging
 
 from momentum_companion.ui.chart_widget import LightweightChartWidget
+from zoneinfo import ZoneInfo
+from datetime import datetime
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -17,6 +19,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._logger = logging.getLogger(__name__)
         self._build_layout()
         self._options_dialog: QtWidgets.QDialog | None = None
+        self._clock_timer = QtCore.QTimer(self)
+        self._clock_timer.setInterval(1000)
+        self._clock_timer.timeout.connect(self._tick_clock)
+        self._clock_timer.start()
+        self._display_tz = ZoneInfo("America/New_York")
 
     def _build_layout(self) -> None:
         central = QtWidgets.QWidget()
@@ -29,6 +36,8 @@ class MainWindow(QtWidgets.QMainWindow):
         top = QtWidgets.QHBoxLayout()
         top.setContentsMargins(0, 0, 0, 0)
         top.setSpacing(6)
+        self.clock_label = QtWidgets.QLabel("--:--:--")
+        top.addWidget(self.clock_label)
         top.addWidget(QtWidgets.QLabel("Symbol:"))
         self.symbol_input = QtWidgets.QLineEdit()
         self.symbol_input.setPlaceholderText("SYM")
@@ -655,6 +664,14 @@ class MainWindow(QtWidgets.QMainWindow):
         hi_txt = _fmt_price(high) if high is not None else "--"
         lo_txt = _fmt_price(low) if low is not None else "--"
         return f"{label}: {hi_txt}/{lo_txt}"
+
+    def _tick_clock(self) -> None:
+        try:
+            now = QtCore.QDateTime.currentDateTimeUtc().toSecsSinceEpoch()
+            dt = datetime.fromtimestamp(now, self._display_tz) if self._display_tz else datetime.utcfromtimestamp(now)
+            self.clock_label.setText(dt.strftime("%H:%M:%S"))
+        except Exception:
+            self.clock_label.setText("--:--:--")
 
 
 def _fmt_pct(val: float | None) -> str:
