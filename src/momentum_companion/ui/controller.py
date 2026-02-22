@@ -73,6 +73,7 @@ class UIController:
         self._intraday_suppressed = False
         self._last_llm_ts: dict[str, float] = {}
         self._last_llm_hash: dict[str, str] = {}
+        self._llm_enabled: bool = False
 
     def handle_flash(self, symbol: str, rec: dict, payload: dict) -> None:
         """Trigger flash alert in UI."""
@@ -86,6 +87,8 @@ class UIController:
     def _hook_symbol_input(self) -> None:
         if hasattr(self._window, "symbol_input"):
             self._window.symbol_input.returnPressed.connect(self._on_symbol_entered)  # type: ignore[attr-defined]
+        if hasattr(self._window, "llm_toggle"):
+            self._window.llm_toggle.clicked.connect(self._on_llm_toggle)  # type: ignore[attr-defined]
 
     def _on_symbol_entered(self) -> None:
         raw = self._window.symbol_input.text()
@@ -286,6 +289,8 @@ class UIController:
         """Gate and invoke LLM coach off the UI thread."""
         symbol = snapshot.get("symbol")
         if not symbol or not self._llm_service:
+            return
+        if not self._llm_enabled:
             return
         # Data quality gates
         if snapshot.get("data_quality") != "ok":
@@ -491,6 +496,13 @@ class UIController:
             self._window.connection_label.setText("Connection: RECONNECTING")
         elif state == "CONNECTING":
             self._window.connection_label.setText("Connection: CONNECTING")
+
+    def _on_llm_toggle(self, checked: bool) -> None:
+        self._llm_enabled = checked
+        if hasattr(self._window, "llm_status"):
+            self._window.llm_status.setText("LLM: ON" if checked else "LLM: OFF")
+        if hasattr(self._window, "llm_toggle"):
+            self._window.llm_toggle.setText("Disable LLM" if checked else "Enable LLM")
 
     @staticmethod
     def _parse_shares_outstanding(payload: Any, symbol: str) -> float | None:

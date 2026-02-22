@@ -38,6 +38,10 @@ class MainWindow(QtWidgets.QMainWindow):
         top.addWidget(self.connection_label)
         self.llm_status = QtWidgets.QLabel("LLM: OFF")
         top.addWidget(self.llm_status)
+        self.llm_toggle = QtWidgets.QPushButton("Enable LLM")
+        self.llm_toggle.setCheckable(True)
+        self.llm_toggle.setChecked(False)
+        top.addWidget(self.llm_toggle)
         top.addStretch()
         root.addLayout(top)
 
