@@ -27,6 +27,11 @@ from momentum_companion.analysis.ae import AEEngine
 from momentum_companion.utils.logging import logging
 
 
+class _ModelSignals(QtCore.QObject):
+    models_ready = QtCore.Signal(object)
+    model_values = QtCore.Signal(str, str)
+
+
 class UIController:
     """Coordinates UI state, signals/slots, and renders updates (§4.1)."""
 
@@ -80,6 +85,11 @@ class UIController:
         self._available_models: list[str] = []
         self._full_model = "gpt-4o"
         self._refresh_model = "gpt-4o-mini"
+        self._model_signals = _ModelSignals()
+        if hasattr(self._window, "populate_models"):
+            self._model_signals.models_ready.connect(self._window.populate_models)  # type: ignore[attr-defined]
+        if hasattr(self._window, "set_model_values"):
+            self._model_signals.model_values.connect(self._window.set_model_values)  # type: ignore[attr-defined]
         self._hook_symbol_input()
 
     def handle_flash(self, symbol: str, rec: dict, payload: dict) -> None:
@@ -607,11 +617,8 @@ class UIController:
                 self._logger.info("LLM models fetched: %s (showing %s)", fetched, len(merged))
                 if merged:
                     self._logger.debug("Model sample: %s", merged[:10])
-                if hasattr(self._window, "populate_models"):
-                    QtCore.QTimer.singleShot(0, lambda m=merged: self._window.populate_models(m))  # type: ignore[attr-defined]
-                QtCore.QTimer.singleShot(
-                    0, lambda: getattr(self._window, "set_model_values", lambda *_: None)(self._full_model, self._refresh_model)
-                )
+                self._model_signals.models_ready.emit(merged)
+                self._model_signals.model_values.emit(self._full_model or "", self._refresh_model or "")
             except Exception:
                 self._logger.warning("Failed to list models from OpenAI", exc_info=True)
         threading.Thread(target=task, daemon=True).start()
