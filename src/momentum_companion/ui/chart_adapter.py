@@ -42,6 +42,11 @@ class ChartAdapter:
     def shutdown(self) -> None:
         return None
 
+    def set_timezone(self, tz_name: str) -> None:
+        """Update underlying chart timezone."""
+        if hasattr(self._widget, "set_timezone"):
+            self._widget.set_timezone(tz_name)
+
 
 class FakeChartAdapter(ChartAdapter):
     """Test fake."""

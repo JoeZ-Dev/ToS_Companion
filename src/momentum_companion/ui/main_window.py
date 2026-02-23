@@ -34,6 +34,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._llm_full_callback: Optional[Callable[[], None]] = None
         self._llm_refresh_callback: Optional[Callable[[], None]] = None
         self._rr_gate_callback: Optional[Callable[[bool], None]] = None
+        self._tz_callback: Optional[Callable[[str], None]] = None
+        self._tz_callback: Optional[Callable[[str], None]] = None
         self._full_model_box: Optional[QtWidgets.QComboBox] = None
         self._refresh_model_box: Optional[QtWidgets.QComboBox] = None
         self._prompt_edit: Optional[QtWidgets.QTextEdit] = None
@@ -389,14 +391,14 @@ class MainWindow(QtWidgets.QMainWindow):
             rr_row.addStretch()
             layout.addLayout(rr_row)
 
-            prompt_label = QtWidgets.QLabel("LLM Prompt:")
-            self._prompt_edit = QtWidgets.QTextEdit()
-            self._prompt_edit.setPlaceholderText("Enter base prompt for LLM recommendations...")
-            if self._pending_prompt_text:
-                self._prompt_edit.setPlainText(self._pending_prompt_text)
-            self._prompt_edit.textChanged.connect(self._handle_prompt_changed)
-            layout.addWidget(prompt_label)
-            layout.addWidget(self._prompt_edit)
+        prompt_label = QtWidgets.QLabel("LLM Prompt:")
+        self._prompt_edit = QtWidgets.QTextEdit()
+        self._prompt_edit.setPlaceholderText("Enter base prompt for LLM recommendations...")
+        if self._pending_prompt_text:
+            self._prompt_edit.setPlainText(self._pending_prompt_text)
+        self._prompt_edit.textChanged.connect(self._handle_prompt_changed)
+        layout.addWidget(prompt_label)
+        layout.addWidget(self._prompt_edit)
 
             close_btn = QtWidgets.QPushButton("Close")
             close_btn.clicked.connect(dlg.close)
@@ -419,23 +421,34 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_tz_changed(self, idx: int) -> None:
         choice = self._tz_selector.currentText() if self._tz_selector else "Eastern (ET)"
+        tz_name = "America/New_York"
         if choice.startswith("Eastern"):
-            self._display_tz = ZoneInfo("America/New_York")
+            tz_name = "America/New_York"
+            self._display_tz = ZoneInfo(tz_name)
         elif choice.startswith("Central"):
-            self._display_tz = ZoneInfo("America/Chicago")
+            tz_name = "America/Chicago"
+            self._display_tz = ZoneInfo(tz_name)
         elif choice.startswith("Mountain"):
-            self._display_tz = ZoneInfo("America/Denver")
+            tz_name = "America/Denver"
+            self._display_tz = ZoneInfo(tz_name)
         elif choice.startswith("Pacific"):
-            self._display_tz = ZoneInfo("America/Los_Angeles")
+            tz_name = "America/Los_Angeles"
+            self._display_tz = ZoneInfo(tz_name)
         elif choice.startswith("Alaska"):
-            self._display_tz = ZoneInfo("America/Anchorage")
+            tz_name = "America/Anchorage"
+            self._display_tz = ZoneInfo(tz_name)
         elif choice.startswith("Hawaii"):
-            self._display_tz = ZoneInfo("Pacific/Honolulu")
+            tz_name = "Pacific/Honolulu"
+            self._display_tz = ZoneInfo(tz_name)
         elif choice.startswith("Local"):
             self._display_tz = datetime.now().astimezone().tzinfo or ZoneInfo("America/New_York")
+            tz_name = self._display_tz.key if hasattr(self._display_tz, "key") else "Local"
         else:
+            tz_name = "UTC"
             self._display_tz = ZoneInfo("UTC")
         self._tick_clock()
+        if self._tz_callback:
+            self._tz_callback(tz_name)
 
     def _handle_api_key_edit(self) -> None:
         if self._api_key_callback and hasattr(self, "_api_key_edit"):
@@ -524,6 +537,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_model_callback = cb
     def set_rr_gate_callback(self, cb: Callable[[bool], None]) -> None:
         self._rr_gate_callback = cb
+    def set_tz_callback(self, cb: Callable[[str], None]) -> None:
+        self._tz_callback = cb
     def set_prompt_callback(self, cb: Callable[[str], None]) -> None:
         self._prompt_callback = cb
     def set_prompt_reset_callback(self, cb: Callable[[], None]) -> None:

@@ -137,6 +137,8 @@ class UIController:
             self._window.set_prompt_reset_callback(self._reset_prompt)  # type: ignore[attr-defined]
         if hasattr(self._window, "set_rr_gate_callback"):
             self._window.set_rr_gate_callback(self._set_rr_gate_disabled)  # type: ignore[attr-defined]
+        if hasattr(self._window, "set_tz_callback"):
+            self._window.set_tz_callback(self._on_display_tz_changed)  # type: ignore[attr-defined]
         if hasattr(self._window, "set_llm_full_callback"):
             self._window.set_llm_full_callback(self._run_llm_full)  # type: ignore[attr-defined]
         if hasattr(self._window, "set_llm_refresh_callback"):
@@ -145,6 +147,7 @@ class UIController:
         self._load_stored_models()
         self._load_stored_prompt()
         self._load_stored_rr_gate()
+        self._on_display_tz_changed("America/New_York")
 
     def _on_symbol_entered(self) -> None:
         raw = self._window.symbol_input.text()
@@ -912,6 +915,13 @@ class UIController:
             self._disable_rr_gate = stored
         if hasattr(self._window, "set_rr_gate_state"):
             self._window.set_rr_gate_state(self._disable_rr_gate)
+
+    def _on_display_tz_changed(self, tz_name: str) -> None:
+        try:
+            self._chart_adapter.set_timezone(tz_name)
+            self._logger.info("Chart timezone set to %s", tz_name)
+        except Exception:
+            self._logger.debug("Failed to set chart timezone to %s", tz_name, exc_info=True)
 
     def _normalize_snapshot_for_llm(self, snapshot: dict) -> dict:
         quote_src = snapshot.get("quote") if isinstance(snapshot, dict) else {}

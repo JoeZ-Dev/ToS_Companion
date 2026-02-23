@@ -23,6 +23,11 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
         height = size.height()
         self.page().runJavaScript(f"if(window.chart){{chart.resize({width}, {height});}}")
 
+    def set_timezone(self, tz_name: str) -> None:
+        """Set chart time zone for axis/tooltip formatting."""
+        safe_tz = tz_name or "UTC"
+        self.page().runJavaScript(f"if(window.setChartTimeZone){{setChartTimeZone('{safe_tz}');}}")
+
     def _init_chart(self) -> None:
         js = ASSET_JS.read_text(encoding="utf-8")
         options = {
@@ -129,21 +134,18 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
               </div>
               <script>
                 window.onerror=(msg)=>{{document.title='JSERR: '+msg;}};
-                function utcToET_hhmmss(seconds){{
+                let currentTz='America/New_York';
+                function formatTime(seconds){{
                   const date=new Date(seconds*1000);
-                  const et=new Date(date.toLocaleString('en-US',{{timeZone:'America/New_York'}}));
-                  const hh=et.getHours().toString().padStart(2,'0');
-                  const mm=et.getMinutes().toString().padStart(2,'0');
-                  const ss=et.getSeconds().toString().padStart(2,'0');
+                  const localized=new Date(date.toLocaleString('en-US',{{timeZone:currentTz}}));
+                  const hh=localized.getHours().toString().padStart(2,'0');
+                  const mm=localized.getMinutes().toString().padStart(2,'0');
+                  const ss=localized.getSeconds().toString().padStart(2,'0');
                   return `${{hh}}:${{mm}}:${{ss}}`;
                 }}
-                function formatTimeET(seconds, tenths){{
-                  const t=utcToET_hhmmss(seconds);
-                  if (tenths === undefined || tenths === null || tenths === 0) return t;
-                  return `${{t}}.${{tenths}}`;
-                }}
+                function setChartTimeZone(tzName){{ currentTz = tzName || 'UTC'; chart.applyOptions({{localization:{{timeFormatter:formatTime}}}}); }}
                 const options={options_json};
-                options.localization.timeFormatter=utcToET_hhmmss;
+                options.localization.timeFormatter=formatTime;
                 const container=document.getElementById('chart');
                 const chart=LightweightCharts.createChart(container, options);
                 const candleSeries=chart.addSeries(LightweightCharts.CandlestickSeries, {candle_json});
