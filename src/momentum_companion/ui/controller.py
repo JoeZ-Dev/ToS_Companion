@@ -580,12 +580,7 @@ class UIController:
                 models = self._llm_service._client.list_models()  # type: ignore[attr-defined]
                 self._available_models = models
                 if hasattr(self._window, "populate_models"):
-                    QtCore.QMetaObject.invokeMethod(
-                        self._window,
-                        "populate_models",
-                        QtCore.Qt.ConnectionType.QueuedConnection,
-                        QtCore.Q_ARG("PyObject", models),
-                    )
+                    QtCore.QTimer.singleShot(0, lambda m=models: self._window.populate_models(m))  # type: ignore[attr-defined]
             except Exception:
                 self._logger.warning("Failed to list models from OpenAI", exc_info=True)
         threading.Thread(target=task, daemon=True).start()
