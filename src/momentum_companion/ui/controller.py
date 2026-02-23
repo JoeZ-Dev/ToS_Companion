@@ -601,12 +601,14 @@ class UIController:
             try:
                 models = self._llm_service._client.list_models()  # type: ignore[attr-defined]
                 fetched = len(models)
-                if not models:
-                    models = ["gpt-4o", "gpt-4o-mini"]
-                self._available_models = models
-                self._logger.info("LLM models fetched: %s", fetched)
+                defaults = ["gpt-4o", "gpt-4o-mini"]
+                merged = sorted(set(models + defaults)) if models else defaults
+                self._available_models = merged
+                self._logger.info("LLM models fetched: %s (showing %s)", fetched, len(merged))
+                if merged:
+                    self._logger.debug("Model sample: %s", merged[:10])
                 if hasattr(self._window, "populate_models"):
-                    QtCore.QTimer.singleShot(0, lambda m=models: self._window.populate_models(m))  # type: ignore[attr-defined]
+                    QtCore.QTimer.singleShot(0, lambda m=merged: self._window.populate_models(m))  # type: ignore[attr-defined]
                 QtCore.QTimer.singleShot(
                     0, lambda: getattr(self._window, "set_model_values", lambda *_: None)(self._full_model, self._refresh_model)
                 )

@@ -33,6 +33,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_model_box: Optional[QtWidgets.QComboBox] = None
         self._models_cache: list[str] = []
         self._pending_api_key_text: Optional[str] = None
+        self._model_status_label: Optional[QtWidgets.QLabel] = None
 
     def _build_layout(self) -> None:
         central = QtWidgets.QWidget()
@@ -353,6 +354,8 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 self.populate_models(["gpt-4o", "gpt-4o-mini"])
             layout.addLayout(model_row)
+            self._model_status_label = QtWidgets.QLabel("Models: --")
+            layout.addWidget(self._model_status_label)
             close_btn = QtWidgets.QPushButton("Close")
             close_btn.clicked.connect(dlg.close)
             layout.addWidget(close_btn, alignment=QtCore.Qt.AlignmentFlag.AlignRight)
@@ -411,6 +414,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._full_model_box.setToolTip(count_txt)
         if self._refresh_model_box:
             self._refresh_model_box.setToolTip(count_txt)
+        if self._model_status_label:
+            self._model_status_label.setText(count_txt)
 
     def _handle_full_model_changed(self, text: str) -> None:
         if hasattr(self, "_full_model_callback") and self._full_model_callback:
