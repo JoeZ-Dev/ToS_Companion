@@ -351,8 +351,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self._refresh_model_box.editTextChanged.connect(self._handle_refresh_model_changed)
             if self._models_cache:
                 self.populate_models(self._models_cache)
-            else:
-                self.populate_models(["gpt-4o", "gpt-4o-mini"])
             layout.addLayout(model_row)
             self._model_status_label = QtWidgets.QLabel("Models: --")
             layout.addWidget(self._model_status_label)
@@ -396,20 +394,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._models_cache = models or []
         if hasattr(self, "_full_model_box") and self._full_model_box:
             self._full_model_box.clear()
-            if self._models_cache:
-                for m in self._models_cache:
-                    self._full_model_box.addItem(m)
-            else:
-                for m in ["gpt-4o", "gpt-4o-mini"]:
-                    self._full_model_box.addItem(m)
+            for m in self._models_cache:
+                self._full_model_box.addItem(m)
         if hasattr(self, "_refresh_model_box") and self._refresh_model_box:
             self._refresh_model_box.clear()
-            if self._models_cache:
-                for m in self._models_cache:
-                    self._refresh_model_box.addItem(m)
-            else:
-                for m in ["gpt-4o", "gpt-4o-mini"]:
-                    self._refresh_model_box.addItem(m)
+            for m in self._models_cache:
+                self._refresh_model_box.addItem(m)
         # Preserve current text if set
         if self._full_model_box and self._full_model_box.currentText():
             self._full_model_box.setEditText(self._full_model_box.currentText())
@@ -417,7 +407,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._refresh_model_box.setEditText(self._refresh_model_box.currentText())
         # Tooltip with count
         sample = ", ".join(self._models_cache[:3]) if self._models_cache else ""
-        count_txt = f"Models: {len(self._models_cache)}" if self._models_cache else "Models: defaults (none fetched)"
+        count_txt = f"Models: {len(self._models_cache)}" if self._models_cache else "Models: loading/none"
         if sample:
             count_txt += f" e.g. {sample}"
         if self._full_model_box:
