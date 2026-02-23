@@ -402,11 +402,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self._refresh_model_box.clear()
             for m in self._models_cache:
                 self._refresh_model_box.addItem(m)
-        # Preserve current text if set
-        if self._full_model_box and self._full_model_box.currentText():
-            self._full_model_box.setEditText(self._full_model_box.currentText())
-        if self._refresh_model_box and self._refresh_model_box.currentText():
-            self._refresh_model_box.setEditText(self._refresh_model_box.currentText())
         # Tooltip with count
         sample = ", ".join(self._models_cache[:3]) if self._models_cache else ""
         count_txt = f"Models: {len(self._models_cache)}" if self._models_cache else "Models: loading/none"
