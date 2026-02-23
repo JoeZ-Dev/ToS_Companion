@@ -608,15 +608,9 @@ class UIController:
                 if merged:
                     self._logger.debug("Model sample: %s", merged[:10])
                 if hasattr(self._window, "populate_models"):
-                    QtCore.QMetaObject.invokeMethod(  # type: ignore[attr-defined]
-                        self._window,
-                        lambda m=merged: self._window.populate_models(m),  # type: ignore[attr-defined]
-                        QtCore.Qt.ConnectionType.QueuedConnection,
-                    )
-                QtCore.QMetaObject.invokeMethod(
-                    self._window,
-                    lambda: getattr(self._window, "set_model_values", lambda *_: None)(self._full_model, self._refresh_model),
-                    QtCore.Qt.ConnectionType.QueuedConnection,
+                    QtCore.QTimer.singleShot(0, lambda m=merged: self._window.populate_models(m))  # type: ignore[attr-defined]
+                QtCore.QTimer.singleShot(
+                    0, lambda: getattr(self._window, "set_model_values", lambda *_: None)(self._full_model, self._refresh_model)
                 )
             except Exception:
                 self._logger.warning("Failed to list models from OpenAI", exc_info=True)
