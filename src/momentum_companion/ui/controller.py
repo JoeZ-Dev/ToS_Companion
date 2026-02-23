@@ -658,6 +658,14 @@ class UIController:
             self._logger.warning(msg)
             QtCore.QTimer.singleShot(0, lambda m=msg: self._window.llm_reco.setText(m))  # type: ignore[attr-defined]
             return
+        bars_len = len(normalized.get("bars_window") or []) if isinstance(normalized.get("bars_window"), list) else 0
+        levels_info = normalized.get("levels") or {}
+        self._logger.info(
+            "LLM normalized snapshot keys=%s bars_window_len=%s levels_fields=%s",
+            list(normalized.keys()),
+            bars_len,
+            list(levels_info.keys()) if isinstance(levels_info, dict) else None,
+        )
         messages = self._build_llm_messages(normalized)
 
         def task() -> None:
@@ -824,6 +832,34 @@ class UIController:
         market_state = snapshot.get("market_state")
         if market_state not in self._ALLOWED_MARKET_STATES:
             market_state = self._compute_market_state()
+        levels_src = snapshot.get("levels") if isinstance(snapshot, dict) else {}
+        if not isinstance(levels_src, dict):
+            levels_src = {}
+        levels = {
+            "nearest_resistance": levels_src.get("nearest_resistance"),
+            "nearest_support": levels_src.get("nearest_support"),
+        }
+        session_src = snapshot.get("session") if isinstance(snapshot, dict) else {}
+        if not isinstance(session_src, dict):
+            session_src = {}
+        session = {
+            "premarket_high": session_src.get("premarket_high"),
+            "premarket_low": session_src.get("premarket_low"),
+            "opening_range_high": session_src.get("opening_range_high"),
+            "opening_range_low": session_src.get("opening_range_low"),
+        }
+        micro_src = snapshot.get("micro") if isinstance(snapshot, dict) else {}
+        if not isinstance(micro_src, dict):
+            micro_src = {}
+        micro = {
+            "micro_resistance_15m": micro_src.get("micro_resistance_15m"),
+            "micro_support_15m": micro_src.get("micro_support_15m"),
+            "micro_state": micro_src.get("micro_state"),
+        }
+        bars_window = snapshot.get("bars_window")
+        if bars_window and isinstance(bars_window, list):
+            # cap to last 60 bars if oversized
+            bars_window = bars_window[-60:]
         norm = {
             "schema_version": snapshot.get("schema_version", "AE-1.1"),
             "status": snapshot.get("status", "ok"),
@@ -833,7 +869,7 @@ class UIController:
             "session_mode": session_mode,
             "market_state": market_state,
             "quote": quote,
-            "bars_window": snapshot.get("bars_window"),
+            "bars_window": bars_window,
             "invocation_type": snapshot.get("invocation_type", "MANUAL_RECALC"),
             "in_position": snapshot.get("in_position", False),
             "side": "LONG" if snapshot.get("in_position") else None,
@@ -841,6 +877,10 @@ class UIController:
             "qty": snapshot.get("qty"),
             "current_stop_loss": snapshot.get("current_stop_loss"),
             "current_target_price": snapshot.get("current_target_price"),
+            "vwap": snapshot.get("vwap"),
+            "session": session,
+            "micro": micro,
+            "levels": levels,
         }
         return norm
 
