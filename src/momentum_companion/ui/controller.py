@@ -746,29 +746,29 @@ class UIController:
                     self._logger.info("LLM payload messages (unformatted): %s", messages)
                 resp = client.complete(messages=messages, model_override=model)
                 content = ""
-            # Log full raw response for debugging/inspection
-            try:
-                self._logger.info("LLM raw response: %s", json.dumps(resp, indent=2))
-            except Exception:
-                self._logger.info("LLM raw response (unformatted): %s", resp)
-            try:
-                choices = resp.get("choices") if isinstance(resp, dict) else None
-                if choices and isinstance(choices, list):
-                    msg = choices[0].get("message") if isinstance(choices[0], dict) else None
-                    if msg and msg.get("content"):
-                        content = msg.get("content")
-            except Exception:
-                content = ""
-            if not content:
-                content = json.dumps(resp)
-            try:
-                rec = json.loads(content)
-            except Exception:
-                rec = {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["DATA_STALE"], "summary": content}
-            rec = self._enforce_llm_output_consistency(rec, normalized, model)
-            QtCore.QTimer.singleShot(0, lambda r=rec: self._window.apply_llm_recommendation(r))  # type: ignore[attr-defined]
-            self._last_llm_ts[self._pending_symbol or ""] = time.time()
-            QtCore.QTimer.singleShot(0, lambda: self._refresh_llm_status())
+                # Log full raw response for debugging/inspection
+                try:
+                    self._logger.info("LLM raw response: %s", json.dumps(resp, indent=2))
+                except Exception:
+                    self._logger.info("LLM raw response (unformatted): %s", resp)
+                try:
+                    choices = resp.get("choices") if isinstance(resp, dict) else None
+                    if choices and isinstance(choices, list):
+                        msg = choices[0].get("message") if isinstance(choices[0], dict) else None
+                        if msg and msg.get("content"):
+                            content = msg.get("content")
+                except Exception:
+                    content = ""
+                if not content:
+                    content = json.dumps(resp)
+                try:
+                    rec = json.loads(content)
+                except Exception:
+                    rec = {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["DATA_STALE"], "summary": content}
+                rec = self._enforce_llm_output_consistency(rec, normalized, model)
+                QtCore.QTimer.singleShot(0, lambda r=rec: self._window.apply_llm_recommendation(r))  # type: ignore[attr-defined]
+                self._last_llm_ts[self._pending_symbol or ""] = time.time()
+                QtCore.QTimer.singleShot(0, lambda: self._refresh_llm_status())
             except Exception as e:
                 # Surface response details when available (e.g., HTTP errors)
                 try:
