@@ -181,6 +181,8 @@ class MainWindow(QtWidgets.QMainWindow):
         btn_row = QtWidgets.QHBoxLayout()
         self.llm_full_btn = QtWidgets.QPushButton("Run Full")
         self.llm_refresh_btn = QtWidgets.QPushButton("Run Refresh")
+        self.llm_full_btn.clicked.connect(self._handle_llm_full_clicked)
+        self.llm_refresh_btn.clicked.connect(self._handle_llm_refresh_clicked)
         btn_row.addWidget(self.llm_full_btn)
         btn_row.addWidget(self.llm_refresh_btn)
         btn_row.addStretch()
@@ -391,11 +393,6 @@ class MainWindow(QtWidgets.QMainWindow):
             update_btn.clicked.connect(self._handle_update_clicked)
             reset_btn = QtWidgets.QPushButton("Reset Prompt")
             reset_btn.clicked.connect(self._handle_reset_prompt_clicked)
-            # Wire LLM run buttons to controller callbacks
-            if hasattr(self, "llm_full_btn") and self.llm_full_btn:
-                self.llm_full_btn.clicked.connect(self._handle_llm_full_clicked)
-            if hasattr(self, "llm_refresh_btn") and self.llm_refresh_btn:
-                self.llm_refresh_btn.clicked.connect(self._handle_llm_refresh_clicked)
             btn_row = QtWidgets.QHBoxLayout()
             btn_row.addStretch()
             btn_row.addWidget(reset_btn)
