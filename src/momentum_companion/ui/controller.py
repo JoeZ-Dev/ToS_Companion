@@ -786,6 +786,13 @@ class UIController:
                         seen.add(m)
                         final.append(m)
                 self._available_models = final
+                # If current selections are not in the available list, fall back to first entries
+                if self._full_model not in final and final:
+                    self._full_model = final[0]
+                if self._refresh_model not in final and len(final) > 1:
+                    self._refresh_model = final[1]
+                elif self._refresh_model not in final and final:
+                    self._refresh_model = final[0]
                 self._logger.info("LLM models fetched: %s (showing %s)", fetched, len(final))
                 if final:
                     self._logger.debug("Model sample: %s", final[:10])
