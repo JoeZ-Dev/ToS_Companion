@@ -262,7 +262,7 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                     toolTip.innerHTML = `
                       <div class="tt-symbol" style="color:${{accent}}">${{window.__symbol}}</div>
                       <div class="tt-price">${{closePx!==undefined?Number(closePx).toFixed(2):'--'}}</div>
-                      <div class="tt-time">${{formatTimeET(ts, tenths)}}</div>
+                      <div class="tt-time">${{formatTime(ts)}}</div>
                       <div class="tt-meta">
                         <div class="tt-k">Vol</div><div class="tt-v">${{vol!==undefined?Number(vol).toLocaleString():'--'}}</div>
                         <div class="tt-k">O</div><div class="tt-v">${{(bar&&bar.open!==undefined)?Number(bar.open).toFixed(2):'--'}}</div>
