@@ -676,6 +676,7 @@ USER PAYLOAD: You are given the full snapshot JSON (schema_version, status, data
 
         def task() -> None:
             try:
+                self._logger.info("LLM invoking model=%s for symbol=%s", model, symbol)
                 resp = client.complete(messages=messages, model_override=model)
                 content = ""
                 # Log full raw response for debugging/inspection
