@@ -47,6 +47,7 @@ def main(instance_id: str) -> None:
         token_provider=token_provider,
         db_path=str(db_path),
         ae_engine=ae_engine,
+        app_state=app_state,
     )
     # wire flash callback
     llm_service._flash_callback = controller.handle_flash  # type: ignore[attr-defined]

@@ -29,6 +29,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._api_key_callback: Optional[Callable[[str], None]] = None
         self._full_model_callback: Optional[Callable[[str], None]] = None
         self._refresh_model_callback: Optional[Callable[[str], None]] = None
+        self._full_model_box: Optional[QtWidgets.QComboBox] = None
+        self._refresh_model_box: Optional[QtWidgets.QComboBox] = None
 
     def _build_layout(self) -> None:
         central = QtWidgets.QWidget()
@@ -326,6 +328,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._api_key_edit.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
             self._api_key_edit.setPlaceholderText("sk-...")
             self._api_key_edit.editingFinished.connect(self._handle_api_key_edit)
+            self._api_key_edit.returnPressed.connect(self._handle_api_key_edit)
             api_row.addWidget(self._api_key_edit)
             layout.addLayout(api_row)
             model_row = QtWidgets.QHBoxLayout()
@@ -384,6 +387,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if hasattr(self, "_refresh_model_box") and self._refresh_model_box:
             self._refresh_model_box.clear()
             self._refresh_model_box.addItems(models)
+        # Preserve current text if set
+        if self._full_model_box and self._full_model_box.currentText():
+            self._full_model_box.setEditText(self._full_model_box.currentText())
+        if self._refresh_model_box and self._refresh_model_box.currentText():
+            self._refresh_model_box.setEditText(self._refresh_model_box.currentText())
 
     def _handle_full_model_changed(self, text: str) -> None:
         if hasattr(self, "_full_model_callback") and self._full_model_callback:
@@ -398,6 +406,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def set_refresh_model_callback(self, cb: Callable[[str], None]) -> None:
         self._refresh_model_callback = cb
+
+    def set_model_values(self, full: str, refresh: str) -> None:
+        if self._full_model_box:
+            self._full_model_box.setEditText(full)
+        if self._refresh_model_box:
+            self._refresh_model_box.setEditText(refresh)
 
     def update_ae_panel(self, snapshot: dict | None) -> None:
         """Render AE snapshot in compact sections."""

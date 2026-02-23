@@ -601,6 +601,9 @@ class UIController:
                 self._available_models = models
                 if hasattr(self._window, "populate_models"):
                     QtCore.QTimer.singleShot(0, lambda m=models: self._window.populate_models(m))  # type: ignore[attr-defined]
+                QtCore.QTimer.singleShot(
+                    0, lambda: getattr(self._window, "set_model_values", lambda *_: None)(self._full_model, self._refresh_model)
+                )
             except Exception:
                 self._logger.warning("Failed to list models from OpenAI", exc_info=True)
         threading.Thread(target=task, daemon=True).start()
@@ -616,6 +619,8 @@ class UIController:
             self._window._full_model_box.setEditText(self._full_model)
         if hasattr(self._window, "_refresh_model_box") and self._window._refresh_model_box:
             self._window._refresh_model_box.setEditText(self._refresh_model)
+        if hasattr(self._window, "set_model_values"):
+            self._window.set_model_values(self._full_model, self._refresh_model)
 
     @staticmethod
     def _parse_shares_outstanding(payload: Any, symbol: str) -> float | None:
