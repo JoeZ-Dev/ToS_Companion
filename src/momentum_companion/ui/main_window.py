@@ -39,6 +39,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._models_cache: list[str] = []
         self._pending_api_key_text: Optional[str] = None
         self._pending_prompt_text: Optional[str] = None
+        self._pending_full_model_text: Optional[str] = None
+        self._pending_refresh_model_text: Optional[str] = None
         self._model_status_label: Optional[QtWidgets.QLabel] = None
 
     def _build_layout(self) -> None:
@@ -367,6 +369,12 @@ class MainWindow(QtWidgets.QMainWindow):
             layout.addLayout(model_row)
             if self._models_cache:
                 self.populate_models(self._models_cache)
+            # Reapply pending selections on first open
+            if self._pending_full_model_text or self._pending_refresh_model_text:
+                self.set_model_values(
+                    self._pending_full_model_text or "",
+                    self._pending_refresh_model_text or "",
+                )
 
             prompt_label = QtWidgets.QLabel("LLM Prompt:")
             self._prompt_edit = QtWidgets.QTextEdit()
@@ -518,12 +526,18 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._full_model_box.setCurrentIndex(idx)
             else:
                 self._full_model_box.setEditText(full)
+            self._pending_full_model_text = None
+        else:
+            self._pending_full_model_text = full
         if self._refresh_model_box:
             idx_r = self._refresh_model_box.findText(refresh)
             if idx_r >= 0:
                 self._refresh_model_box.setCurrentIndex(idx_r)
             else:
                 self._refresh_model_box.setEditText(refresh)
+            self._pending_refresh_model_text = None
+        else:
+            self._pending_refresh_model_text = refresh
 
     def set_api_key_value(self, value: str) -> None:
         """Set API key field text (masked by UI)."""
