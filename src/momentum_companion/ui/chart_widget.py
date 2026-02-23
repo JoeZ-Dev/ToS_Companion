@@ -143,9 +143,16 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                   const ss=localized.getSeconds().toString().padStart(2,'0');
                   return `${{hh}}:${{mm}}:${{ss}}`;
                 }}
-                function setChartTimeZone(tzName){{ currentTz = tzName || 'UTC'; chart.applyOptions({{localization:{{timeFormatter:formatTime}}}}); }}
+                function setChartTimeZone(tzName){{
+                  currentTz = tzName || 'UTC';
+                  chart.applyOptions({{
+                    localization:{{timeFormatter:formatTime}},
+                    timeScale:{{tickMarkFormatter:formatTime}}
+                  }});
+                }}
                 const options={options_json};
                 options.localization.timeFormatter=formatTime;
+                options.timeScale.tickMarkFormatter=formatTime;
                 const container=document.getElementById('chart');
                 const chart=LightweightCharts.createChart(container, options);
                 const candleSeries=chart.addSeries(LightweightCharts.CandlestickSeries, {candle_json});
