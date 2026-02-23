@@ -28,8 +28,7 @@ from momentum_companion.utils.logging import logging
 
 
 class _ModelSignals(QtCore.QObject):
-    models_ready = QtCore.Signal(object)
-    model_values = QtCore.Signal(str, str)
+    models_ready = QtCore.Signal(object, str, str)
 
 
 class UIController:
@@ -91,9 +90,13 @@ class UIController:
         )
         self._model_signals = _ModelSignals()
         if hasattr(self._window, "populate_models"):
-            self._model_signals.models_ready.connect(self._window.populate_models)  # type: ignore[attr-defined]
-        if hasattr(self._window, "set_model_values"):
-            self._model_signals.model_values.connect(self._window.set_model_values)  # type: ignore[attr-defined]
+            # Single signal carries models + selections to enforce ordering
+            self._model_signals.models_ready.connect(  # type: ignore[attr-defined]
+                lambda models, full, refresh: (
+                    self._window.populate_models(models),  # type: ignore[attr-defined]
+                    getattr(self._window, "set_model_values", lambda *_: None)(full, refresh),
+                )
+            )
         self._hook_symbol_input()
 
     def handle_flash(self, symbol: str, rec: dict, payload: dict) -> None:
@@ -698,9 +701,8 @@ class UIController:
                 self._logger.info("LLM models fetched: %s (showing %s)", fetched, len(final))
                 if final:
                     self._logger.debug("Model sample: %s", final[:10])
-                # Apply list then re-select saved values via queued signals
-                self._model_signals.models_ready.emit(final)
-                self._model_signals.model_values.emit(self._full_model or "", self._refresh_model or "")
+                # Emit once with models + selections to preserve order on the UI thread
+                self._model_signals.models_ready.emit(final, self._full_model or "", self._refresh_model or "")
             except Exception:
                 self._logger.warning("Failed to list models from OpenAI", exc_info=True)
         threading.Thread(target=task, daemon=True).start()
