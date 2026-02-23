@@ -39,6 +39,11 @@ class UIController:
     _ALLOWED_MARKET_STATES = {"premarket", "normal", "afterhours"}
     _BARS_WINDOW_MAX = 60
     _BARS_WINDOW_MIN_READY = 20
+    _ENTRY_TO_TRIGGER_MAX_PCT = 0.02
+    _MAX_STOP_PCT = 0.10
+    _MAX_TARGET_PCT = 0.20
+    _SWING_LOW_LOOKBACK_BARS = 12
+    _SWING_HIGH_LOOKBACK_BARS = 24
 
     def __init__(
         self,
@@ -935,6 +940,7 @@ class UIController:
                 "levels": levels,
                 "micro": micro,
                 "vwap": snapshot.get("vwap"),
+                "bars_window": bars_window,
             }
         )
         norm = {
@@ -1096,49 +1102,137 @@ class UIController:
         return True, None
 
     def _build_structural_plan(self, payload: dict) -> dict:
-        """Derive deterministic structural plan from normalized payload."""
+        """Derive deterministic structural plan from normalized payload with conservative limits."""
         quote = payload.get("quote") or {}
         levels = payload.get("levels") or {}
         micro = payload.get("micro") or {}
-        entry = quote.get("last") if isinstance(quote, dict) else None
+        bars = payload.get("bars_window") or []
+        invalid_reasons: list[str] = []
+
+        last = quote.get("last") if isinstance(quote, dict) else None
+        ask = quote.get("ask") if isinstance(quote, dict) else None
+        nearest_res = levels.get("nearest_resistance") if isinstance(levels, dict) else None
+        nearest_sup = levels.get("nearest_support") if isinstance(levels, dict) else None
+        micro_res = micro.get("micro_resistance_15m") if isinstance(micro, dict) else None
+        micro_sup = micro.get("micro_support_15m") if isinstance(micro, dict) else None
+
+        entry = None
+        entry_source = "last"
+        if last is not None and nearest_res and isinstance(nearest_res, dict):
+            res_price = nearest_res.get("price")
+            if res_price is not None:
+                try:
+                    last_f = float(last)
+                    res_f = float(res_price)
+                    if res_f > last_f:
+                        pct = (res_f - last_f) / last_f
+                        if pct <= self._ENTRY_TO_TRIGGER_MAX_PCT:
+                            entry = res_f
+                            entry_source = "nearest_resistance_trigger"
+                except Exception:
+                    pass
+        if entry is None:
+            entry = ask if ask is not None else last
         stop = None
         stop_source = None
+        if nearest_sup and isinstance(nearest_sup, dict) and nearest_sup.get("price") is not None:
+            stop = nearest_sup.get("price")
+            stop_source = "nearest_support"
+        elif micro_sup is not None:
+            stop = micro_sup
+            stop_source = "micro_support_15m"
+        else:
+            try:
+                lows = [float(b.get("l")) for b in bars[-self._SWING_LOW_LOOKBACK_BARS :] if isinstance(b, dict) and b.get("l") is not None]
+                if lows:
+                    stop = min(lows)
+                    stop_source = "swing_low"
+            except Exception:
+                pass
         target = None
         target_source = None
-        if isinstance(levels, dict):
-            nearest_sup = levels.get("nearest_support")
-            if isinstance(nearest_sup, dict) and nearest_sup.get("price") is not None:
-                stop = nearest_sup.get("price")
-                stop_source = "nearest_support"
-            nearest_res = levels.get("nearest_resistance")
-            if isinstance(nearest_res, dict) and nearest_res.get("price") is not None:
-                target = nearest_res.get("price")
-                target_source = "nearest_resistance"
-        if stop is None:
-            stop = payload.get("vwap")
-            if stop is not None:
-                stop_source = "vwap"
-        if target is None and isinstance(micro, dict):
-            target = micro.get("micro_resistance_15m")
-            if target is not None:
-                target_source = "micro_resistance_15m"
-        rr = None
         try:
-            if entry is not None and stop is not None and target is not None:
-                entry_f = float(entry)
+            entry_f = float(entry) if entry is not None else None
+        except Exception:
+            entry_f = None
+        if entry_f is not None and micro_res is not None:
+            try:
+                micro_f = float(micro_res)
+                if micro_f > entry_f and (micro_f - entry_f) / entry_f <= self._MAX_TARGET_PCT:
+                    target = micro_f
+                    target_source = "micro_resistance_15m"
+            except Exception:
+                pass
+        if target is None and entry_f is not None:
+            try:
+                highs = [float(b.get("h")) for b in bars[-self._SWING_HIGH_LOOKBACK_BARS :] if isinstance(b, dict) and b.get("h") is not None]
+                if highs:
+                    swing_high = max(highs)
+                    if swing_high > entry_f and (swing_high - entry_f) / entry_f <= self._MAX_TARGET_PCT:
+                        target = swing_high
+                        target_source = "swing_high"
+            except Exception:
+                pass
+        if target is None and nearest_res and isinstance(nearest_res, dict) and nearest_res.get("price") is not None and entry_f is not None:
+            try:
+                res_f = float(nearest_res.get("price"))
+                if res_f > entry_f and (res_f - entry_f) / entry_f <= self._MAX_TARGET_PCT:
+                    target = res_f
+                    target_source = "nearest_resistance"
+            except Exception:
+                pass
+        rr = None
+        valid = False
+        if entry_f is not None and stop is not None and target is not None:
+            try:
                 stop_f = float(stop)
                 target_f = float(target)
-                if entry_f != stop_f:
-                    rr = (target_f - entry_f) / (entry_f - stop_f)
-        except Exception:
-            rr = None
+                stop_pct = (entry_f - stop_f) / entry_f if entry_f else None
+                target_pct = (target_f - entry_f) / entry_f if entry_f else None
+                if target_f > entry_f and stop_f < entry_f and stop_pct is not None and target_pct is not None:
+                    rr = (target_f - entry_f) / (entry_f - stop_f) if entry_f != stop_f else None
+                    if (
+                        rr is not None
+                        and rr >= 2.0
+                        and stop_pct <= self._MAX_STOP_PCT
+                        and target_pct <= self._MAX_TARGET_PCT
+                    ):
+                        valid = True
+                    else:
+                        invalid_reasons.append("risk_or_target_pct_or_rr")
+                else:
+                    invalid_reasons.append("ordering")
+            except Exception:
+                invalid_reasons.append("calc_error")
+        else:
+            if entry_f is None:
+                invalid_reasons.append("no_entry")
+            if stop is None:
+                invalid_reasons.append("no_stop")
+            if target is None:
+                invalid_reasons.append("no_target")
+        if not valid:
+            return {
+                "entry_candidate": None,
+                "stop_candidate": None,
+                "target_candidate": None,
+                "rr_candidate": None,
+                "entry_source": entry_source,
+                "stop_source": stop_source,
+                "target_source": target_source,
+                "valid": False,
+                "invalid_reasons": invalid_reasons,
+            }
         return {
-            "entry_candidate": entry,
+            "entry_candidate": entry_f,
             "stop_candidate": stop,
             "target_candidate": target,
             "rr_candidate": rr,
+            "entry_source": entry_source,
             "stop_source": stop_source,
             "target_source": target_source,
+            "valid": True,
+            "invalid_reasons": [],
         }
 
     def _compute_market_state(self) -> str | None:
@@ -1176,7 +1270,7 @@ class UIController:
             "RR_BELOW_MINIMUM only when you output numeric entry/stop/target and risk_reward<2.0. If validity=NOT_VALID_FOR_TRADING and risk_reward=null, DO NOT use RR_BELOW_MINIMUM; use NO_CLEAR_LEVEL instead if no structural target can meet 2R.\n"
             "Only use HOD_* reason codes if snapshot includes explicit high_of_day/hod_price; otherwise do not emit HOD_*.\n"
             "If entry is at/above nearest_resistance.price and there is no higher resistance provided, default to NOT_VALID_FOR_TRADING unless bars_window clearly shows continuation with a structural swing target.\n"
-            "structural_plan provides entry_candidate, stop_candidate, target_candidate, rr_candidate. If structural_plan.rr_candidate>=2.0 with target>entry and stop<entry, you MUST NOT use NO_CLEAR_LEVEL. If still not tradable, use another allowed code supported by snapshot evidence and explain in summary.\n"
+            "structural_plan provides entry_candidate, stop_candidate, target_candidate, rr_candidate, and valid. If structural_plan.valid=true, you MUST NOT use NO_CLEAR_LEVEL. If still not tradable, use another allowed code supported by snapshot evidence and explain in summary.\n"
             "Example: If setup_rating is B- but no structural target yields >=2R, set NOT_VALID_FOR_TRADING with reason_codes=[NO_CLEAR_LEVEL] and all price fields null.\n"
             "If validity=NOT_VALID_FOR_TRADING and reason_codes includes NO_CLEAR_LEVEL, summary must name the structural targets evaluated (e.g., nearest_resistance.price, micro_resistance_15m, swing highs) and why 2R was not achievable.\n"
             "Self-check: JSON valid; enums valid; null rules met; no extra keys. If risk_reward is null then reason_codes MUST NOT contain RR_BELOW_MINIMUM."
@@ -1282,21 +1376,7 @@ class UIController:
         stop = plan.get("stop_candidate")
         target = plan.get("target_candidate")
         rr = plan.get("rr_candidate")
-        structural_ok = False
-        try:
-            if (
-                entry is not None
-                and stop is not None
-                and target is not None
-                and float(target) > float(entry)
-                and float(stop) < float(entry)
-                and rr is not None
-                and float(rr) >= 2.0
-            ):
-                structural_ok = True
-        except Exception:
-            structural_ok = False
-        if structural_ok and validity == "NOT_VALID_FOR_TRADING" and any(code == "NO_CLEAR_LEVEL" for code in reason_codes):
+        if plan.get("valid") is True and validity == "NOT_VALID_FOR_TRADING" and any(code == "NO_CLEAR_LEVEL" for code in reason_codes):
             return False, "NO_CLEAR_LEVEL_CONTRADICTS_STRUCTURAL_PLAN"
         return True, ""
 
