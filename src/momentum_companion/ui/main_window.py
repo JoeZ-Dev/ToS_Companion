@@ -348,7 +348,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self._refresh_model_box.setPlaceholderText("e.g., gpt-4o-mini")
             model_row.addWidget(self._refresh_model_box)
             self._full_model_box.editTextChanged.connect(self._handle_full_model_changed)
+            self._full_model_box.currentTextChanged.connect(self._handle_full_model_changed)
             self._refresh_model_box.editTextChanged.connect(self._handle_refresh_model_changed)
+            self._refresh_model_box.currentTextChanged.connect(self._handle_refresh_model_changed)
             if self._models_cache:
                 self.populate_models(self._models_cache)
             layout.addLayout(model_row)
