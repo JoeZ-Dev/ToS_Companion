@@ -1,3 +1,6 @@
+import pytest
+
+pytest.importorskip("PySide6")
 from momentum_companion.ui.controller import UIController
 
 
@@ -94,3 +97,60 @@ def test_structural_plan_ignores_stop_above_entry_and_falls_back():
     plan = ctl._build_structural_plan(payload)
     assert plan["stop_candidate"] == 0.9  # fell back to micro support below entry
     assert plan["stop_source"] == "micro_support_15m"
+
+
+def test_reason_mapping_risk_breach_for_rr_below_minimum():
+    ctl = _make_controller()
+    normalized = {
+        "quote": {"last": 1.0},
+        "structural_plan": {
+            "entry_candidate": 1.0,
+            "stop_candidate": 0.9,
+            "target_candidate": 1.05,
+            "rr_candidate": 0.5,
+            "valid": False,
+            "invalid_reasons": ["RR_BELOW_MINIMUM"],
+        },
+    }
+    allow, rec = ctl._structural_rr_gate(normalized)
+    assert allow is False
+    assert rec and rec.get("reason_codes")[0] == "RISK_BREACH"
+
+
+def test_reason_mapping_no_clear_level_when_missing_target():
+    ctl = _make_controller()
+    normalized = {
+        "quote": {"last": 1.0},
+        "structural_plan": {
+            "entry_candidate": 1.0,
+            "stop_candidate": 0.9,
+            "target_candidate": None,
+            "valid": False,
+            "invalid_reasons": ["NO_TARGET_ABOVE_ENTRY"],
+        },
+    }
+    allow, rec = ctl._structural_rr_gate(normalized)
+    assert allow is True  # missing target -> gate lets LLM handle, but skip rec None
+    assert rec is None
+
+
+def test_entry_trigger_requires_proximity():
+    ctl = _make_controller()
+    payload = {
+        "quote": {"last": 1.0, "ask": 1.0},
+        "levels": {"nearest_resistance": {"price": 1.03}},
+        "micro": {},
+        "bars_window": [],
+        "market_state": "normal",
+    }
+    plan = ctl._build_structural_plan(payload)
+    assert plan["entry_source"] == "nearest_resistance_trigger"
+    payload_far = {
+        "quote": {"last": 1.0, "ask": 1.0},
+        "levels": {"nearest_resistance": {"price": 1.05}},  # 5% away, should not use trigger
+        "micro": {},
+        "bars_window": [],
+        "market_state": "normal",
+    }
+    plan_far = ctl._build_structural_plan(payload_far)
+    assert plan_far["entry_source"] == "last"

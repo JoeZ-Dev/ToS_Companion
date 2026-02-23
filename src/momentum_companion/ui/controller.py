@@ -40,6 +40,7 @@ class UIController:
     _BARS_WINDOW_MAX = 60
     _BARS_WINDOW_MIN_READY = 20
     _ENTRY_TO_TRIGGER_MAX_PCT = 0.02
+    _ENTRY_TRIGGER_PROX_PCT = 0.015
     _MAX_STOP_PCT = 0.10
     _MAX_TARGET_PCT = 0.20
     _SWING_LOW_LOOKBACK_BARS = 12
@@ -1092,6 +1093,8 @@ class UIController:
         entry = quote.get("last") if isinstance(quote, dict) else None
         stop = plan.get("stop_candidate") if isinstance(plan, dict) else None
         target = plan.get("target_candidate") if isinstance(plan, dict) else None
+        valid_plan = plan.get("valid") if isinstance(plan, dict) else None
+        reasons = plan.get("invalid_reasons") if isinstance(plan, dict) else []
         if entry is None or stop is None or target is None:
             return True, None
         try:
@@ -1121,19 +1124,27 @@ class UIController:
             rr,
             plan.get("target_source") if isinstance(plan, dict) else None,
         )
-        if rr < 2.0:
-            rec = {
-                "validity": "NOT_VALID_FOR_TRADING",
-                "setup_rating": "C",
-                "entry_price": None,
-                "stop_loss": None,
-                "target_price": None,
-                "risk_reward": None,
-                "summary": f"Structural target too close for 2R (entry={entry_f}, stop={stop_f}, target={target_f}, rr={round(rr,3)}).",
-                "reason_codes": ["NO_CLEAR_LEVEL"],
-            }
-            return False, rec
-        return True, None
+        if valid_plan is True or rr >= 2.0:
+            return True, None
+        # invalid path: map reasons to codes
+        reason_codes: list[str] = []
+        if reasons and any(r in {"STOP_TOO_WIDE", "RR_BELOW_MINIMUM"} for r in reasons):
+            reason_codes.append("RISK_BREACH")
+        if not reason_codes and (target_f <= entry_f or stop_f >= entry_f or not target or not stop):
+            reason_codes.append("NO_CLEAR_LEVEL")
+        if not reason_codes:
+            reason_codes.append("NO_CLEAR_LEVEL")
+        rec = {
+            "validity": "NOT_VALID_FOR_TRADING",
+            "setup_rating": "C",
+            "entry_price": None,
+            "stop_loss": None,
+            "target_price": None,
+            "risk_reward": None,
+            "summary": f"Structural gate blocked: entry={entry_f}, stop={stop_f}, target={target_f}, rr={round(rr,3)} reasons={reasons}",
+            "reason_codes": reason_codes[:3],
+        }
+        return False, rec
 
     def _build_structural_plan(self, payload: dict) -> dict:
         """Derive deterministic structural plan from normalized payload with conservative limits."""
@@ -1152,15 +1163,16 @@ class UIController:
 
         entry = None
         entry_source = "last"
+        market_state = payload.get("market_state")
         if last is not None and nearest_res and isinstance(nearest_res, dict):
             res_price = nearest_res.get("price")
             if res_price is not None:
                 try:
                     last_f = float(last)
                     res_f = float(res_price)
-                    if res_f > last_f:
+                    if res_f > last_f and market_state == "normal":
                         pct = (res_f - last_f) / last_f
-                        if pct <= self._ENTRY_TO_TRIGGER_MAX_PCT:
+                        if pct <= self._ENTRY_TO_TRIGGER_MAX_PCT and pct <= self._ENTRY_TRIGGER_PROX_PCT:
                             entry = res_f
                             entry_source = "nearest_resistance_trigger"
                 except Exception:
@@ -1330,7 +1342,7 @@ class UIController:
             "RR_BELOW_MINIMUM only when you output numeric entry/stop/target and risk_reward<2.0. If validity=NOT_VALID_FOR_TRADING and risk_reward=null, DO NOT use RR_BELOW_MINIMUM; use NO_CLEAR_LEVEL instead if no structural target can meet 2R.\n"
             "Only use HOD_* reason codes if snapshot includes explicit high_of_day/hod_price; otherwise do not emit HOD_*.\n"
             "If entry is at/above nearest_resistance.price and there is no higher resistance provided, default to NOT_VALID_FOR_TRADING unless bars_window clearly shows continuation with a structural swing target.\n"
-            "structural_plan provides entry_candidate, stop_candidate, target_candidate, rr_candidate, and valid. If structural_plan.valid=true, you MUST NOT use NO_CLEAR_LEVEL. If still not tradable, use another allowed code supported by snapshot evidence and explain in summary.\n"
+            "structural_plan provides entry_candidate, stop_candidate, target_candidate, rr_candidate, and valid. If structural_plan.valid=true, you MUST NOT use NO_CLEAR_LEVEL. If structural_plan.valid=false and invalid_reasons include STOP_TOO_WIDE or RR_BELOW_MINIMUM, do NOT use NO_CLEAR_LEVEL; use RISK_BREACH instead.\n"
             "Example: If setup_rating is B- but no structural target yields >=2R, set NOT_VALID_FOR_TRADING with reason_codes=[NO_CLEAR_LEVEL] and all price fields null.\n"
             "If validity=NOT_VALID_FOR_TRADING and reason_codes includes NO_CLEAR_LEVEL, summary must name the structural targets evaluated (e.g., nearest_resistance.price, micro_resistance_15m, swing highs) and why 2R was not achievable.\n"
             "Self-check: JSON valid; enums valid; null rules met; no extra keys. If risk_reward is null then reason_codes MUST NOT contain RR_BELOW_MINIMUM."
