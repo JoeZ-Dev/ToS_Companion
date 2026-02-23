@@ -7,6 +7,7 @@ from momentum_companion.utils.logging import logging
 from momentum_companion.ui.chart_widget import LightweightChartWidget
 from zoneinfo import ZoneInfo
 from datetime import datetime
+from typing import Callable, Optional
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -25,6 +26,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._clock_timer.start()
         self._display_tz = ZoneInfo("America/New_York")
         self._tz_selector: QtWidgets.QComboBox | None = None
+        self._api_key_callback: Optional[Callable[[str], None]] = None
 
     def _build_layout(self) -> None:
         central = QtWidgets.QWidget()
@@ -158,6 +160,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.llm_flash.setStyleSheet("color: red; font-weight: bold;")
         llm_layout.addWidget(self.llm_reco)
         llm_layout.addWidget(self.llm_flash)
+        self.llm_status_line = QtWidgets.QLabel("LLM Status: --")
+        self.llm_status_line.setStyleSheet("color: #95a5a6;")
+        llm_layout.addWidget(self.llm_status_line)
         llm_group.setLayout(llm_layout)
         side_panel.addWidget(llm_group)
 
@@ -282,6 +287,7 @@ class MainWindow(QtWidgets.QMainWindow):
             dlg = QtWidgets.QDialog(self)
             dlg.setWindowTitle("Options")
             dlg.setModal(True)
+            dlg.resize(420, 360)
             dlg.setStyleSheet(
                 """
                 QDialog { background-color: #111; color: #ecf0f1; }
@@ -312,6 +318,14 @@ class MainWindow(QtWidgets.QMainWindow):
             tz_row.addWidget(self._tz_selector)
             tz_row.addStretch()
             layout.addLayout(tz_row)
+            api_row = QtWidgets.QHBoxLayout()
+            api_row.addWidget(QtWidgets.QLabel("OpenAI API Key:"))
+            self._api_key_edit = QtWidgets.QLineEdit()
+            self._api_key_edit.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
+            self._api_key_edit.setPlaceholderText("sk-...")
+            self._api_key_edit.editingFinished.connect(self._handle_api_key_edit)
+            api_row.addWidget(self._api_key_edit)
+            layout.addLayout(api_row)
             close_btn = QtWidgets.QPushButton("Close")
             close_btn.clicked.connect(dlg.close)
             layout.addWidget(close_btn, alignment=QtCore.Qt.AlignmentFlag.AlignRight)
@@ -338,6 +352,13 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self._display_tz = ZoneInfo("UTC")
         self._tick_clock()
+
+    def _handle_api_key_edit(self) -> None:
+        if self._api_key_callback and hasattr(self, "_api_key_edit"):
+            self._api_key_callback(self._api_key_edit.text())
+
+    def set_api_key_callback(self, cb: Callable[[str], None]) -> None:
+        self._api_key_callback = cb
 
     def update_ae_panel(self, snapshot: dict | None) -> None:
         """Render AE snapshot in compact sections."""

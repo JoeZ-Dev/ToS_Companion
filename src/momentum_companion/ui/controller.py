@@ -16,6 +16,7 @@ from momentum_companion.ui.chart_adapter import ChartAdapter
 from momentum_companion.clients.schwab_stream import SchwabStreamClient
 from momentum_companion.clients.schwab_rest import SchwabRestClient
 from momentum_companion.clients.token_provider import TokenProvider
+from momentum_companion.llm.client import LLMClient
 from momentum_companion.data.contracts import QuoteEvent
 from momentum_companion.data.bar_aggregator import BarAggregator10s, TenSecondBar
 from momentum_companion.data.price_update import PriceUpdate
@@ -89,6 +90,8 @@ class UIController:
             self._window.symbol_input.returnPressed.connect(self._on_symbol_entered)  # type: ignore[attr-defined]
         if hasattr(self._window, "llm_toggle"):
             self._window.llm_toggle.clicked.connect(self._on_llm_toggle)  # type: ignore[attr-defined]
+        if hasattr(self._window, "set_api_key_callback"):
+            self._window.set_api_key_callback(self._set_api_key)  # type: ignore[attr-defined]
         if hasattr(self._window, "options_btn"):
             self._window.options_btn.clicked.connect(self._open_options)  # type: ignore[attr-defined]
 
@@ -310,6 +313,7 @@ class UIController:
             return
         self._last_llm_ts[symbol] = now_sec
         self._last_llm_hash[symbol] = snap_hash
+        self._refresh_llm_status(symbol)
         QtCore.QTimer.singleShot(0, lambda: self._run_llm(snapshot, quote_event))
 
     def _run_llm(self, snapshot: dict, quote_event: QuoteEvent) -> None:
@@ -325,6 +329,8 @@ class UIController:
                 )
         except Exception:
             self._logger.exception("LLM evaluate failed")
+        finally:
+            self._refresh_llm_status(snapshot.get("symbol"))
 
     @staticmethod
     def _snapshot_hash(snapshot: dict) -> str:
@@ -505,10 +511,38 @@ class UIController:
             self._window.llm_status.setText("LLM: ON" if checked else "LLM: OFF")
         if hasattr(self._window, "llm_toggle"):
             self._window.llm_toggle.setText("Disable LLM" if checked else "Enable LLM")
+        self._refresh_llm_status()
 
     def _open_options(self) -> None:
         if hasattr(self._window, "show_options_dialog"):
             self._window.show_options_dialog()
+
+    def _refresh_llm_status(self, symbol: str | None = None) -> None:
+        """Update LLM status line in UI."""
+        if not hasattr(self._window, "llm_status_line"):
+            return
+        sym = symbol or self._pending_symbol or ""
+        state = "ON" if self._llm_enabled else "OFF"
+        key_state = "set" if getattr(self._llm_service, "_client", None) else "unset"
+        last_ts = self._last_llm_ts.get(sym)
+        last_txt = time.strftime("%H:%M:%S", time.localtime(last_ts)) if last_ts else "--"
+        next_txt = "--"
+        if last_ts:
+            next_ts = last_ts + 30
+            delta = max(0, int(next_ts - time.time()))
+            next_txt = f"in {delta}s"
+        self._window.llm_status_line.setText(f"LLM Status: {state} | Key: {key_state} | Last: {last_txt} | Next: {next_txt}")
+
+    def _set_api_key(self, key: str) -> None:
+        key = key.strip()
+        if key:
+            try:
+                self._llm_service._client = LLMClient(api_key=key, model="gpt-5.1-codex-max")  # type: ignore[attr-defined]
+            except Exception:
+                self._logger.exception("Failed to set LLM API key")
+        else:
+            self._llm_service._client = None  # type: ignore[attr-defined]
+        self._refresh_llm_status()
 
     @staticmethod
     def _parse_shares_outstanding(payload: Any, symbol: str) -> float | None:
