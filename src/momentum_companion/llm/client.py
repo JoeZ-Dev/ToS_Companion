@@ -19,7 +19,7 @@ class LLMClient:
         self._mode = mode
         self._http = httpx.Client(timeout=10.0)
 
-    def complete(self, messages: list[dict[str, str]]) -> Dict[str, Any]:
+    def complete(self, messages: list[dict[str, str]], model_override: str | None = None) -> Dict[str, Any]:
         if self._mode == "mock":
             return {
                 "validity": "VALID_FOR_TRADING",
@@ -34,7 +34,25 @@ class LLMClient:
         resp = self._http.post(
             "https://api.openai.com/v1/chat/completions",
             headers={"Authorization": f"Bearer {self._api_key}"},
-            json={"model": self._model, "messages": messages, "response_format": {"type": "json_object"}},
+            json={
+                "model": model_override or self._model,
+                "messages": messages,
+                "temperature": 0.2,
+                "max_tokens": 800,
+                "response_format": {"type": "json_object"},
+            },
         )
         resp.raise_for_status()
         return resp.json()
+
+    def list_models(self) -> list[str]:
+        resp = self._http.get(
+            "https://api.openai.com/v1/models",
+            headers={"Authorization": f"Bearer {self._api_key}"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        models = data.get("data", [])
+        ids = [m.get("id") for m in models if m.get("id")]
+        ids.sort()
+        return ids

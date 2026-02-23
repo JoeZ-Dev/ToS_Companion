@@ -78,6 +78,9 @@ class UIController:
         self._last_llm_hash: dict[str, str] = {}
         self._llm_enabled: bool = False
         self._app_state = app_state
+        self._available_models: list[str] = []
+        self._full_model = "gpt-4o"
+        self._refresh_model = "gpt-4o-mini"
 
     def handle_flash(self, symbol: str, rec: dict, payload: dict) -> None:
         """Trigger flash alert in UI."""
@@ -98,6 +101,7 @@ class UIController:
         if hasattr(self._window, "options_btn"):
             self._window.options_btn.clicked.connect(self._open_options)  # type: ignore[attr-defined]
         self._load_stored_api_key()
+        self._load_stored_models()
 
     def _on_symbol_entered(self) -> None:
         raw = self._window.symbol_input.text()
@@ -309,7 +313,8 @@ class UIController:
         # Time gate
         now_sec = time.time()
         last_ts = self._last_llm_ts.get(symbol, 0)
-        if now_sec - last_ts < 30:
+        interval = 60 if symbol not in self._last_llm_ts else 30
+        if now_sec - last_ts < interval:
             return
         # Change gate
         snap_hash = self._snapshot_hash(snapshot)
@@ -323,7 +328,8 @@ class UIController:
     def _run_llm(self, snapshot: dict, quote_event: QuoteEvent) -> None:
         try:
             session_mode = "RTH" if self._is_intraday_window() else "PRE"
-            rec = self._llm_service.evaluate(snapshot, session_mode, quote_event)  # type: ignore[attr-defined]
+            model = self._full_model if snapshot.get("symbol") not in self._last_llm_ts else self._refresh_model
+            rec = self._llm_service.evaluate(snapshot, session_mode, quote_event, model_override=model)  # type: ignore[attr-defined]
             if hasattr(self._window, "apply_llm_recommendation"):
                 QtCore.QMetaObject.invokeMethod(
                     self._window,
@@ -544,6 +550,7 @@ class UIController:
                 self._llm_service._client = LLMClient(api_key=key, model="gpt-5.1-codex-max")  # type: ignore[attr-defined]
                 if self._app_state:
                     self._app_state.set_secret("openai_api_key", key)
+                self._load_models_async()
             except Exception:
                 self._logger.exception("Failed to set LLM API key")
         else:
@@ -561,7 +568,35 @@ class UIController:
                 self._llm_service._client = LLMClient(api_key=stored, model="gpt-5.1-codex-max")  # type: ignore[attr-defined]
             except Exception:
                 self._logger.exception("Failed to load stored LLM API key")
+        if self._llm_service and getattr(self._llm_service, "_client", None):
+            self._load_models_async()
         self._refresh_llm_status()
+
+    def _load_models_async(self) -> None:
+        if not self._llm_service or not getattr(self._llm_service, "_client", None):
+            return
+        def task() -> None:
+            try:
+                models = self._llm_service._client.list_models()  # type: ignore[attr-defined]
+                self._available_models = models
+                if hasattr(self._window, "populate_models"):
+                    QtCore.QMetaObject.invokeMethod(
+                        self._window,
+                        "populate_models",
+                        QtCore.Qt.ConnectionType.QueuedConnection,
+                        QtCore.Q_ARG(list, models),  # type: ignore[arg-type]
+                    )
+            except Exception:
+                self._logger.warning("Failed to list models from OpenAI", exc_info=True)
+        threading.Thread(target=task, daemon=True).start()
+
+    def _load_stored_models(self) -> None:
+        if not self._app_state:
+            return
+        full = self._app_state.get("llm_full_model") or self._full_model
+        refresh = self._app_state.get("llm_refresh_model") or self._refresh_model
+        self._full_model = full
+        self._refresh_model = refresh
 
     @staticmethod
     def _parse_shares_outstanding(payload: Any, symbol: str) -> float | None:

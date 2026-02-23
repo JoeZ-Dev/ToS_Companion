@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import sqlite3
 from typing import Any, Optional
+from cryptography.fernet import Fernet, InvalidToken
 import base64
 import hashlib
 import platform
+import os
 
 
 class AppStateStore:
@@ -33,7 +35,7 @@ class AppStateStore:
         """Persist a lightly encrypted value."""
         if value is None:
             return
-        encoded = self._xor_encode(value)
+        encoded = self._fernet_encode(value)
         self.set(key, encoded)
 
     def get_secret(self, key: str) -> Optional[str]:
@@ -42,22 +44,36 @@ class AppStateStore:
         if enc is None:
             return None
         try:
-            return self._xor_decode(enc)
+            return self._fernet_decode(enc)
         except Exception:
             return None
 
-    def _xor_encode(self, plaintext: str) -> str:
-        key_bytes = self._derive_key()
-        data = plaintext.encode("utf-8")
-        out = bytes([b ^ key_bytes[i % len(key_bytes)] for i, b in enumerate(data)])
-        return base64.urlsafe_b64encode(out).decode("utf-8")
+    def _fernet_encode(self, plaintext: str) -> str:
+        f = self._fernet()
+        token = f.encrypt(plaintext.encode("utf-8"))
+        return token.decode("utf-8")
 
-    def _xor_decode(self, encoded: str) -> str:
-        key_bytes = self._derive_key()
+    def _fernet_decode(self, encoded: str) -> str:
+        f = self._fernet()
+        try:
+            data = f.decrypt(encoded.encode("utf-8"))
+            return data.decode("utf-8")
+        except InvalidToken:
+            # fallback to legacy xor if old entries exist
+            return self._xor_legacy_decode(encoded)
+
+    def _fernet(self) -> Fernet:
+        key = self._derive_key()
+        return Fernet(key)
+
+    def _xor_legacy_decode(self, encoded: str) -> str:
+        key_bytes = hashlib.sha256(platform.node().encode("utf-8")).digest()
         data = base64.urlsafe_b64decode(encoded.encode("utf-8"))
         out = bytes([b ^ key_bytes[i % len(key_bytes)] for i, b in enumerate(data)])
         return out.decode("utf-8")
 
     @staticmethod
     def _derive_key() -> bytes:
-        return hashlib.sha256(platform.node().encode("utf-8")).digest()
+        # derive a stable machine-bound key; pad/trim to 32 bytes for Fernet
+        h = hashlib.sha256(platform.node().encode("utf-8")).digest()
+        return base64.urlsafe_b64encode(h)

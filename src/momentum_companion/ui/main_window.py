@@ -326,6 +326,18 @@ class MainWindow(QtWidgets.QMainWindow):
             self._api_key_edit.editingFinished.connect(self._handle_api_key_edit)
             api_row.addWidget(self._api_key_edit)
             layout.addLayout(api_row)
+            model_row = QtWidgets.QHBoxLayout()
+            model_row.addWidget(QtWidgets.QLabel("Full Model:"))
+            self._full_model_box = QtWidgets.QComboBox()
+            self._full_model_box.setEditable(True)
+            self._full_model_box.setPlaceholderText("e.g., gpt-4o")
+            model_row.addWidget(self._full_model_box)
+            model_row.addWidget(QtWidgets.QLabel("Refresh Model:"))
+            self._refresh_model_box = QtWidgets.QComboBox()
+            self._refresh_model_box.setEditable(True)
+            self._refresh_model_box.setPlaceholderText("e.g., gpt-4o-mini")
+            model_row.addWidget(self._refresh_model_box)
+            layout.addLayout(model_row)
             close_btn = QtWidgets.QPushButton("Close")
             close_btn.clicked.connect(dlg.close)
             layout.addWidget(close_btn, alignment=QtCore.Qt.AlignmentFlag.AlignRight)
@@ -359,6 +371,15 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def set_api_key_callback(self, cb: Callable[[str], None]) -> None:
         self._api_key_callback = cb
+
+    def populate_models(self, models: list[str]) -> None:
+        """Populate model dropdowns with available identifiers."""
+        if hasattr(self, "_full_model_box") and self._full_model_box:
+            self._full_model_box.clear()
+            self._full_model_box.addItems(models)
+        if hasattr(self, "_refresh_model_box") and self._refresh_model_box:
+            self._refresh_model_box.clear()
+            self._refresh_model_box.addItems(models)
 
     def update_ae_panel(self, snapshot: dict | None) -> None:
         """Render AE snapshot in compact sections."""

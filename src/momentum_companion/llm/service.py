@@ -27,11 +27,21 @@ class LLMService:
         self._flash_callback = flash_callback
         self._last_rec_by_symbol: Dict[str, Dict[str, Any]] = {}
 
-    def evaluate(self, raw_snapshot: Dict[str, Any], session_mode: str, quote: Dict[str, Any]) -> Dict[str, Any]:
+    def evaluate(
+        self,
+        raw_snapshot: Dict[str, Any],
+        session_mode: str,
+        quote: Dict[str, Any],
+        model_override: str | None = None,
+        messages_override: list[dict] | None = None,
+    ) -> Dict[str, Any]:
         payload = normalize_snapshot(raw_snapshot, session_mode, quote)
         if self._client:
-            messages = [{"role": "system", "content": "LLM Coach"}, {"role": "user", "content": str(payload)}]
-            resp = self._client.complete(messages)
+            messages = messages_override or [
+                {"role": "system", "content": "LLM Coach"},
+                {"role": "user", "content": str(payload)},
+            ]
+            resp = self._client.complete(messages, model_override=model_override)
         else:
             resp = self._coach.run(payload, {})
         if not self._coach.validate_response(resp):
