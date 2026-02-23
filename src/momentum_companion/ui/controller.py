@@ -1206,10 +1206,22 @@ class UIController:
         ok, reason = self._validate_llm_response_consistency(normalized, rec)
         if ok:
             return rec
-        self._logger.info("LLM response invalid (%s); attempting repair retry", reason)
+        plan = normalized.get("structural_plan") or {}
+        self._logger.info(
+            "LLM response invalid (%s); attempting repair retry entry=%s stop=%s target=%s rr=%s",
+            reason,
+            plan.get("entry_candidate"),
+            plan.get("stop_candidate"),
+            plan.get("target_candidate"),
+            plan.get("rr_candidate"),
+        )
         repaired = self._retry_llm_without_no_clear(normalized, model, reason)
         if repaired:
-            return repaired
+            ok2, reason2 = self._validate_llm_response_consistency(normalized, repaired)
+            if ok2:
+                self._logger.info("LLM repair accepted")
+                return repaired
+            self._logger.info("LLM repair invalid (%s); applying fallback", reason2)
         self._logger.info("LLM fallback applied after invalid response (%s)", reason)
         plan = normalized.get("structural_plan") or {}
         return self._fallback_structural_rec(normalized, plan)
@@ -1295,11 +1307,19 @@ class UIController:
             return None
         messages = self._build_llm_messages(normalized)
         reminder = (
-            "REPAIR_ATTEMPT: Previous response violated a hard constraint "
-            f"({reason}). structural_plan shows rr_candidate>=2 with target>entry and stop<entry. "
-            "You MUST NOT use NO_CLEAR_LEVEL in this case. Return corrected JSON only.\n"
+            "REPAIR REQUIRED: Your previous response violated a hard constraint: "
+            f"{reason}. structural_plan indicates a valid structural target/stop with rr_candidate>=2. "
+            "You MUST NOT output NOT_VALID_FOR_TRADING with NO_CLEAR_LEVEL here. "
+            "Either output VALID_FOR_TRADING with entry/stop/target/risk_reward from structural_plan, "
+            "or if not tradable for another reason, choose a different allowed reason_code (not NO_CLEAR_LEVEL) and follow null rules.\n"
         )
-        messages[1]["content"] = reminder + messages[1]["content"]
+        messages[1]["content"] = messages[1]["content"] + "\n" + reminder
+        self._logger.info(
+            "LLM repair retry start (developer prompt len=%s, reminder len=%s, reason=%s)",
+            len(messages[1].get("content", "")),
+            len(reminder),
+            reason,
+        )
         try:
             resp = client.complete(messages=messages, model_override=model)
             rec = self._extract_rec_from_resp(resp)
@@ -1323,7 +1343,7 @@ class UIController:
             "stop_loss": stop,
             "target_price": target,
             "risk_reward": rr,
-            "summary": "Model response inconsistent; using structural_plan levels for 2R feasibility.",
+            "summary": "Fallback used due to model inconsistency with structural_plan.",
             "reason_codes": ["ENTRY_APPROACHING"],
         }
         if in_position:
