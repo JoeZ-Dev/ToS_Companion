@@ -403,6 +403,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self._full_model_box.setEditText(self._full_model_box.currentText())
         if self._refresh_model_box and self._refresh_model_box.currentText():
             self._refresh_model_box.setEditText(self._refresh_model_box.currentText())
+        # Tooltip with count
+        count_txt = f"Models: {len(self._models_cache)}" if self._models_cache else "Models: defaults (none fetched)"
+        if self._full_model_box:
+            self._full_model_box.setToolTip(count_txt)
+        if self._refresh_model_box:
+            self._refresh_model_box.setToolTip(count_txt)
 
     def _handle_full_model_changed(self, text: str) -> None:
         if hasattr(self, "_full_model_callback") and self._full_model_callback:
