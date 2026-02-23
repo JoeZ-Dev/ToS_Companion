@@ -435,9 +435,17 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def set_model_values(self, full: str, refresh: str) -> None:
         if self._full_model_box:
-            self._full_model_box.setEditText(full)
+            idx = self._full_model_box.findText(full)
+            if idx >= 0:
+                self._full_model_box.setCurrentIndex(idx)
+            else:
+                self._full_model_box.setEditText(full)
         if self._refresh_model_box:
-            self._refresh_model_box.setEditText(refresh)
+            idx_r = self._refresh_model_box.findText(refresh)
+            if idx_r >= 0:
+                self._refresh_model_box.setCurrentIndex(idx_r)
+            else:
+                self._refresh_model_box.setEditText(refresh)
 
     def set_api_key_value(self, value: str) -> None:
         """Set API key field text (masked by UI)."""
