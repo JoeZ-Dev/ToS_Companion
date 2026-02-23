@@ -746,24 +746,29 @@ class UIController:
                     self._logger.info("LLM payload messages (unformatted): %s", messages)
                 resp = client.complete(messages=messages, model_override=model)
                 content = ""
-                # Log full raw response for debugging/inspection
-                try:
-                    self._logger.info("LLM raw response: %s", json.dumps(resp, indent=2))
-                except Exception:
-                    self._logger.info("LLM raw response (unformatted): %s", resp)
-                try:
-                    choices = resp.get("choices") if isinstance(resp, dict) else None
-                    if choices and isinstance(choices, list):
-                        msg = choices[0].get("message") if isinstance(choices[0], dict) else None
-                        if msg and msg.get("content"):
-                            content = msg.get("content")
-                except Exception:
-                    content = ""
-                if not content:
-                    content = json.dumps(resp)
-                QtCore.QTimer.singleShot(0, lambda txt=content: self._window.llm_reco.setText(f"LLM: {txt}"))  # type: ignore[attr-defined]
-                self._last_llm_ts[self._pending_symbol or ""] = time.time()
-                QtCore.QTimer.singleShot(0, lambda: self._refresh_llm_status())
+            # Log full raw response for debugging/inspection
+            try:
+                self._logger.info("LLM raw response: %s", json.dumps(resp, indent=2))
+            except Exception:
+                self._logger.info("LLM raw response (unformatted): %s", resp)
+            try:
+                choices = resp.get("choices") if isinstance(resp, dict) else None
+                if choices and isinstance(choices, list):
+                    msg = choices[0].get("message") if isinstance(choices[0], dict) else None
+                    if msg and msg.get("content"):
+                        content = msg.get("content")
+            except Exception:
+                content = ""
+            if not content:
+                content = json.dumps(resp)
+            try:
+                rec = json.loads(content)
+            except Exception:
+                rec = {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["DATA_STALE"], "summary": content}
+            rec = self._enforce_llm_output_consistency(rec, normalized, model)
+            QtCore.QTimer.singleShot(0, lambda r=rec: self._window.apply_llm_recommendation(r))  # type: ignore[attr-defined]
+            self._last_llm_ts[self._pending_symbol or ""] = time.time()
+            QtCore.QTimer.singleShot(0, lambda: self._refresh_llm_status())
             except Exception as e:
                 # Surface response details when available (e.g., HTTP errors)
                 try:
@@ -1197,7 +1202,69 @@ class UIController:
         ]
 
     def _enforce_llm_output_consistency(self, rec: dict, normalized: dict, model: str) -> dict:
-        """Prevent NO_CLEAR_LEVEL when structural plan already supports 2R."""
+        """Validate LLM response; retry once on violation; fallback if still invalid."""
+        ok, reason = self._validate_llm_response_consistency(normalized, rec)
+        if ok:
+            return rec
+        self._logger.info("LLM response invalid (%s); attempting repair retry", reason)
+        repaired = self._retry_llm_without_no_clear(normalized, model, reason)
+        if repaired:
+            return repaired
+        self._logger.info("LLM fallback applied after invalid response (%s)", reason)
+        plan = normalized.get("structural_plan") or {}
+        return self._fallback_structural_rec(normalized, plan)
+
+    def _validate_llm_response_consistency(self, normalized: dict, rec: dict) -> tuple[bool, str]:
+        """Check structural NO_CLEAR_LEVEL contradiction and schema/null rules."""
+        allowed_codes = {
+            "FAILED_BREAKOUT",
+            "LOWER_HIGHS",
+            "NO_CLEAR_LEVEL",
+            "VWAP_TEST",
+            "VWAP_REJECT",
+            "VWAP_RECLAIM",
+            "VOLUME_FADE",
+            "WEAK_VOLUME_ON_EXTENSION",
+            "STRONG_VOLUME_CONTINUATION",
+            "BUYERS_WEAK",
+            "HEAVY_SELL_PRESSURE",
+            "HOD_BREAKOUT_HOLDING",
+            "HOD_REJECT",
+            "SPREAD_WIDENING",
+            "THIN_LIQUIDITY",
+            "RR_BELOW_MINIMUM",
+            "DATA_STALE",
+            "ENTRY_APPROACHING",
+            "STOP_THREAT",
+            "HALT_OR_REJECT",
+            "DISCONNECT",
+            "EXECUTION_FILL",
+            "RISK_BREACH",
+        }
+        validity = rec.get("validity")
+        reason_codes = rec.get("reason_codes") or []
+        if not isinstance(reason_codes, list):
+            return False, "reason_codes_not_list"
+        if not (1 <= len(reason_codes) <= 3):
+            return False, "reason_codes_len"
+        if any(code not in allowed_codes for code in reason_codes):
+            return False, "reason_code_not_allowed"
+        entry_price = rec.get("entry_price")
+        stop_loss = rec.get("stop_loss")
+        target_price = rec.get("target_price")
+        risk_reward = rec.get("risk_reward")
+        if validity == "NOT_VALID_FOR_TRADING":
+            if any(v is not None for v in (entry_price, stop_loss, target_price, risk_reward)):
+                return False, "not_valid_fields_not_null"
+        if risk_reward is None and any(code == "RR_BELOW_MINIMUM" for code in reason_codes):
+            return False, "rr_below_min_with_null_rr"
+        if risk_reward is not None:
+            try:
+                rr_val = float(risk_reward)
+                if rr_val >= 2.0 and any(code == "RR_BELOW_MINIMUM" for code in reason_codes):
+                    return False, "rr_below_min_with_high_rr"
+            except Exception:
+                pass
         plan = normalized.get("structural_plan") or {}
         entry = plan.get("entry_candidate")
         stop = plan.get("stop_candidate")
@@ -1217,32 +1284,19 @@ class UIController:
                 structural_ok = True
         except Exception:
             structural_ok = False
-        if not structural_ok:
-            return rec
-        reason_codes = rec.get("reason_codes") or []
-        validity = rec.get("validity")
-        if validity == "NOT_VALID_FOR_TRADING" and any(code == "NO_CLEAR_LEVEL" for code in reason_codes):
-            self._logger.info(
-                "LLM response inconsistent with structural_plan rr>=2 (entry=%s stop=%s target=%s rr=%s); attempting repair",
-                entry,
-                stop,
-                target,
-                rr,
-            )
-            repaired = self._retry_llm_without_no_clear(normalized, model, plan)
-            if repaired:
-                return repaired
-            return self._fallback_structural_rec(normalized, plan)
-        return rec
+        if structural_ok and validity == "NOT_VALID_FOR_TRADING" and any(code == "NO_CLEAR_LEVEL" for code in reason_codes):
+            return False, "NO_CLEAR_LEVEL_CONTRADICTS_STRUCTURAL_PLAN"
+        return True, ""
 
-    def _retry_llm_without_no_clear(self, normalized: dict, model: str, plan: dict) -> dict | None:
-        """Retry once with extra developer instruction to avoid NO_CLEAR_LEVEL misuse."""
+    def _retry_llm_without_no_clear(self, normalized: dict, model: str, reason: str) -> dict | None:
+        """Retry once with extra developer instruction to avoid structural contradictions."""
         client = getattr(self._llm_service, "_client", None)
         if not client:
             return None
         messages = self._build_llm_messages(normalized)
         reminder = (
-            "REPAIR_ATTEMPT: Previous response was inconsistent with structural_plan (rr_candidate>=2 with target>entry and stop<entry). "
+            "REPAIR_ATTEMPT: Previous response violated a hard constraint "
+            f"({reason}). structural_plan shows rr_candidate>=2 with target>entry and stop<entry. "
             "You MUST NOT use NO_CLEAR_LEVEL in this case. Return corrected JSON only.\n"
         )
         messages[1]["content"] = reminder + messages[1]["content"]
