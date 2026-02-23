@@ -621,7 +621,18 @@ class UIController:
                     if any(m.startswith(p) for p in allowed_prefixes)
                     and not any(b in m.lower() for b in banned_snippets)
                 ]
-                final = filtered or defaults
+                # Keep current selections visible even if not in filtered list
+                candidate_order = (
+                    ([self._full_model, self._refresh_model] if self._full_model or self._refresh_model else [])
+                    + sorted(filtered, reverse=True)
+                    + defaults
+                )
+                seen: set[str] = set()
+                final: list[str] = []
+                for m in candidate_order:
+                    if m and m not in seen:
+                        seen.add(m)
+                        final.append(m)
                 self._available_models = final
                 self._logger.info("LLM models fetched: %s (showing %s)", fetched, len(final))
                 if final:
