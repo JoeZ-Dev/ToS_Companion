@@ -357,6 +357,20 @@ class UIController:
         self._last_llm_hash[symbol] = snap_hash
         self._refresh_llm_status(symbol)
         normalized = self._normalize_snapshot_for_llm(snapshot)
+        allow, rec = self._structural_rr_gate(normalized)
+        if not allow:
+            self._logger.info("LLM auto skip via structural gate for %s", symbol)
+            if hasattr(self._window, "apply_llm_recommendation"):
+                try:
+                    QtCore.QMetaObject.invokeMethod(
+                        self._window,
+                        "apply_llm_recommendation",
+                        QtCore.Qt.ConnectionType.QueuedConnection,
+                        QtCore.Q_ARG(dict, rec),  # type: ignore[arg-type]
+                    )
+                except Exception:
+                    pass
+            return
         QtCore.QTimer.singleShot(0, lambda n=normalized: self._run_llm_from_snapshot(n, quote_event, is_first))
 
     def _run_llm_from_snapshot(self, snapshot: dict, quote_event: QuoteEvent, is_first: bool) -> None:
@@ -692,6 +706,12 @@ class UIController:
             bars[0]["ts_ms"] if bars_len else None,
             bars[-1]["ts_ms"] if bars_len else None,
         )
+        allow, gate_rec = self._structural_rr_gate(normalized)
+        if not allow:
+            msg = json.dumps(gate_rec)
+            self._logger.info("LLM manual skip via structural gate: %s", msg)
+            QtCore.QTimer.singleShot(0, lambda txt=msg: self._window.llm_reco.setText(f"LLM: {txt}"))  # type: ignore[attr-defined]
+            return
         messages = self._build_llm_messages(normalized)
 
         def task() -> None:
@@ -1003,6 +1023,67 @@ class UIController:
         if not isinstance(bars, list) or bars_len < self._BARS_WINDOW_MIN_READY:
             missing.append("bars_window")
         return (len(missing) == 0, missing)
+
+    def _structural_rr_gate(self, normalized: dict) -> tuple[bool, dict | None]:
+        quote = normalized.get("quote") or {}
+        entry = quote.get("last")
+        levels = normalized.get("levels") or {}
+        micro = normalized.get("micro") or {}
+        nearest_sup = levels.get("nearest_support") if isinstance(levels, dict) else None
+        nearest_res = levels.get("nearest_resistance") if isinstance(levels, dict) else None
+        stop = None
+        target = None
+        if nearest_sup and isinstance(nearest_sup, dict):
+            stop = nearest_sup.get("price")
+        if stop is None:
+            stop = normalized.get("vwap")
+        if nearest_res and isinstance(nearest_res, dict):
+            target = nearest_res.get("price")
+        if target is None and isinstance(micro, dict):
+            target = micro.get("micro_resistance_15m")
+        if entry is None or stop is None or target is None:
+            return True, None
+        try:
+            entry_f = float(entry)
+            stop_f = float(stop)
+            target_f = float(target)
+        except Exception:
+            return True, None
+        if target_f <= entry_f or stop_f >= entry_f:
+            rec = {
+                "validity": "NOT_VALID_FOR_TRADING",
+                "setup_rating": "C",
+                "entry_price": None,
+                "stop_loss": None,
+                "target_price": None,
+                "risk_reward": None,
+                "summary": f"Structural target/stop invalid (entry={entry_f}, stop={stop_f}, target={target_f}).",
+                "reason_codes": ["NO_CLEAR_LEVEL"],
+            }
+            return False, rec
+        rr = (target_f - entry_f) / (entry_f - stop_f) if (entry_f - stop_f) != 0 else 0
+        self._logger.info(
+            "LLM structural gate check entry=%s stop=%s target=%s rr=%s from nearest_res=%s micro_res=%s",
+            entry_f,
+            stop_f,
+            target_f,
+            rr,
+            target if nearest_res else None,
+            micro.get("micro_resistance_15m") if isinstance(micro, dict) else None,
+        )
+        if rr < 2.0:
+            rec = {
+                "validity": "NOT_VALID_FOR_TRADING",
+                "setup_rating": "C",
+                "entry_price": None,
+                "stop_loss": None,
+                "target_price": None,
+                "risk_reward": None,
+                "summary": f"Structural target too close for 2R (entry={entry_f}, stop={stop_f}, target={target_f}, rr={round(rr,3)}).",
+                "reason_codes": ["NO_CLEAR_LEVEL"],
+            }
+            return False, rec
+        return True, None
 
     def _compute_market_state(self) -> str | None:
         now_et = datetime.now(self._et_tz)
