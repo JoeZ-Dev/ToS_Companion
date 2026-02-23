@@ -428,6 +428,8 @@ class MainWindow(QtWidgets.QMainWindow):
         """Populate model dropdowns with available identifiers."""
         logging.getLogger(__name__).info("Populating models dropdown with %s entries", len(models))
         self._models_cache = models or []
+        full_sel = self._full_model_box.currentText() if self._full_model_box else ""
+        refresh_sel = self._refresh_model_box.currentText() if self._refresh_model_box else ""
         if hasattr(self, "_full_model_box") and self._full_model_box:
             self._full_model_box.clear()
             for m in self._models_cache:
@@ -436,6 +438,19 @@ class MainWindow(QtWidgets.QMainWindow):
             self._refresh_model_box.clear()
             for m in self._models_cache:
                 self._refresh_model_box.addItem(m)
+        # Reapply previous selection if present
+        if self._full_model_box and full_sel:
+            idx = self._full_model_box.findText(full_sel)
+            if idx >= 0:
+                self._full_model_box.setCurrentIndex(idx)
+            else:
+                self._full_model_box.setEditText(full_sel)
+        if self._refresh_model_box and refresh_sel:
+            idx_r = self._refresh_model_box.findText(refresh_sel)
+            if idx_r >= 0:
+                self._refresh_model_box.setCurrentIndex(idx_r)
+            else:
+                self._refresh_model_box.setEditText(refresh_sel)
         # Tooltip with count
         sample = ", ".join(self._models_cache[:3]) if self._models_cache else ""
         count_txt = f"Models: {len(self._models_cache)}" if self._models_cache else "Models: loading/none"
