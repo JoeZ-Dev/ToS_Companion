@@ -18,7 +18,8 @@ class LLMClient:
         self._api_key = api_key
         self._model = model
         self._mode = mode
-        self._http = httpx.Client(timeout=10.0)
+        # Allow a bit more headroom for larger prompts/responses
+        self._http = httpx.Client(timeout=30.0)
 
     def complete(self, messages: list[dict[str, str]], model_override: str | None = None) -> Dict[str, Any]:
         if self._mode == "mock":
