@@ -30,6 +30,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._full_model_callback: Optional[Callable[[str], None]] = None
         self._refresh_model_callback: Optional[Callable[[str], None]] = None
         self._prompt_callback: Optional[Callable[[str], None]] = None
+        self._llm_full_callback: Optional[Callable[[], None]] = None
+        self._llm_refresh_callback: Optional[Callable[[], None]] = None
         self._full_model_box: Optional[QtWidgets.QComboBox] = None
         self._refresh_model_box: Optional[QtWidgets.QComboBox] = None
         self._prompt_edit: Optional[QtWidgets.QTextEdit] = None
@@ -173,6 +175,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.llm_status_line = QtWidgets.QLabel("LLM Status: --")
         self.llm_status_line.setStyleSheet("color: #95a5a6;")
         llm_layout.addWidget(self.llm_status_line)
+        btn_row = QtWidgets.QHBoxLayout()
+        self.llm_full_btn = QtWidgets.QPushButton("Run Full")
+        self.llm_refresh_btn = QtWidgets.QPushButton("Run Refresh")
+        btn_row.addWidget(self.llm_full_btn)
+        btn_row.addWidget(self.llm_refresh_btn)
+        btn_row.addStretch()
+        llm_layout.addLayout(btn_row)
         llm_group.setLayout(llm_layout)
         side_panel.addWidget(llm_group)
 
@@ -371,6 +380,11 @@ class MainWindow(QtWidgets.QMainWindow):
             close_btn.clicked.connect(dlg.close)
             update_btn = QtWidgets.QPushButton("Update")
             update_btn.clicked.connect(self._handle_update_clicked)
+            # Wire LLM run buttons to controller callbacks
+            if hasattr(self, "llm_full_btn") and self.llm_full_btn:
+                self.llm_full_btn.clicked.connect(self._handle_llm_full_clicked)
+            if hasattr(self, "llm_refresh_btn") and self.llm_refresh_btn:
+                self.llm_refresh_btn.clicked.connect(self._handle_llm_refresh_clicked)
             btn_row = QtWidgets.QHBoxLayout()
             btn_row.addStretch()
             btn_row.addWidget(update_btn)
@@ -452,6 +466,14 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._refresh_model_box and self._refresh_model_callback:
             self._refresh_model_callback(self._refresh_model_box.currentText())
 
+    def _handle_llm_full_clicked(self) -> None:
+        if self._llm_full_callback:
+            self._llm_full_callback()
+
+    def _handle_llm_refresh_clicked(self) -> None:
+        if self._llm_refresh_callback:
+            self._llm_refresh_callback()
+
     def set_full_model_callback(self, cb: Callable[[str], None]) -> None:
         self._full_model_callback = cb
 
@@ -459,6 +481,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_model_callback = cb
     def set_prompt_callback(self, cb: Callable[[str], None]) -> None:
         self._prompt_callback = cb
+    def set_llm_full_callback(self, cb: Callable[[], None]) -> None:
+        self._llm_full_callback = cb
+    def set_llm_refresh_callback(self, cb: Callable[[], None]) -> None:
+        self._llm_refresh_callback = cb
 
     def set_model_values(self, full: str, refresh: str) -> None:
         if self._full_model_box:

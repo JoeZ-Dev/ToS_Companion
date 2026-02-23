@@ -120,6 +120,10 @@ class UIController:
             self._window.set_refresh_model_callback(self._set_refresh_model)  # type: ignore[attr-defined]
         if hasattr(self._window, "set_prompt_callback"):
             self._window.set_prompt_callback(self._set_prompt)  # type: ignore[attr-defined]
+        if hasattr(self._window, "set_llm_full_callback"):
+            self._window.set_llm_full_callback(self._run_llm_full)  # type: ignore[attr-defined]
+        if hasattr(self._window, "set_llm_refresh_callback"):
+            self._window.set_llm_refresh_callback(self._run_llm_refresh)  # type: ignore[attr-defined]
         self._load_stored_api_key()
         self._load_stored_models()
         self._load_stored_prompt()
@@ -558,11 +562,7 @@ class UIController:
         last_ts = self._last_llm_ts.get(sym)
         last_txt = time.strftime("%H:%M:%S", time.localtime(last_ts)) if last_ts else "--"
         next_txt = "--"
-        if last_ts:
-            next_ts = last_ts + 30
-            delta = max(0, int(next_ts - time.time()))
-            next_txt = f"in {delta}s"
-        self._window.llm_status_line.setText(f"LLM Status: {state} | Key: {key_state} | Last: {last_txt} | Next: {next_txt}")
+        self._window.llm_status_line.setText(f"LLM Status: {state} | Key: {key_state} | Last: {last_txt}")
 
     def _set_api_key(self, key: str) -> None:
         key = key.strip()
@@ -602,6 +602,53 @@ class UIController:
             self._llm_prompt = prompt
             if self._app_state:
                 self._app_state.set("llm_prompt", prompt)
+        self._refresh_llm_status()
+
+    def _run_llm_full(self) -> None:
+        self._run_llm(self._full_model)
+
+    def _run_llm_refresh(self) -> None:
+        self._run_llm(self._refresh_model)
+
+    def _run_llm(self, model: str) -> None:
+        """Invoke LLM with current snapshot using selected model."""
+        if not self._llm_enabled:
+            return
+        if not self._last_ae_snapshot:
+            self._logger.warning("LLM run skipped: no snapshot")
+            return
+        client = getattr(self._llm_service, "_client", None)
+        if not client:
+            self._logger.warning("LLM run skipped: no client")
+            return
+        symbol = self._pending_symbol or ""
+        prompt = self._llm_prompt
+        snapshot_json = json.dumps(self._last_ae_snapshot, indent=2)
+        messages = [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": f"Snapshot for {symbol}:\n{snapshot_json}"},
+        ]
+
+        def task() -> None:
+            try:
+                resp = client.complete(messages=messages, model_override=model)
+                content = ""
+                try:
+                    choices = resp.get("choices") if isinstance(resp, dict) else None
+                    if choices and isinstance(choices, list):
+                        msg = choices[0].get("message") if isinstance(choices[0], dict) else None
+                        if msg and msg.get("content"):
+                            content = msg.get("content")
+                except Exception:
+                    content = ""
+                if not content:
+                    content = json.dumps(resp)
+                QtCore.QTimer.singleShot(0, lambda txt=content: self._window.llm_reco.setText(f"LLM: {txt}"))  # type: ignore[attr-defined]
+                self._last_llm_ts[self._pending_symbol or ""] = time.time()
+                QtCore.QTimer.singleShot(0, lambda: self._refresh_llm_status())
+            except Exception:
+                self._logger.warning("LLM invocation failed", exc_info=True)
+        threading.Thread(target=task, daemon=True).start()
 
     def _load_stored_api_key(self) -> None:
         if not self._app_state:
