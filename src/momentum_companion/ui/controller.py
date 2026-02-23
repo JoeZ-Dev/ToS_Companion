@@ -17,6 +17,7 @@ from momentum_companion.clients.schwab_stream import SchwabStreamClient
 from momentum_companion.clients.schwab_rest import SchwabRestClient
 from momentum_companion.clients.token_provider import TokenProvider
 from momentum_companion.llm.client import LLMClient
+from momentum_companion.state.app_state import AppStateStore
 from momentum_companion.data.contracts import QuoteEvent
 from momentum_companion.data.bar_aggregator import BarAggregator10s, TenSecondBar
 from momentum_companion.data.price_update import PriceUpdate
@@ -38,6 +39,7 @@ class UIController:
         token_provider: TokenProvider | None = None,
         db_path: str | None = None,
         ae_engine: AEEngine | None = None,
+        app_state: AppStateStore | None = None,
     ) -> None:
         self._window = window
         self._llm_service = llm_service
@@ -75,6 +77,7 @@ class UIController:
         self._last_llm_ts: dict[str, float] = {}
         self._last_llm_hash: dict[str, str] = {}
         self._llm_enabled: bool = False
+        self._app_state = app_state
 
     def handle_flash(self, symbol: str, rec: dict, payload: dict) -> None:
         """Trigger flash alert in UI."""
@@ -94,6 +97,7 @@ class UIController:
             self._window.set_api_key_callback(self._set_api_key)  # type: ignore[attr-defined]
         if hasattr(self._window, "options_btn"):
             self._window.options_btn.clicked.connect(self._open_options)  # type: ignore[attr-defined]
+        self._load_stored_api_key()
 
     def _on_symbol_entered(self) -> None:
         raw = self._window.symbol_input.text()
@@ -538,10 +542,25 @@ class UIController:
         if key:
             try:
                 self._llm_service._client = LLMClient(api_key=key, model="gpt-5.1-codex-max")  # type: ignore[attr-defined]
+                if self._app_state:
+                    self._app_state.set_secret("openai_api_key", key)
             except Exception:
                 self._logger.exception("Failed to set LLM API key")
         else:
             self._llm_service._client = None  # type: ignore[attr-defined]
+            if self._app_state:
+                self._app_state.set("openai_api_key", "")
+        self._refresh_llm_status()
+
+    def _load_stored_api_key(self) -> None:
+        if not self._app_state:
+            return
+        stored = self._app_state.get_secret("openai_api_key")
+        if stored:
+            try:
+                self._llm_service._client = LLMClient(api_key=stored, model="gpt-5.1-codex-max")  # type: ignore[attr-defined]
+            except Exception:
+                self._logger.exception("Failed to load stored LLM API key")
         self._refresh_llm_status()
 
     @staticmethod
