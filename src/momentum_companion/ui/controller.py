@@ -100,6 +100,10 @@ class UIController:
             self._window.set_api_key_callback(self._set_api_key)  # type: ignore[attr-defined]
         if hasattr(self._window, "options_btn"):
             self._window.options_btn.clicked.connect(self._open_options)  # type: ignore[attr-defined]
+        if hasattr(self._window, "set_full_model_callback"):
+            self._window.set_full_model_callback(self._set_full_model)  # type: ignore[attr-defined]
+        if hasattr(self._window, "set_refresh_model_callback"):
+            self._window.set_refresh_model_callback(self._set_refresh_model)  # type: ignore[attr-defined]
         self._load_stored_api_key()
         self._load_stored_models()
 
@@ -559,6 +563,22 @@ class UIController:
                 self._app_state.set("openai_api_key", "")
         self._refresh_llm_status()
 
+    def _set_full_model(self, model: str) -> None:
+        model = model.strip()
+        if model:
+            self._full_model = model
+            if self._app_state:
+                self._app_state.set("llm_full_model", model)
+        self._refresh_llm_status()
+
+    def _set_refresh_model(self, model: str) -> None:
+        model = model.strip()
+        if model:
+            self._refresh_model = model
+            if self._app_state:
+                self._app_state.set("llm_refresh_model", model)
+        self._refresh_llm_status()
+
     def _load_stored_api_key(self) -> None:
         if not self._app_state:
             return
@@ -592,6 +612,10 @@ class UIController:
         refresh = self._app_state.get("llm_refresh_model") or self._refresh_model
         self._full_model = full
         self._refresh_model = refresh
+        if hasattr(self._window, "_full_model_box") and self._window._full_model_box:
+            self._window._full_model_box.setEditText(self._full_model)
+        if hasattr(self._window, "_refresh_model_box") and self._window._refresh_model_box:
+            self._window._refresh_model_box.setEditText(self._refresh_model)
 
     @staticmethod
     def _parse_shares_outstanding(payload: Any, symbol: str) -> float | None:

@@ -27,6 +27,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._display_tz = ZoneInfo("America/New_York")
         self._tz_selector: QtWidgets.QComboBox | None = None
         self._api_key_callback: Optional[Callable[[str], None]] = None
+        self._full_model_callback: Optional[Callable[[str], None]] = None
+        self._refresh_model_callback: Optional[Callable[[str], None]] = None
 
     def _build_layout(self) -> None:
         central = QtWidgets.QWidget()
@@ -337,6 +339,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._refresh_model_box.setEditable(True)
             self._refresh_model_box.setPlaceholderText("e.g., gpt-4o-mini")
             model_row.addWidget(self._refresh_model_box)
+            self._full_model_box.editTextChanged.connect(self._handle_full_model_changed)
+            self._refresh_model_box.editTextChanged.connect(self._handle_refresh_model_changed)
             layout.addLayout(model_row)
             close_btn = QtWidgets.QPushButton("Close")
             close_btn.clicked.connect(dlg.close)
@@ -380,6 +384,20 @@ class MainWindow(QtWidgets.QMainWindow):
         if hasattr(self, "_refresh_model_box") and self._refresh_model_box:
             self._refresh_model_box.clear()
             self._refresh_model_box.addItems(models)
+
+    def _handle_full_model_changed(self, text: str) -> None:
+        if hasattr(self, "_full_model_callback") and self._full_model_callback:
+            self._full_model_callback(text)
+
+    def _handle_refresh_model_changed(self, text: str) -> None:
+        if hasattr(self, "_refresh_model_callback") and self._refresh_model_callback:
+            self._refresh_model_callback(text)
+
+    def set_full_model_callback(self, cb: Callable[[str], None]) -> None:
+        self._full_model_callback = cb
+
+    def set_refresh_model_callback(self, cb: Callable[[str], None]) -> None:
+        self._refresh_model_callback = cb
 
     def update_ae_panel(self, snapshot: dict | None) -> None:
         """Render AE snapshot in compact sections."""
