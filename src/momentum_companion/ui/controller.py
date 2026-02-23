@@ -698,9 +698,12 @@ class UIController:
                 self._logger.info("LLM models fetched: %s (showing %s)", fetched, len(final))
                 if final:
                     self._logger.debug("Model sample: %s", final[:10])
-                # Emit in order: populate list, then apply saved selections (Qt will queue across threads)
-                self._model_signals.models_ready.emit(final)
-                self._model_signals.model_values.emit(self._full_model or "", self._refresh_model or "")
+                # Apply list then re-select saved values on the UI thread
+                QtCore.QTimer.singleShot(0, lambda f=final: getattr(self._window, "populate_models", lambda *_: None)(f))
+                QtCore.QTimer.singleShot(
+                    0,
+                    lambda: getattr(self._window, "set_model_values", lambda *_: None)(self._full_model, self._refresh_model),
+                )
             except Exception:
                 self._logger.warning("Failed to list models from OpenAI", exc_info=True)
         threading.Thread(target=task, daemon=True).start()
