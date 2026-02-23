@@ -600,6 +600,8 @@ class UIController:
         def task() -> None:
             try:
                 models = self._llm_service._client.list_models()  # type: ignore[attr-defined]
+                if not models:
+                    models = ["gpt-4o", "gpt-4o-mini"]
                 self._available_models = models
                 if hasattr(self._window, "populate_models"):
                     QtCore.QTimer.singleShot(0, lambda m=models: self._window.populate_models(m))  # type: ignore[attr-defined]

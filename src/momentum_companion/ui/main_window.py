@@ -350,6 +350,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._refresh_model_box.editTextChanged.connect(self._handle_refresh_model_changed)
             if self._models_cache:
                 self.populate_models(self._models_cache)
+            else:
+                self.populate_models(["gpt-4o", "gpt-4o-mini"])
             layout.addLayout(model_row)
             close_btn = QtWidgets.QPushButton("Close")
             close_btn.clicked.connect(dlg.close)
@@ -390,10 +392,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._models_cache = models or []
         if hasattr(self, "_full_model_box") and self._full_model_box:
             self._full_model_box.clear()
-            self._full_model_box.addItems(models)
+            if self._models_cache:
+                self._full_model_box.addItems(self._models_cache)
         if hasattr(self, "_refresh_model_box") and self._refresh_model_box:
             self._refresh_model_box.clear()
-            self._refresh_model_box.addItems(models)
+            if self._models_cache:
+                self._refresh_model_box.addItems(self._models_cache)
         # Preserve current text if set
         if self._full_model_box and self._full_model_box.currentText():
             self._full_model_box.setEditText(self._full_model_box.currentText())
