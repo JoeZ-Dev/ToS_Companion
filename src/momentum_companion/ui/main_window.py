@@ -29,10 +29,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._api_key_callback: Optional[Callable[[str], None]] = None
         self._full_model_callback: Optional[Callable[[str], None]] = None
         self._refresh_model_callback: Optional[Callable[[str], None]] = None
+        self._prompt_callback: Optional[Callable[[str], None]] = None
         self._full_model_box: Optional[QtWidgets.QComboBox] = None
         self._refresh_model_box: Optional[QtWidgets.QComboBox] = None
+        self._prompt_edit: Optional[QtWidgets.QTextEdit] = None
         self._models_cache: list[str] = []
         self._pending_api_key_text: Optional[str] = None
+        self._pending_prompt_text: Optional[str] = None
         self._model_status_label: Optional[QtWidgets.QLabel] = None
 
     def _build_layout(self) -> None:
@@ -354,9 +357,25 @@ class MainWindow(QtWidgets.QMainWindow):
             layout.addLayout(model_row)
             if self._models_cache:
                 self.populate_models(self._models_cache)
+
+            prompt_label = QtWidgets.QLabel("LLM Prompt:")
+            self._prompt_edit = QtWidgets.QTextEdit()
+            self._prompt_edit.setPlaceholderText("Enter base prompt for LLM recommendations...")
+            if self._pending_prompt_text:
+                self._prompt_edit.setPlainText(self._pending_prompt_text)
+            self._prompt_edit.textChanged.connect(self._handle_prompt_changed)
+            layout.addWidget(prompt_label)
+            layout.addWidget(self._prompt_edit)
+
             close_btn = QtWidgets.QPushButton("Close")
             close_btn.clicked.connect(dlg.close)
-            layout.addWidget(close_btn, alignment=QtCore.Qt.AlignmentFlag.AlignRight)
+            update_btn = QtWidgets.QPushButton("Update")
+            update_btn.clicked.connect(self._handle_update_clicked)
+            btn_row = QtWidgets.QHBoxLayout()
+            btn_row.addStretch()
+            btn_row.addWidget(update_btn)
+            btn_row.addWidget(close_btn)
+            layout.addLayout(btn_row)
             dlg.setLayout(layout)
             self._options_dialog = dlg
         else:
@@ -421,11 +440,25 @@ class MainWindow(QtWidgets.QMainWindow):
         if hasattr(self, "_refresh_model_callback") and self._refresh_model_callback:
             self._refresh_model_callback(text)
 
+    def _handle_prompt_changed(self) -> None:
+        if self._prompt_callback and self._prompt_edit:
+            self._prompt_callback(self._prompt_edit.toPlainText())
+
+    def _handle_update_clicked(self) -> None:
+        if self._prompt_edit and self._prompt_callback:
+            self._prompt_callback(self._prompt_edit.toPlainText())
+        if self._full_model_box and self._full_model_callback:
+            self._full_model_callback(self._full_model_box.currentText())
+        if self._refresh_model_box and self._refresh_model_callback:
+            self._refresh_model_callback(self._refresh_model_box.currentText())
+
     def set_full_model_callback(self, cb: Callable[[str], None]) -> None:
         self._full_model_callback = cb
 
     def set_refresh_model_callback(self, cb: Callable[[str], None]) -> None:
         self._refresh_model_callback = cb
+    def set_prompt_callback(self, cb: Callable[[str], None]) -> None:
+        self._prompt_callback = cb
 
     def set_model_values(self, full: str, refresh: str) -> None:
         if self._full_model_box:
@@ -447,6 +480,13 @@ class MainWindow(QtWidgets.QMainWindow):
             self._api_key_edit.setText(value)
         else:
             self._pending_api_key_text = value
+
+    def set_prompt_value(self, value: str) -> None:
+        """Set prompt text area."""
+        if self._prompt_edit:
+            self._prompt_edit.setPlainText(value)
+        else:
+            self._pending_prompt_text = value
 
     def update_ae_panel(self, snapshot: dict | None) -> None:
         """Render AE snapshot in compact sections."""

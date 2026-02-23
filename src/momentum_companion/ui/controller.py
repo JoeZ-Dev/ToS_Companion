@@ -85,6 +85,10 @@ class UIController:
         self._available_models: list[str] = []
         self._full_model = "gpt-4o"
         self._refresh_model = "gpt-4o-mini"
+        self._llm_prompt = (
+            "You are a trading coach. Provide a concise long/short recommendation with entry, stop, target, and reasons. "
+            "Use the supplied AE snapshot only; do not hallucinate missing data."
+        )
         self._model_signals = _ModelSignals()
         if hasattr(self._window, "populate_models"):
             self._model_signals.models_ready.connect(self._window.populate_models)  # type: ignore[attr-defined]
@@ -114,8 +118,11 @@ class UIController:
             self._window.set_full_model_callback(self._set_full_model)  # type: ignore[attr-defined]
         if hasattr(self._window, "set_refresh_model_callback"):
             self._window.set_refresh_model_callback(self._set_refresh_model)  # type: ignore[attr-defined]
+        if hasattr(self._window, "set_prompt_callback"):
+            self._window.set_prompt_callback(self._set_prompt)  # type: ignore[attr-defined]
         self._load_stored_api_key()
         self._load_stored_models()
+        self._load_stored_prompt()
 
     def _on_symbol_entered(self) -> None:
         raw = self._window.symbol_input.text()
@@ -589,6 +596,13 @@ class UIController:
                 self._app_state.set("llm_refresh_model", model)
         self._refresh_llm_status()
 
+    def _set_prompt(self, prompt: str) -> None:
+        prompt = prompt.strip()
+        if prompt:
+            self._llm_prompt = prompt
+            if self._app_state:
+                self._app_state.set("llm_prompt", prompt)
+
     def _load_stored_api_key(self) -> None:
         if not self._app_state:
             return
@@ -659,6 +673,15 @@ class UIController:
             self._window.set_model_values(self._full_model, self._refresh_model)
         if self._available_models and hasattr(self._window, "populate_models"):
             self._window.populate_models(self._available_models)
+
+    def _load_stored_prompt(self) -> None:
+        if not self._app_state:
+            return
+        stored = self._app_state.get("llm_prompt")
+        if stored:
+            self._llm_prompt = stored
+        if hasattr(self._window, "set_prompt_value"):
+            self._window.set_prompt_value(self._llm_prompt)
 
     @staticmethod
     def _parse_shares_outstanding(payload: Any, symbol: str) -> float | None:
