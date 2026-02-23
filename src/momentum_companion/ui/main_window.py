@@ -392,6 +392,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def populate_models(self, models: list[str]) -> None:
         """Populate model dropdowns with available identifiers."""
+        logging.getLogger(__name__).info("Populating models dropdown with %s entries", len(models))
         self._models_cache = models or []
         if hasattr(self, "_full_model_box") and self._full_model_box:
             self._full_model_box.clear()
