@@ -64,7 +64,6 @@ class UIController:
             None,
             None,
         )
-        self._hook_symbol_input()
         self._chart_adapter = ChartAdapter(self._window.chart_widget)
         self._initial_render_done = False
         self._indicators = IndicatorsEngine()
@@ -81,6 +80,7 @@ class UIController:
         self._available_models: list[str] = []
         self._full_model = "gpt-4o"
         self._refresh_model = "gpt-4o-mini"
+        self._hook_symbol_input()
 
     def handle_flash(self, symbol: str, rec: dict, payload: dict) -> None:
         """Trigger flash alert in UI."""
