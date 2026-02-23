@@ -584,7 +584,7 @@ class UIController:
                         self._window,
                         "populate_models",
                         QtCore.Qt.ConnectionType.QueuedConnection,
-                        QtCore.Q_ARG(list, models),  # type: ignore[arg-type]
+                        QtCore.Q_ARG("PyObject", models),
                     )
             except Exception:
                 self._logger.warning("Failed to list models from OpenAI", exc_info=True)
