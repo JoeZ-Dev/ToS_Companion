@@ -385,7 +385,15 @@ class UIController:
                 is_first,
                 self._llm_prompt_version,
             )
-            rec = self._llm_service.evaluate(snapshot, session_mode, quote_event, model_override=model)  # type: ignore[attr-defined]
+            messages = self._build_llm_messages(snapshot)
+            rec = self._llm_service.evaluate(
+                snapshot,
+                session_mode,
+                quote_event,
+                model_override=model,
+                messages_override=messages,
+            )  # type: ignore[attr-defined]
+            rec = self._enforce_llm_output_consistency(rec, snapshot, model)
             if hasattr(self._window, "apply_llm_recommendation"):
                 QtCore.QMetaObject.invokeMethod(
                     self._window,
@@ -916,6 +924,14 @@ class UIController:
             "micro_state": micro_src.get("micro_state"),
         }
         bars_window = self._extract_bars_window(snapshot)
+        plan = self._build_structural_plan(
+            {
+                "quote": quote,
+                "levels": levels,
+                "micro": micro,
+                "vwap": snapshot.get("vwap"),
+            }
+        )
         norm = {
             "schema_version": snapshot.get("schema_version", "AE-1.1"),
             "status": snapshot.get("status", "ok"),
@@ -937,6 +953,7 @@ class UIController:
             "session": session,
             "micro": micro,
             "levels": levels,
+            "structural_plan": plan,
         }
         return norm
 
@@ -1025,22 +1042,11 @@ class UIController:
         return (len(missing) == 0, missing)
 
     def _structural_rr_gate(self, normalized: dict) -> tuple[bool, dict | None]:
+        plan = normalized.get("structural_plan") or self._build_structural_plan(normalized)
         quote = normalized.get("quote") or {}
-        entry = quote.get("last")
-        levels = normalized.get("levels") or {}
-        micro = normalized.get("micro") or {}
-        nearest_sup = levels.get("nearest_support") if isinstance(levels, dict) else None
-        nearest_res = levels.get("nearest_resistance") if isinstance(levels, dict) else None
-        stop = None
-        target = None
-        if nearest_sup and isinstance(nearest_sup, dict):
-            stop = nearest_sup.get("price")
-        if stop is None:
-            stop = normalized.get("vwap")
-        if nearest_res and isinstance(nearest_res, dict):
-            target = nearest_res.get("price")
-        if target is None and isinstance(micro, dict):
-            target = micro.get("micro_resistance_15m")
+        entry = quote.get("last") if isinstance(quote, dict) else None
+        stop = plan.get("stop_candidate") if isinstance(plan, dict) else None
+        target = plan.get("target_candidate") if isinstance(plan, dict) else None
         if entry is None or stop is None or target is None:
             return True, None
         try:
@@ -1085,6 +1091,52 @@ class UIController:
             return False, rec
         return True, None
 
+    def _build_structural_plan(self, payload: dict) -> dict:
+        """Derive deterministic structural plan from normalized payload."""
+        quote = payload.get("quote") or {}
+        levels = payload.get("levels") or {}
+        micro = payload.get("micro") or {}
+        entry = quote.get("last") if isinstance(quote, dict) else None
+        stop = None
+        stop_source = None
+        target = None
+        target_source = None
+        if isinstance(levels, dict):
+            nearest_sup = levels.get("nearest_support")
+            if isinstance(nearest_sup, dict) and nearest_sup.get("price") is not None:
+                stop = nearest_sup.get("price")
+                stop_source = "nearest_support"
+            nearest_res = levels.get("nearest_resistance")
+            if isinstance(nearest_res, dict) and nearest_res.get("price") is not None:
+                target = nearest_res.get("price")
+                target_source = "nearest_resistance"
+        if stop is None:
+            stop = payload.get("vwap")
+            if stop is not None:
+                stop_source = "vwap"
+        if target is None and isinstance(micro, dict):
+            target = micro.get("micro_resistance_15m")
+            if target is not None:
+                target_source = "micro_resistance_15m"
+        rr = None
+        try:
+            if entry is not None and stop is not None and target is not None:
+                entry_f = float(entry)
+                stop_f = float(stop)
+                target_f = float(target)
+                if entry_f != stop_f:
+                    rr = (target_f - entry_f) / (entry_f - stop_f)
+        except Exception:
+            rr = None
+        return {
+            "entry_candidate": entry,
+            "stop_candidate": stop,
+            "target_candidate": target,
+            "rr_candidate": rr,
+            "stop_source": stop_source,
+            "target_source": target_source,
+        }
+
     def _compute_market_state(self) -> str | None:
         now_et = datetime.now(self._et_tz)
         t = now_et.time()
@@ -1120,6 +1172,7 @@ class UIController:
             "RR_BELOW_MINIMUM only when you output numeric entry/stop/target and risk_reward<2.0. If validity=NOT_VALID_FOR_TRADING and risk_reward=null, DO NOT use RR_BELOW_MINIMUM; use NO_CLEAR_LEVEL instead if no structural target can meet 2R.\n"
             "Only use HOD_* reason codes if snapshot includes explicit high_of_day/hod_price; otherwise do not emit HOD_*.\n"
             "If entry is at/above nearest_resistance.price and there is no higher resistance provided, default to NOT_VALID_FOR_TRADING unless bars_window clearly shows continuation with a structural swing target.\n"
+            "structural_plan provides entry_candidate, stop_candidate, target_candidate, rr_candidate. If structural_plan.rr_candidate>=2.0 with target>entry and stop<entry, you MUST NOT use NO_CLEAR_LEVEL. If still not tradable, use another allowed code supported by snapshot evidence and explain in summary.\n"
             "Example: If setup_rating is B- but no structural target yields >=2R, set NOT_VALID_FOR_TRADING with reason_codes=[NO_CLEAR_LEVEL] and all price fields null.\n"
             "If validity=NOT_VALID_FOR_TRADING and reason_codes includes NO_CLEAR_LEVEL, summary must name the structural targets evaluated (e.g., nearest_resistance.price, micro_resistance_15m, swing highs) and why 2R was not achievable.\n"
             "Self-check: JSON valid; enums valid; null rules met; no extra keys. If risk_reward is null then reason_codes MUST NOT contain RR_BELOW_MINIMUM."
@@ -1143,6 +1196,115 @@ class UIController:
             {"role": "developer", "content": developer_text},
             {"role": "user", "content": user_text},
         ]
+
+    def _enforce_llm_output_consistency(self, rec: dict, normalized: dict, model: str) -> dict:
+        """Prevent NO_CLEAR_LEVEL when structural plan already supports 2R."""
+        plan = normalized.get("structural_plan") or {}
+        entry = plan.get("entry_candidate")
+        stop = plan.get("stop_candidate")
+        target = plan.get("target_candidate")
+        rr = plan.get("rr_candidate")
+        structural_ok = False
+        try:
+            if (
+                entry is not None
+                and stop is not None
+                and target is not None
+                and float(target) > float(entry)
+                and float(stop) < float(entry)
+                and rr is not None
+                and float(rr) >= 2.0
+            ):
+                structural_ok = True
+        except Exception:
+            structural_ok = False
+        if not structural_ok:
+            return rec
+        reason_codes = rec.get("reason_codes") or []
+        validity = rec.get("validity")
+        if validity == "NOT_VALID_FOR_TRADING" and any(code == "NO_CLEAR_LEVEL" for code in reason_codes):
+            self._logger.info(
+                "LLM response inconsistent with structural_plan rr>=2 (entry=%s stop=%s target=%s rr=%s); attempting repair",
+                entry,
+                stop,
+                target,
+                rr,
+            )
+            repaired = self._retry_llm_without_no_clear(normalized, model, plan)
+            if repaired:
+                return repaired
+            return self._fallback_structural_rec(normalized, plan)
+        return rec
+
+    def _retry_llm_without_no_clear(self, normalized: dict, model: str, plan: dict) -> dict | None:
+        """Retry once with extra developer instruction to avoid NO_CLEAR_LEVEL misuse."""
+        client = getattr(self._llm_service, "_client", None)
+        if not client:
+            return None
+        messages = self._build_llm_messages(normalized)
+        reminder = (
+            "REPAIR_ATTEMPT: Previous response was inconsistent with structural_plan (rr_candidate>=2 with target>entry and stop<entry). "
+            "You MUST NOT use NO_CLEAR_LEVEL in this case. Return corrected JSON only.\n"
+        )
+        messages[1]["content"] = reminder + messages[1]["content"]
+        try:
+            resp = client.complete(messages=messages, model_override=model)
+            rec = self._extract_rec_from_resp(resp)
+            if rec:
+                return rec
+        except Exception:
+            self._logger.exception("LLM repair retry failed")
+        return None
+
+    def _fallback_structural_rec(self, normalized: dict, plan: dict) -> dict:
+        """Deterministic fallback when model remains inconsistent."""
+        entry = plan.get("entry_candidate")
+        stop = plan.get("stop_candidate")
+        target = plan.get("target_candidate")
+        rr = plan.get("rr_candidate")
+        in_position = bool(normalized.get("in_position"))
+        rec: dict[str, Any] = {
+            "validity": "VALID_FOR_TRADING",
+            "setup_rating": "B-",
+            "entry_price": entry,
+            "stop_loss": stop,
+            "target_price": target,
+            "risk_reward": rr,
+            "summary": "Model response inconsistent; using structural_plan levels for 2R feasibility.",
+            "reason_codes": ["ENTRY_APPROACHING"],
+        }
+        if in_position:
+            rec.update(
+                {
+                    "trade_management_action": "HOLD",
+                    "action_urgency": "LOW",
+                    "updated_stop_loss": stop,
+                    "add_entry_price": None,
+                    "add_qty": None,
+                    "management_summary": "Model inconsistent; holding using structural plan.",
+                }
+            )
+        return rec
+
+    @staticmethod
+    def _extract_rec_from_resp(resp: Any) -> dict | None:
+        """Attempt to parse LLM client response into a dict recommendation."""
+        if isinstance(resp, dict):
+            if "choices" in resp:
+                try:
+                    choices = resp.get("choices") or []
+                    if choices and isinstance(choices, list):
+                        msg = choices[0].get("message") if isinstance(choices[0], dict) else None
+                        content = msg.get("content") if msg else None
+                        if content:
+                            return json.loads(content)
+                except Exception:
+                    return None
+            # already looks like a recommendation
+            validity = resp.get("validity")
+            if validity:
+                return resp
+        return None
 
     @staticmethod
     def _parse_shares_outstanding(payload: Any, symbol: str) -> float | None:
