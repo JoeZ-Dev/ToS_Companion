@@ -352,8 +352,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self._refresh_model_box.editTextChanged.connect(self._handle_refresh_model_changed)
             self._refresh_model_box.currentTextChanged.connect(self._handle_refresh_model_changed)
             layout.addLayout(model_row)
-            self._model_status_label = QtWidgets.QLabel("Models: --")
-            layout.addWidget(self._model_status_label)
             if self._models_cache:
                 self.populate_models(self._models_cache)
             close_btn = QtWidgets.QPushButton("Close")
@@ -414,8 +412,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self._full_model_box.setToolTip(count_txt)
         if self._refresh_model_box:
             self._refresh_model_box.setToolTip(count_txt)
-        if self._model_status_label:
-            self._model_status_label.setText(count_txt)
 
     def _handle_full_model_changed(self, text: str) -> None:
         if hasattr(self, "_full_model_callback") and self._full_model_callback:
