@@ -391,14 +391,14 @@ class MainWindow(QtWidgets.QMainWindow):
             rr_row.addStretch()
             layout.addLayout(rr_row)
 
-        prompt_label = QtWidgets.QLabel("LLM Prompt:")
-        self._prompt_edit = QtWidgets.QTextEdit()
-        self._prompt_edit.setPlaceholderText("Enter base prompt for LLM recommendations...")
-        if self._pending_prompt_text:
-            self._prompt_edit.setPlainText(self._pending_prompt_text)
-        self._prompt_edit.textChanged.connect(self._handle_prompt_changed)
-        layout.addWidget(prompt_label)
-        layout.addWidget(self._prompt_edit)
+            prompt_label = QtWidgets.QLabel("LLM Prompt:")
+            self._prompt_edit = QtWidgets.QTextEdit()
+            self._prompt_edit.setPlaceholderText("Enter base prompt for LLM recommendations...")
+            if self._pending_prompt_text:
+                self._prompt_edit.setPlainText(self._pending_prompt_text)
+            self._prompt_edit.textChanged.connect(self._handle_prompt_changed)
+            layout.addWidget(prompt_label)
+            layout.addWidget(self._prompt_edit)
 
             close_btn = QtWidgets.QPushButton("Close")
             close_btn.clicked.connect(dlg.close)
