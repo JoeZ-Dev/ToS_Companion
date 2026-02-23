@@ -981,15 +981,16 @@ class UIController:
             "Tradability bar:\n"
             "VALID_FOR_TRADING only if setup_rating>=B- AND risk_reward>=2.0 AND entry_price/stop_loss/target_price are present.\n"
             "If NOT_VALID_FOR_TRADING then entry_price/stop_loss/target_price/risk_reward MUST be null.\n"
-            "Targets must be anchored to structural levels from the snapshot: nearest_resistance.price (preferred), micro_resistance_15m, or a recent swing high visible in bars_window. "
-            "Do NOT back-solve target to hit RR. If no structural target above entry or RR>=2 cannot be met with structural target, set NOT_VALID_FOR_TRADING with NO_CLEAR_LEVEL or RR_BELOW_MINIMUM and null entry/stop/target/risk_reward.\n"
+            "Targets must be anchored to structural levels from the snapshot: nearest_resistance.price (preferred), micro_resistance_15m, or a recent swing high visible in bars_window. Do NOT back-solve target to hit RR.\n"
+            "If no structural target above entry or RR>=2 cannot be met with structural target, set NOT_VALID_FOR_TRADING with NO_CLEAR_LEVEL and null entry/stop/target/risk_reward.\n"
             "reason_codes:\n"
             "Return 1–3 codes, most important first. Codes MUST be from this allowed list ONLY:\n"
             "FAILED_BREAKOUT,LOWER_HIGHS,NO_CLEAR_LEVEL,VWAP_TEST,VWAP_REJECT,VWAP_RECLAIM,VOLUME_FADE,WEAK_VOLUME_ON_EXTENSION,STRONG_VOLUME_CONTINUATION,BUYERS_WEAK,HEAVY_SELL_PRESSURE,HOD_BREAKOUT_HOLDING,HOD_REJECT,SPREAD_WIDENING,THIN_LIQUIDITY,RR_BELOW_MINIMUM,DATA_STALE,ENTRY_APPROACHING,STOP_THREAT,HALT_OR_REJECT,DISCONNECT,EXECUTION_FILL,RISK_BREACH\n"
-            "RR_BELOW_MINIMUM only if risk_reward is present and <2.0; if risk_reward is null do not use RR_BELOW_MINIMUM. "
+            "RR_BELOW_MINIMUM only when you output numeric entry/stop/target and risk_reward<2.0. If validity=NOT_VALID_FOR_TRADING and risk_reward=null, DO NOT use RR_BELOW_MINIMUM; use NO_CLEAR_LEVEL instead if no structural target can meet 2R.\n"
             "Only use HOD_* reason codes if snapshot includes explicit high_of_day/hod_price; otherwise do not emit HOD_*.\n"
             "If entry is at/above nearest_resistance.price and there is no higher resistance provided, default to NOT_VALID_FOR_TRADING unless bars_window clearly shows continuation with a structural swing target.\n"
-            "Self-check: JSON valid; enums valid; null rules met; no extra keys."
+            "Example: If setup_rating is B- but no structural target yields >=2R, set NOT_VALID_FOR_TRADING with reason_codes=[NO_CLEAR_LEVEL] and all price fields null.\n"
+            "Self-check: JSON valid; enums valid; null rules met; no extra keys. If risk_reward is null then reason_codes MUST NOT contain RR_BELOW_MINIMUM."
         )
 
     def _build_llm_messages(self, snapshot: dict) -> list[dict[str, str]]:
