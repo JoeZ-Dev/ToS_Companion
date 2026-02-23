@@ -797,42 +797,27 @@ class UIController:
         return norm
 
     def _default_developer_prompt(self) -> str:
-        reason_codes = [
-            "FAILED_BREAKOUT",
-            "LOWER_HIGHS",
-            "NO_CLEAR_LEVEL",
-            "VWAP_TEST",
-            "VWAP_REJECT",
-            "VWAP_RECLAIM",
-            "VOLUME_FADE",
-            "WEAK_VOLUME_ON_EXTENSION",
-            "STRONG_VOLUME_CONTINUATION",
-            "BUYERS_WEAK",
-            "HEAVY_SELL_PRESSURE",
-            "HOD_BREAKOUT_HOLDING",
-            "HOD_REJECT",
-            "SPREAD_WIDENING",
-            "THIN_LIQUIDITY",
-            "RR_BELOW_MINIMUM",
-            "DATA_STALE",
-            "ENTRY_APPROACHING",
-            "STOP_THREAT",
-            "HALT_OR_REJECT",
-            "DISCONNECT",
-            "EXECUTION_FILL",
-            "RISK_BREACH",
-        ]
-        reason_str = ", ".join(reason_codes)
         return (
             f"PROMPT_VERSION={self._llm_prompt_version}\n"
-            "Return exactly ONE JSON object and NOTHING ELSE.\n"
-            "Output keys required (setup mode): validity, setup_rating, entry_price, stop_loss, target_price, risk_reward, summary, reason_codes.\n"
-            "If in_position=true, also include: trade_management_action, action_urgency, updated_stop_loss, add_entry_price, add_qty, management_summary.\n"
+            "Return EXACTLY ONE JSON object and NOTHING ELSE.\n"
+            "No markdown. No extra keys.\n"
+            "Output keys required when in_position=false:\n"
+            "validity, setup_rating, entry_price, stop_loss, target_price, risk_reward, summary, reason_codes\n"
+            "Additional required keys when in_position=true:\n"
+            "trade_management_action, action_urgency, updated_stop_loss, add_entry_price, add_qty, management_summary\n"
+            "Enums:\n"
+            "validity = VALID_FOR_TRADING|NOT_VALID_FOR_TRADING\n"
+            "setup_rating = A+|A|A-|B+|B|B-|C+|C|C-|D\n"
+            "trade_management_action = HOLD|EXIT_NOW|SCALE_OUT_50|MOVE_STOP_TO_BREAKEVEN|RAISE_STOP_TO|ADD_TO_POSITION\n"
+            "action_urgency = LOW|MEDIUM|HIGH\n"
+            "Tradability bar:\n"
             "VALID_FOR_TRADING only if setup_rating>=B- AND risk_reward>=2.0 AND entry_price/stop_loss/target_price are present.\n"
             "If NOT_VALID_FOR_TRADING then entry_price/stop_loss/target_price/risk_reward MUST be null.\n"
-            "reason_codes MUST be 1–3 items and MUST be from this allowed list ONLY: "
-            f"{reason_str}.\n"
-            "Do not output any other keys. Do not output markdown."
+            "reason_codes:\n"
+            "Return 1–3 codes, most important first. Codes MUST be from this allowed list ONLY:\n"
+            "FAILED_BREAKOUT,LOWER_HIGHS,NO_CLEAR_LEVEL,VWAP_TEST,VWAP_REJECT,VWAP_RECLAIM,VOLUME_FADE,WEAK_VOLUME_ON_EXTENSION,STRONG_VOLUME_CONTINUATION,BUYERS_WEAK,HEAVY_SELL_PRESSURE,HOD_BREAKOUT_HOLDING,HOD_REJECT,SPREAD_WIDENING,THIN_LIQUIDITY,RR_BELOW_MINIMUM,DATA_STALE,ENTRY_APPROACHING,STOP_THREAT,HALT_OR_REJECT,DISCONNECT,EXECUTION_FILL,RISK_BREACH\n"
+            "Self-check before finalizing:\n"
+            "JSON valid; enums valid; null rules met; no extra keys."
         )
 
     def _build_llm_messages(self, snapshot: dict) -> list[dict[str, str]]:
