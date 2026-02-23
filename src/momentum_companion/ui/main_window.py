@@ -32,6 +32,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._full_model_box: Optional[QtWidgets.QComboBox] = None
         self._refresh_model_box: Optional[QtWidgets.QComboBox] = None
         self._models_cache: list[str] = []
+        self._pending_api_key_text: Optional[str] = None
 
     def _build_layout(self) -> None:
         central = QtWidgets.QWidget()
@@ -330,6 +331,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._api_key_edit.setPlaceholderText("sk-...")
             self._api_key_edit.editingFinished.connect(self._handle_api_key_edit)
             self._api_key_edit.returnPressed.connect(self._handle_api_key_edit)
+            if self._pending_api_key_text:
+                self._api_key_edit.setText(self._pending_api_key_text)
             api_row.addWidget(self._api_key_edit)
             layout.addLayout(api_row)
             model_row = QtWidgets.QHBoxLayout()
@@ -416,6 +419,13 @@ class MainWindow(QtWidgets.QMainWindow):
             self._full_model_box.setEditText(full)
         if self._refresh_model_box:
             self._refresh_model_box.setEditText(refresh)
+
+    def set_api_key_value(self, value: str) -> None:
+        """Set API key field text (masked by UI)."""
+        if hasattr(self, "_api_key_edit") and self._api_key_edit:
+            self._api_key_edit.setText(value)
+        else:
+            self._pending_api_key_text = value
 
     def update_ae_panel(self, snapshot: dict | None) -> None:
         """Render AE snapshot in compact sections."""

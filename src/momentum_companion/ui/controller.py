@@ -588,6 +588,8 @@ class UIController:
                 self._llm_service._client = LLMClient(api_key=stored, model="gpt-5.1-codex-max")  # type: ignore[attr-defined]
             except Exception:
                 self._logger.exception("Failed to load stored LLM API key")
+            if hasattr(self._window, "set_api_key_value"):
+                self._window.set_api_key_value(stored)
         if self._llm_service and getattr(self._llm_service, "_client", None):
             self._load_models_async()
         self._refresh_llm_status()
