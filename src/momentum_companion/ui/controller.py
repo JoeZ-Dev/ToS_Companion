@@ -666,6 +666,12 @@ class UIController:
         if not self._last_ae_snapshot:
             self._logger.warning("LLM run skipped: no snapshot")
             return
+        ready, missing = self._is_snapshot_ready_for_llm(self._last_ae_snapshot)
+        if not ready:
+            msg = f"LLM skipped — snapshot not ready (missing {', '.join(missing)}; bars_len={len(self._last_ae_snapshot.get('bars_window') or []) if isinstance(self._last_ae_snapshot, dict) else 0})"
+            self._logger.warning(msg)
+            QtCore.QTimer.singleShot(0, lambda m=msg: self._window.llm_reco.setText(m))  # type: ignore[attr-defined]
+            return
         client = getattr(self._llm_service, "_client", None)
         if not client:
             self._logger.warning("LLM run skipped: no client")
@@ -996,6 +1002,31 @@ class UIController:
         if len(compact) > self._BARS_WINDOW_MAX:
             compact = compact[-self._BARS_WINDOW_MAX :]
         return compact
+
+    def _is_snapshot_ready_for_llm(self, snapshot: dict) -> tuple[bool, list[str]]:
+        normalized = self._normalize_snapshot_for_llm(snapshot)
+        missing: list[str] = []
+        session_mode = normalized.get("session_mode")
+        if session_mode not in self._ALLOWED_SESSION_MODES:
+            missing.append("session_mode")
+        market_state = normalized.get("market_state")
+        if market_state not in self._ALLOWED_MARKET_STATES:
+            missing.append("market_state")
+        quote = normalized.get("quote") or {}
+        last = quote.get("last") if isinstance(quote, dict) else None
+        bid = quote.get("bid") if isinstance(quote, dict) else None
+        ask = quote.get("ask") if isinstance(quote, dict) else None
+        if last is None:
+            missing.append("quote.last")
+        if bid is None and ask is None:
+            missing.append("quote.bid/ask")
+        bars = normalized.get("bars_window") if isinstance(normalized, dict) else None
+        bars_len = len(bars) if isinstance(bars, list) else 0
+        if not bars:
+            missing.append("bars_window")
+        if bars_len < self._BARS_WINDOW_MIN_READY:
+            missing.append("bars_window_len")
+        return (len(missing) == 0, missing)
 
     def _compute_market_state(self) -> str | None:
         now_et = datetime.now(self._et_tz)
