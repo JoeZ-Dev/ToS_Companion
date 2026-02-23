@@ -613,11 +613,20 @@ class UIController:
                 fetched = len(models)
                 defaults = ["gpt-4o", "gpt-4o-mini"]
                 merged = sorted(set(models + defaults)) if models else defaults
-                self._available_models = merged
-                self._logger.info("LLM models fetched: %s (showing %s)", fetched, len(merged))
-                if merged:
-                    self._logger.debug("Model sample: %s", merged[:10])
-                self._model_signals.models_ready.emit(merged)
+                allowed_prefixes = ["gpt-5", "gpt-4.1", "gpt-4o", "gpt-4", "gpt-3.5", "o3"]
+                banned_snippets = ["audio", "vision", "realtime", "embed", "whisper", "tts", "test", "beta", "sandbox"]
+                filtered = [
+                    m
+                    for m in merged
+                    if any(m.startswith(p) for p in allowed_prefixes)
+                    and not any(b in m.lower() for b in banned_snippets)
+                ]
+                final = filtered or defaults
+                self._available_models = final
+                self._logger.info("LLM models fetched: %s (showing %s)", fetched, len(final))
+                if final:
+                    self._logger.debug("Model sample: %s", final[:10])
+                self._model_signals.models_ready.emit(final)
                 self._model_signals.model_values.emit(self._full_model or "", self._refresh_model or "")
             except Exception:
                 self._logger.warning("Failed to list models from OpenAI", exc_info=True)
