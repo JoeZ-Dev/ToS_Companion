@@ -97,6 +97,7 @@ class UIController:
         self._refresh_model = "gpt-4o-mini"
         self._llm_prompt_version = "LLM_COACH_PROMPT_V1"
         self._llm_prompt = self._default_developer_prompt()
+        self._disable_rr_gate: bool = False
         self._model_signals = _ModelSignals()
         if hasattr(self._window, "populate_models"):
             # Single signal carries models + selections to enforce ordering
@@ -134,6 +135,8 @@ class UIController:
             self._window.set_prompt_callback(self._set_prompt)  # type: ignore[attr-defined]
         if hasattr(self._window, "set_prompt_reset_callback"):
             self._window.set_prompt_reset_callback(self._reset_prompt)  # type: ignore[attr-defined]
+        if hasattr(self._window, "set_rr_gate_callback"):
+            self._window.set_rr_gate_callback(self._set_rr_gate_disabled)  # type: ignore[attr-defined]
         if hasattr(self._window, "set_llm_full_callback"):
             self._window.set_llm_full_callback(self._run_llm_full)  # type: ignore[attr-defined]
         if hasattr(self._window, "set_llm_refresh_callback"):
@@ -141,6 +144,7 @@ class UIController:
         self._load_stored_api_key()
         self._load_stored_models()
         self._load_stored_prompt()
+        self._load_stored_rr_gate()
 
     def _on_symbol_entered(self) -> None:
         raw = self._window.symbol_input.text()
@@ -680,6 +684,13 @@ class UIController:
             self._window.set_prompt_value(self._llm_prompt)
         self._refresh_llm_status()
 
+    def _set_rr_gate_disabled(self, disabled: bool) -> None:
+        self._disable_rr_gate = bool(disabled)
+        if self._app_state:
+            self._app_state.set("llm_disable_rr_gate", self._disable_rr_gate)
+        if hasattr(self._window, "set_rr_gate_state"):
+            self._window.set_rr_gate_state(self._disable_rr_gate)
+
     def _run_llm_full(self) -> None:
         self._run_llm_manual(self._full_model)
 
@@ -803,6 +814,7 @@ class UIController:
         if self._llm_service and getattr(self._llm_service, "_client", None):
             self._load_models_async()
         self._refresh_llm_status()
+        self._load_stored_rr_gate()
 
     def _load_models_async(self) -> None:
         if not self._llm_service or not getattr(self._llm_service, "_client", None):
@@ -891,6 +903,15 @@ class UIController:
                 self._llm_prompt = stored
         if hasattr(self._window, "set_prompt_value"):
             self._window.set_prompt_value(self._llm_prompt)
+
+    def _load_stored_rr_gate(self) -> None:
+        if not self._app_state:
+            return
+        stored = self._app_state.get("llm_disable_rr_gate")
+        if isinstance(stored, bool):
+            self._disable_rr_gate = stored
+        if hasattr(self._window, "set_rr_gate_state"):
+            self._window.set_rr_gate_state(self._disable_rr_gate)
 
     def _normalize_snapshot_for_llm(self, snapshot: dict) -> dict:
         quote_src = snapshot.get("quote") if isinstance(snapshot, dict) else {}
@@ -1053,6 +1074,9 @@ class UIController:
         return (len(missing) == 0, missing)
 
     def _structural_rr_gate(self, normalized: dict) -> tuple[bool, dict | None]:
+        if self._disable_rr_gate:
+            self._logger.info("LLM structural gate bypassed (disable_rr_gate option enabled)")
+            return True, None
         plan = normalized.get("structural_plan") or self._build_structural_plan(normalized)
         quote = normalized.get("quote") or {}
         entry = quote.get("last") if isinstance(quote, dict) else None

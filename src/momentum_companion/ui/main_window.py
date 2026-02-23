@@ -33,14 +33,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self._prompt_reset_callback: Optional[Callable[[], None]] = None
         self._llm_full_callback: Optional[Callable[[], None]] = None
         self._llm_refresh_callback: Optional[Callable[[], None]] = None
+        self._rr_gate_callback: Optional[Callable[[bool], None]] = None
         self._full_model_box: Optional[QtWidgets.QComboBox] = None
         self._refresh_model_box: Optional[QtWidgets.QComboBox] = None
         self._prompt_edit: Optional[QtWidgets.QTextEdit] = None
+        self._rr_gate_checkbox: Optional[QtWidgets.QCheckBox] = None
         self._models_cache: list[str] = []
         self._pending_api_key_text: Optional[str] = None
         self._pending_prompt_text: Optional[str] = None
         self._pending_full_model_text: Optional[str] = None
         self._pending_refresh_model_text: Optional[str] = None
+        self._pending_rr_gate_disabled: bool = False
         self._model_status_label: Optional[QtWidgets.QLabel] = None
 
     def _build_layout(self) -> None:
@@ -378,6 +381,14 @@ class MainWindow(QtWidgets.QMainWindow):
                     self._pending_refresh_model_text or "",
                 )
 
+            rr_row = QtWidgets.QHBoxLayout()
+            self._rr_gate_checkbox = QtWidgets.QCheckBox("Disable pre-LLM R/R gate (allow calls even if RR<2)")
+            self._rr_gate_checkbox.setChecked(self._pending_rr_gate_disabled)
+            self._rr_gate_checkbox.stateChanged.connect(self._handle_rr_gate_changed)
+            rr_row.addWidget(self._rr_gate_checkbox)
+            rr_row.addStretch()
+            layout.addLayout(rr_row)
+
             prompt_label = QtWidgets.QLabel("LLM Prompt:")
             self._prompt_edit = QtWidgets.QTextEdit()
             self._prompt_edit.setPlaceholderText("Enter base prompt for LLM recommendations...")
@@ -478,6 +489,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if hasattr(self, "_refresh_model_callback") and self._refresh_model_callback:
             self._refresh_model_callback(text)
 
+    def _handle_rr_gate_changed(self) -> None:
+        if self._rr_gate_callback and self._rr_gate_checkbox:
+            self._rr_gate_callback(bool(self._rr_gate_checkbox.isChecked()))
+
     def _handle_prompt_changed(self) -> None:
         if self._prompt_callback and self._prompt_edit:
             self._prompt_callback(self._prompt_edit.toPlainText())
@@ -507,6 +522,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def set_refresh_model_callback(self, cb: Callable[[str], None]) -> None:
         self._refresh_model_callback = cb
+    def set_rr_gate_callback(self, cb: Callable[[bool], None]) -> None:
+        self._rr_gate_callback = cb
     def set_prompt_callback(self, cb: Callable[[str], None]) -> None:
         self._prompt_callback = cb
     def set_prompt_reset_callback(self, cb: Callable[[], None]) -> None:
@@ -535,6 +552,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self._pending_refresh_model_text = None
         else:
             self._pending_refresh_model_text = refresh
+
+    def set_rr_gate_state(self, disabled: bool) -> None:
+        self._pending_rr_gate_disabled = disabled
+        if self._rr_gate_checkbox:
+            self._rr_gate_checkbox.setChecked(disabled)
 
     def set_api_key_value(self, value: str) -> None:
         """Set API key field text (masked by UI)."""
