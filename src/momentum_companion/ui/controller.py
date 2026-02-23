@@ -990,6 +990,7 @@ class UIController:
             "Only use HOD_* reason codes if snapshot includes explicit high_of_day/hod_price; otherwise do not emit HOD_*.\n"
             "If entry is at/above nearest_resistance.price and there is no higher resistance provided, default to NOT_VALID_FOR_TRADING unless bars_window clearly shows continuation with a structural swing target.\n"
             "Example: If setup_rating is B- but no structural target yields >=2R, set NOT_VALID_FOR_TRADING with reason_codes=[NO_CLEAR_LEVEL] and all price fields null.\n"
+            "If validity=NOT_VALID_FOR_TRADING and reason_codes includes NO_CLEAR_LEVEL, summary must name the structural targets evaluated (e.g., nearest_resistance.price, micro_resistance_15m, swing highs) and why 2R was not achievable.\n"
             "Self-check: JSON valid; enums valid; null rules met; no extra keys. If risk_reward is null then reason_codes MUST NOT contain RR_BELOW_MINIMUM."
         )
 
