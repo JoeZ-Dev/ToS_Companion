@@ -35,6 +35,9 @@ class _ModelSignals(QtCore.QObject):
 class UIController:
     """Coordinates UI state, signals/slots, and renders updates (§4.1)."""
 
+    _ALLOWED_SESSION_MODES = {"NORMAL", "SEAMLESS"}
+    _ALLOWED_MARKET_STATES = {"premarket", "normal", "afterhours"}
+
     def __init__(
         self,
         window: MainWindow,
@@ -624,7 +627,28 @@ class UIController:
             self._logger.warning("LLM run skipped: no client")
             return
         symbol = self._pending_symbol or ""
-        messages = self._build_llm_messages(self._last_ae_snapshot)
+        normalized = self._normalize_snapshot_for_llm(self._last_ae_snapshot)
+        missing: list[str] = []
+        session_mode = normalized.get("session_mode")
+        if session_mode not in self._ALLOWED_SESSION_MODES:
+            missing.append("session_mode")
+        market_state = normalized.get("market_state")
+        if market_state not in self._ALLOWED_MARKET_STATES:
+            missing.append("market_state")
+        quote = normalized.get("quote") or {}
+        last = quote.get("last") if isinstance(quote, dict) else None
+        bid = quote.get("bid") if isinstance(quote, dict) else None
+        ask = quote.get("ask") if isinstance(quote, dict) else None
+        if last is None:
+            missing.append("quote.last")
+        if bid is None and ask is None:
+            missing.append("quote.bid/ask")
+        if missing:
+            msg = f"LLM skipped — snapshot not ready (missing {', '.join(missing)})"
+            self._logger.warning(msg)
+            QtCore.QTimer.singleShot(0, lambda m=msg: self._window.llm_reco.setText(m))  # type: ignore[attr-defined]
+            return
+        messages = self._build_llm_messages(normalized)
 
         def task() -> None:
             try:
@@ -764,26 +788,40 @@ class UIController:
             return
         stored = self._app_state.get("llm_prompt")
         if stored:
-            self._llm_prompt = stored
+            # If stored prompt contains legacy markdown templates, replace with default compact contract
+            if "```" in stored or "# ✅" in stored or "USER PAYLOAD" in stored:
+                self._llm_prompt = self._default_developer_prompt()
+                self._app_state.set("llm_prompt", self._llm_prompt)
+            else:
+                self._llm_prompt = stored
         if hasattr(self._window, "set_prompt_value"):
             self._window.set_prompt_value(self._llm_prompt)
 
     def _normalize_snapshot_for_llm(self, snapshot: dict) -> dict:
         quote_src = snapshot.get("quote") if isinstance(snapshot, dict) else {}
-        quote = {
-            "bid": quote_src.get("bid") if isinstance(quote_src, dict) else None,
-            "ask": quote_src.get("ask") if isinstance(quote_src, dict) else None,
-            "last": quote_src.get("last") if isinstance(quote_src, dict) else None,
-            "volume": quote_src.get("volume") if isinstance(quote_src, dict) else None,
-        }
+        if not isinstance(quote_src, dict):
+            quote_src = {}
+        # fall back to latest quote cache if missing
+        bid = quote_src.get("bid", self._last_quote.get("bid"))
+        ask = quote_src.get("ask", self._last_quote.get("ask"))
+        last = quote_src.get("last", self._last_quote.get("last"))
+        volume = quote_src.get("volume", self._last_quote.get("total_volume"))
+        quote = {"bid": bid, "ask": ask, "last": last, "volume": volume}
+
+        session_mode = snapshot.get("session_mode")
+        if session_mode not in self._ALLOWED_SESSION_MODES:
+            session_mode = "SEAMLESS"
+        market_state = snapshot.get("market_state")
+        if market_state not in self._ALLOWED_MARKET_STATES:
+            market_state = self._compute_market_state()
         norm = {
             "schema_version": snapshot.get("schema_version", "AE-1.1"),
             "status": snapshot.get("status", "ok"),
             "data_quality": snapshot.get("data_quality"),
-            "as_of_ts_ms": snapshot.get("as_of_ts_ms") or snapshot.get("as_of"),
+            "as_of_ts_ms": snapshot.get("as_of_ts_ms") or snapshot.get("as_of") or int(time.time() * 1000),
             "symbol": snapshot.get("symbol"),
-            "session_mode": snapshot.get("session_mode"),
-            "market_state": snapshot.get("market_state"),
+            "session_mode": session_mode,
+            "market_state": market_state,
             "quote": quote,
             "bars_window": snapshot.get("bars_window"),
             "invocation_type": snapshot.get("invocation_type", "MANUAL_RECALC"),
@@ -796,28 +834,38 @@ class UIController:
         }
         return norm
 
+    def _compute_market_state(self) -> str | None:
+        now_et = datetime.now(self._et_tz)
+        t = now_et.time()
+        if dtime(4, 0) <= t < dtime(9, 30):
+            return "premarket"
+        if dtime(9, 30) <= t < dtime(16, 0):
+            return "normal"
+        if dtime(16, 0) <= t < dtime(20, 0):
+            return "afterhours"
+        return None
+
     def _default_developer_prompt(self) -> str:
         return (
             f"PROMPT_VERSION={self._llm_prompt_version}\n"
             "Return EXACTLY ONE JSON object and NOTHING ELSE.\n"
             "No markdown. No extra keys.\n"
-            "Output keys required when in_position=false:\n"
+            "Required keys when in_position=false:\n"
             "validity, setup_rating, entry_price, stop_loss, target_price, risk_reward, summary, reason_codes\n"
             "Additional required keys when in_position=true:\n"
             "trade_management_action, action_urgency, updated_stop_loss, add_entry_price, add_qty, management_summary\n"
             "Enums:\n"
-            "validity = VALID_FOR_TRADING|NOT_VALID_FOR_TRADING\n"
-            "setup_rating = A+|A|A-|B+|B|B-|C+|C|C-|D\n"
-            "trade_management_action = HOLD|EXIT_NOW|SCALE_OUT_50|MOVE_STOP_TO_BREAKEVEN|RAISE_STOP_TO|ADD_TO_POSITION\n"
-            "action_urgency = LOW|MEDIUM|HIGH\n"
+            "validity=VALID_FOR_TRADING|NOT_VALID_FOR_TRADING\n"
+            "setup_rating=A+|A|A-|B+|B|B-|C+|C|C-|D\n"
+            "trade_management_action=HOLD|EXIT_NOW|SCALE_OUT_50|MOVE_STOP_TO_BREAKEVEN|RAISE_STOP_TO|ADD_TO_POSITION\n"
+            "action_urgency=LOW|MEDIUM|HIGH\n"
             "Tradability bar:\n"
             "VALID_FOR_TRADING only if setup_rating>=B- AND risk_reward>=2.0 AND entry_price/stop_loss/target_price are present.\n"
             "If NOT_VALID_FOR_TRADING then entry_price/stop_loss/target_price/risk_reward MUST be null.\n"
             "reason_codes:\n"
             "Return 1–3 codes, most important first. Codes MUST be from this allowed list ONLY:\n"
             "FAILED_BREAKOUT,LOWER_HIGHS,NO_CLEAR_LEVEL,VWAP_TEST,VWAP_REJECT,VWAP_RECLAIM,VOLUME_FADE,WEAK_VOLUME_ON_EXTENSION,STRONG_VOLUME_CONTINUATION,BUYERS_WEAK,HEAVY_SELL_PRESSURE,HOD_BREAKOUT_HOLDING,HOD_REJECT,SPREAD_WIDENING,THIN_LIQUIDITY,RR_BELOW_MINIMUM,DATA_STALE,ENTRY_APPROACHING,STOP_THREAT,HALT_OR_REJECT,DISCONNECT,EXECUTION_FILL,RISK_BREACH\n"
-            "Self-check before finalizing:\n"
-            "JSON valid; enums valid; null rules met; no extra keys."
+            "Self-check: JSON valid; enums valid; null rules met; no extra keys."
         )
 
     def _build_llm_messages(self, snapshot: dict) -> list[dict[str, str]]:
