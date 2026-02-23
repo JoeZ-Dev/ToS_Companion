@@ -30,6 +30,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._full_model_callback: Optional[Callable[[str], None]] = None
         self._refresh_model_callback: Optional[Callable[[str], None]] = None
         self._prompt_callback: Optional[Callable[[str], None]] = None
+        self._prompt_reset_callback: Optional[Callable[[], None]] = None
         self._llm_full_callback: Optional[Callable[[], None]] = None
         self._llm_refresh_callback: Optional[Callable[[], None]] = None
         self._full_model_box: Optional[QtWidgets.QComboBox] = None
@@ -380,6 +381,8 @@ class MainWindow(QtWidgets.QMainWindow):
             close_btn.clicked.connect(dlg.close)
             update_btn = QtWidgets.QPushButton("Update")
             update_btn.clicked.connect(self._handle_update_clicked)
+            reset_btn = QtWidgets.QPushButton("Reset Prompt")
+            reset_btn.clicked.connect(self._handle_reset_prompt_clicked)
             # Wire LLM run buttons to controller callbacks
             if hasattr(self, "llm_full_btn") and self.llm_full_btn:
                 self.llm_full_btn.clicked.connect(self._handle_llm_full_clicked)
@@ -387,6 +390,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.llm_refresh_btn.clicked.connect(self._handle_llm_refresh_clicked)
             btn_row = QtWidgets.QHBoxLayout()
             btn_row.addStretch()
+            btn_row.addWidget(reset_btn)
             btn_row.addWidget(update_btn)
             btn_row.addWidget(close_btn)
             layout.addLayout(btn_row)
@@ -481,6 +485,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._refresh_model_box and self._refresh_model_callback:
             self._refresh_model_callback(self._refresh_model_box.currentText())
 
+    def _handle_reset_prompt_clicked(self) -> None:
+        if self._prompt_reset_callback:
+            self._prompt_reset_callback()
+
     def _handle_llm_full_clicked(self) -> None:
         if self._llm_full_callback:
             self._llm_full_callback()
@@ -496,6 +504,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_model_callback = cb
     def set_prompt_callback(self, cb: Callable[[str], None]) -> None:
         self._prompt_callback = cb
+    def set_prompt_reset_callback(self, cb: Callable[[], None]) -> None:
+        self._prompt_reset_callback = cb
     def set_llm_full_callback(self, cb: Callable[[], None]) -> None:
         self._llm_full_callback = cb
     def set_llm_refresh_callback(self, cb: Callable[[], None]) -> None:

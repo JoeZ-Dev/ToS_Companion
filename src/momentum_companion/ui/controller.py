@@ -125,6 +125,8 @@ class UIController:
             self._window.set_refresh_model_callback(self._set_refresh_model)  # type: ignore[attr-defined]
         if hasattr(self._window, "set_prompt_callback"):
             self._window.set_prompt_callback(self._set_prompt)  # type: ignore[attr-defined]
+        if hasattr(self._window, "set_prompt_reset_callback"):
+            self._window.set_prompt_reset_callback(self._reset_prompt)  # type: ignore[attr-defined]
         if hasattr(self._window, "set_llm_full_callback"):
             self._window.set_llm_full_callback(self._run_llm_full)  # type: ignore[attr-defined]
         if hasattr(self._window, "set_llm_refresh_callback"):
@@ -607,6 +609,14 @@ class UIController:
             self._llm_prompt = prompt
             if self._app_state:
                 self._app_state.set("llm_prompt", prompt)
+        self._refresh_llm_status()
+
+    def _reset_prompt(self) -> None:
+        self._llm_prompt = self._default_developer_prompt()
+        if self._app_state:
+            self._app_state.set("llm_prompt", self._llm_prompt)
+        if hasattr(self._window, "set_prompt_value"):
+            self._window.set_prompt_value(self._llm_prompt)
         self._refresh_llm_status()
 
     def _run_llm_full(self) -> None:
