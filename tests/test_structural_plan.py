@@ -20,8 +20,12 @@ def test_structural_plan_prefers_micro_over_far_resistance():
     plan = ctl._build_structural_plan(payload)
     assert plan["target_candidate"] == 1.15
     assert plan["target_source"] == "micro_resistance_15m"
-    # RR: (1.15-1.0)/(1.0-0.92)=0.15/0.08=1.875 <2 so plan should be invalid
+    # RR: (1.15-1.0)/(1.0-0.92)=0.15/0.08=1.875 <2 so plan should be invalid but keep candidates
     assert plan["valid"] is False
+    assert plan["entry_candidate"] == 1.0
+    assert plan["stop_candidate"] == 0.92
+    assert plan["rr_candidate"] and plan["rr_candidate"] < 2
+    assert "RR_BELOW_MINIMUM" in plan["invalid_reasons"]
 
 
 def test_structural_plan_valid_rejects_no_clear_level():
@@ -57,3 +61,20 @@ def test_structural_plan_normal_case_uses_swing_high():
     assert plan["target_source"] == "swing_high"
     assert plan["target_candidate"] > plan["entry_candidate"]
     assert plan["valid"] in {True, False}  # ensure no exception
+
+
+def test_structural_plan_target_too_far_marks_reason():
+    ctl = _make_controller()
+    payload = {
+        "quote": {"last": 1.0, "ask": 1.0},
+        "levels": {
+            "nearest_resistance": {"price": 1.35},  # 35% away, beyond MAX_TARGET_PCT=0.20
+            "nearest_support": {"price": 0.9},
+        },
+        "micro": {},
+        "bars_window": [],
+    }
+    plan = ctl._build_structural_plan(payload)
+    assert plan["target_candidate"] == 1.35  # still reported for diagnostics
+    assert plan["valid"] is False
+    assert "TARGET_TOO_FAR" in plan["invalid_reasons"]

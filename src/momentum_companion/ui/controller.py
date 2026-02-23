@@ -1133,6 +1133,11 @@ class UIController:
                     pass
         if entry is None:
             entry = ask if ask is not None else last
+        try:
+            entry_f = float(entry) if entry is not None else None
+        except Exception:
+            entry_f = None
+
         stop = None
         stop_source = None
         if nearest_sup and isinstance(nearest_sup, dict) and nearest_sup.get("price") is not None:
@@ -1149,12 +1154,9 @@ class UIController:
                     stop_source = "swing_low"
             except Exception:
                 pass
+
         target = None
         target_source = None
-        try:
-            entry_f = float(entry) if entry is not None else None
-        except Exception:
-            entry_f = None
         if entry_f is not None and micro_res is not None:
             try:
                 micro_f = float(micro_res)
@@ -1181,58 +1183,70 @@ class UIController:
                     target_source = "nearest_resistance"
             except Exception:
                 pass
+
+        # Compute diagnostics
+        risk_per_share = None
+        reward_per_share = None
+        risk_pct = None
+        target_pct = None
         rr = None
-        valid = False
-        if entry_f is not None and stop is not None and target is not None:
+        if entry_f is not None and stop is not None:
             try:
                 stop_f = float(stop)
-                target_f = float(target)
-                stop_pct = (entry_f - stop_f) / entry_f if entry_f else None
-                target_pct = (target_f - entry_f) / entry_f if entry_f else None
-                if target_f > entry_f and stop_f < entry_f and stop_pct is not None and target_pct is not None:
-                    rr = (target_f - entry_f) / (entry_f - stop_f) if entry_f != stop_f else None
-                    if (
-                        rr is not None
-                        and rr >= 2.0
-                        and stop_pct <= self._MAX_STOP_PCT
-                        and target_pct <= self._MAX_TARGET_PCT
-                    ):
-                        valid = True
-                    else:
-                        invalid_reasons.append("risk_or_target_pct_or_rr")
-                else:
-                    invalid_reasons.append("ordering")
+                risk_per_share = entry_f - stop_f
+                if entry_f != 0:
+                    risk_pct = risk_per_share / entry_f
             except Exception:
-                invalid_reasons.append("calc_error")
-        else:
-            if entry_f is None:
-                invalid_reasons.append("no_entry")
-            if stop is None:
-                invalid_reasons.append("no_stop")
-            if target is None:
-                invalid_reasons.append("no_target")
-        if not valid:
-            return {
-                "entry_candidate": None,
-                "stop_candidate": None,
-                "target_candidate": None,
-                "rr_candidate": None,
-                "entry_source": entry_source,
-                "stop_source": stop_source,
-                "target_source": target_source,
-                "valid": False,
-                "invalid_reasons": invalid_reasons,
-            }
+                pass
+        if entry_f is not None and target is not None:
+            try:
+                target_f = float(target)
+                reward_per_share = target_f - entry_f
+                if entry_f != 0:
+                    target_pct = reward_per_share / entry_f
+            except Exception:
+                pass
+        if risk_per_share is not None and reward_per_share is not None and risk_per_share > 0 and reward_per_share > 0:
+            try:
+                rr = reward_per_share / risk_per_share
+            except Exception:
+                rr = None
+
+        # Validity rules
+        valid = True
+        if entry_f is None:
+            valid = False
+            invalid_reasons.append("NO_ENTRY_PRICE")
+        if stop is None or (entry_f is not None and float(stop) >= entry_f):
+            valid = False
+            invalid_reasons.append("NO_STOP_BELOW_ENTRY")
+        if target is None or (entry_f is not None and float(target) <= entry_f):
+            valid = False
+            invalid_reasons.append("NO_TARGET_ABOVE_ENTRY")
+        if risk_pct is not None and risk_pct > self._MAX_STOP_PCT:
+            valid = False
+            invalid_reasons.append("STOP_TOO_WIDE")
+        if target_pct is not None and target_pct > self._MAX_TARGET_PCT:
+            valid = False
+            invalid_reasons.append("TARGET_TOO_FAR")
+        if rr is not None and rr < 2.0:
+            valid = False
+            invalid_reasons.append("RR_BELOW_MINIMUM")
+
         return {
             "entry_candidate": entry_f,
             "stop_candidate": stop,
             "target_candidate": target,
             "rr_candidate": rr,
+            "risk_per_share": risk_per_share,
+            "reward_per_share": reward_per_share,
+            "risk_pct": risk_pct,
+            "target_pct": target_pct,
             "entry_source": entry_source,
             "stop_source": stop_source,
             "target_source": target_source,
-            "valid": True,
-            "invalid_reasons": [],
+            "valid": valid,
+            "invalid_reasons": invalid_reasons[:3],
         }
 
     def _compute_market_state(self) -> str | None:
