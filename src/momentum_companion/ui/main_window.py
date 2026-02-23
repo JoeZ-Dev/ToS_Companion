@@ -409,7 +409,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._refresh_model_box and self._refresh_model_box.currentText():
             self._refresh_model_box.setEditText(self._refresh_model_box.currentText())
         # Tooltip with count
+        sample = ", ".join(self._models_cache[:3]) if self._models_cache else ""
         count_txt = f"Models: {len(self._models_cache)}" if self._models_cache else "Models: defaults (none fetched)"
+        if sample:
+            count_txt += f" e.g. {sample}"
         if self._full_model_box:
             self._full_model_box.setToolTip(count_txt)
         if self._refresh_model_box:
