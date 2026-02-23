@@ -346,23 +346,31 @@ class UIController:
             return
         # Time gate
         now_sec = time.time()
+        is_first = symbol not in self._last_llm_ts
         last_ts = self._last_llm_ts.get(symbol, 0)
-        interval = 60 if symbol not in self._last_llm_ts else 30
+        interval = 60 if is_first else 30
         if now_sec - last_ts < interval:
             return
         # Change gate
         snap_hash = self._snapshot_hash(snapshot)
         if self._last_llm_hash.get(symbol) == snap_hash:
             return
-        self._last_llm_ts[symbol] = now_sec
         self._last_llm_hash[symbol] = snap_hash
         self._refresh_llm_status(symbol)
-        QtCore.QTimer.singleShot(0, lambda: self._run_llm(snapshot, quote_event))
+        QtCore.QTimer.singleShot(0, lambda: self._run_llm_from_snapshot(snapshot, quote_event, is_first))
 
-    def _run_llm(self, snapshot: dict, quote_event: QuoteEvent) -> None:
+    def _run_llm_from_snapshot(self, snapshot: dict, quote_event: QuoteEvent, is_first: bool) -> None:
         try:
             session_mode = "RTH" if self._is_intraday_window() else "PRE"
-            model = self._full_model if snapshot.get("symbol") not in self._last_llm_ts else self._refresh_model
+            model = self._full_model if is_first else self._refresh_model
+            self._last_llm_ts[snapshot.get("symbol") or ""] = time.time()
+            self._logger.info(
+                "LLM auto invoke model=%s symbol=%s is_first=%s prompt_version=%s",
+                model,
+                snapshot.get("symbol"),
+                is_first,
+                self._llm_prompt_version,
+            )
             rec = self._llm_service.evaluate(snapshot, session_mode, quote_event, model_override=model)  # type: ignore[attr-defined]
             if hasattr(self._window, "apply_llm_recommendation"):
                 QtCore.QMetaObject.invokeMethod(
@@ -376,14 +384,38 @@ class UIController:
         finally:
             self._refresh_llm_status(snapshot.get("symbol"))
 
-    @staticmethod
-    def _snapshot_hash(snapshot: dict) -> str:
-        """Hash key fields to detect meaningful changes."""
+    def _snapshot_hash(self, snapshot: dict) -> str:
+        """Hash key fields to detect meaningful changes using normalized payload subset."""
         import hashlib
-        import json
 
-        keys = ["regime", "levels", "micro", "last_price", "vwap", "data_quality"]
-        data = {k: snapshot.get(k) for k in keys}
+        normalized = self._normalize_snapshot_for_llm(snapshot)
+        quote = normalized.get("quote") or {}
+        levels = normalized.get("levels") or {}
+        micro = normalized.get("micro") or {}
+        bars = normalized.get("bars_window") or []
+        closes: list[float] = []
+        if isinstance(bars, list):
+            for b in bars[-10:]:
+                if isinstance(b, dict) and b.get("c") is not None:
+                    try:
+                        closes.append(float(b.get("c")))
+                    except Exception:
+                        continue
+        data = {
+            "data_quality": normalized.get("data_quality"),
+            "quote_last": quote.get("last"),
+            "quote_bid": quote.get("bid"),
+            "quote_ask": quote.get("ask"),
+            "vwap": normalized.get("vwap"),
+            "micro_state": micro.get("micro_state"),
+            "micro_resistance_15m": micro.get("micro_resistance_15m"),
+            "micro_support_15m": micro.get("micro_support_15m"),
+            "nearest_res_price": (levels.get("nearest_resistance") or {}).get("price") if isinstance(levels, dict) else None,
+            "nearest_res_source": (levels.get("nearest_resistance") or {}).get("source") if isinstance(levels, dict) else None,
+            "nearest_sup_price": (levels.get("nearest_support") or {}).get("price") if isinstance(levels, dict) else None,
+            "nearest_sup_source": (levels.get("nearest_support") or {}).get("source") if isinstance(levels, dict) else None,
+            "bars_closes": closes,
+        }
         return hashlib.sha256(json.dumps(data, sort_keys=True, default=str).encode()).hexdigest()
 
     def _update_labels_ui(self, ts_ms: int | None, bid: float | None, ask: float | None, last: float | None) -> None:
@@ -622,12 +654,12 @@ class UIController:
         self._refresh_llm_status()
 
     def _run_llm_full(self) -> None:
-        self._run_llm(self._full_model)
+        self._run_llm_manual(self._full_model)
 
     def _run_llm_refresh(self) -> None:
-        self._run_llm(self._refresh_model)
+        self._run_llm_manual(self._refresh_model)
 
-    def _run_llm(self, model: str) -> None:
+    def _run_llm_manual(self, model: str) -> None:
         """Invoke LLM with current snapshot using selected model."""
         if not self._llm_enabled:
             return
@@ -663,7 +695,7 @@ class UIController:
         if not bars or bars_len < self._BARS_WINDOW_MIN_READY:
             missing.append("bars_window")
         if missing:
-            msg = f"LLM skipped — snapshot not ready (missing {', '.join(missing)})"
+            msg = f"LLM skipped — snapshot not ready (missing {', '.join(missing)}; bars_len={bars_len})"
             self._logger.warning(msg)
             QtCore.QTimer.singleShot(0, lambda m=msg: self._window.llm_reco.setText(m))  # type: ignore[attr-defined]
             return
@@ -680,7 +712,13 @@ class UIController:
 
         def task() -> None:
             try:
-                self._logger.info("LLM invoking model=%s for symbol=%s prompt_version=%s", model, symbol, self._llm_prompt_version)
+                self._logger.info(
+                    "LLM invoking model=%s for symbol=%s prompt_version=%s invocation=MANUAL bars_len=%s",
+                    model,
+                    symbol,
+                    self._llm_prompt_version,
+                    bars_len,
+                )
                 try:
                     self._logger.info(
                         "LLM payload sizes: system=%s dev=%s user=%s | previews: sys=%s ... dev=%s ... user=%s ...",
@@ -946,12 +984,17 @@ class UIController:
                 )
             except Exception:
                 continue
-        # drop the last bar if it might be forming (assume last may be partial if flagged missing)
-        if compact and len(compact) > 1:
-            compact = compact[:-1]
-        # keep chronological order and cap length to 48
-        if len(compact) > 48:
-            compact = compact[-48:]
+        # drop the last bar only if likely forming (assume 5m cadence)
+        if compact:
+            now_ms = int(time.time() * 1000)
+            last_bar = compact[-1]
+            ts_ms_last = last_bar.get("ts_ms")
+            if ts_ms_last and isinstance(ts_ms_last, (int, float)):
+                if now_ms < ts_ms_last + 5 * 60 * 1000:
+                    compact = compact[:-1]
+        # keep chronological order and cap length to max
+        if len(compact) > self._BARS_WINDOW_MAX:
+            compact = compact[-self._BARS_WINDOW_MAX :]
         return compact
 
     def _compute_market_state(self) -> str | None:
