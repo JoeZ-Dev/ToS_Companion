@@ -307,6 +307,20 @@ class MainWindow(QtWidgets.QMainWindow):
         target = rec.get("target_price")
         self.llm_reco.setText(f"LLM: {validity} | Rating {rating} | Entry {entry} Stop {stop} Target {target}")
 
+    def set_llm_recommendation(self, text: str) -> None:
+        """Set human-readable LLM recommendation text."""
+        try:
+            self.llm_reco.setText(text)
+        except Exception:
+            self._logger.warning("LLM UI update failed (recommendation widget missing)")
+
+    def set_llm_status_line(self, text: str) -> None:
+        """Set compact LLM status line."""
+        try:
+            self.llm_status_line.setText(text)
+        except Exception:
+            self._logger.warning("LLM UI update failed (status widget missing)")
+
     def flash_alert(self, message: str) -> None:
         """Show flash-worthy alert."""
         self.llm_flash.setText(message)

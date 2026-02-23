@@ -414,6 +414,18 @@ class UIController:
                     QtCore.Qt.ConnectionType.QueuedConnection,
                     QtCore.Q_ARG(dict, rec),  # type: ignore[arg-type]
                 )
+            QtCore.QMetaObject.invokeMethod(  # type: ignore[attr-defined]
+                self._window,
+                "set_llm_recommendation",
+                QtCore.Qt.ConnectionType.QueuedConnection,
+                QtCore.Q_ARG(str, self._format_llm_recommendation(rec)),
+            )
+            QtCore.QMetaObject.invokeMethod(  # type: ignore[attr-defined]
+                self._window,
+                "set_llm_status_line",
+                QtCore.Qt.ConnectionType.QueuedConnection,
+                QtCore.Q_ARG(str, self._format_llm_status(rec, model, snapshot.get("symbol"))),
+            )
         except Exception:
             self._logger.exception("LLM evaluate failed")
         finally:
@@ -712,7 +724,10 @@ class UIController:
         if not ready:
             msg = f"LLM skipped — snapshot not ready (missing {', '.join(missing)}; bars_len={len(self._last_ae_snapshot.get('bars_window') or []) if isinstance(self._last_ae_snapshot, dict) else 0})"
             self._logger.warning(msg)
-            QtCore.QTimer.singleShot(0, lambda m=msg: self._window.llm_reco.setText(m))  # type: ignore[attr-defined]
+            QtCore.QTimer.singleShot(
+                0,
+                lambda m=msg: getattr(self._window, "set_llm_recommendation", lambda *_: None)(m),
+            )  # type: ignore[arg-type]
             return
         client = getattr(self._llm_service, "_client", None)
         if not client:
@@ -738,7 +753,10 @@ class UIController:
         if not allow:
             msg = json.dumps(gate_rec)
             self._logger.info("LLM manual skip via structural gate: %s", msg)
-            QtCore.QTimer.singleShot(0, lambda txt=msg: self._window.llm_reco.setText(f"LLM: {txt}"))  # type: ignore[attr-defined]
+            QtCore.QTimer.singleShot(
+                0,
+                lambda txt=msg: getattr(self._window, "set_llm_recommendation", lambda *_: None)(f"LLM: {txt}"),
+            )  # type: ignore[arg-type]
             return
         messages = self._build_llm_messages(normalized)
 
@@ -786,7 +804,7 @@ class UIController:
                 except Exception:
                     rec = {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["DATA_STALE"], "summary": content}
                 rec = self._enforce_llm_output_consistency(rec, normalized, model)
-                QtCore.QTimer.singleShot(0, lambda r=rec: self._window.apply_llm_recommendation(r))  # type: ignore[attr-defined]
+                QtCore.QTimer.singleShot(0, lambda r=rec, m=model, s=symbol: self._render_llm_to_ui(r, m, s))  # type: ignore[arg-type]
                 self._last_llm_ts[self._pending_symbol or ""] = time.time()
                 QtCore.QTimer.singleShot(0, lambda: self._refresh_llm_status())
             except Exception as e:
@@ -800,8 +818,11 @@ class UIController:
                     pass
                 self._logger.warning("LLM invocation failed", exc_info=True)
                 QtCore.QTimer.singleShot(
-                    0, lambda msg=str(e): self._window.llm_reco.setText(f"LLM error: {msg}")
-                )  # type: ignore[attr-defined]
+                    0,
+                    lambda msg=str(e): getattr(self._window, "set_llm_recommendation", lambda *_: None)(
+                        f"LLM error: {msg}"
+                    ),
+                )  # type: ignore[arg-type]
         threading.Thread(target=task, daemon=True).start()
 
     def _load_stored_api_key(self) -> None:
@@ -1550,6 +1571,54 @@ class UIController:
             if validity:
                 return resp
         return None
+
+    def _render_llm_to_ui(self, rec: dict, model: str, symbol: str | None) -> None:
+        """Render validated LLM output into the UI."""
+        try:
+            text = self._format_llm_recommendation(rec)
+            status = self._format_llm_status(rec, model, symbol)
+            self._logger.info("LLM UI update: setting recommendation text (len=%s)", len(text))
+            if hasattr(self._window, "set_llm_recommendation"):
+                self._window.set_llm_recommendation(text)  # type: ignore[attr-defined]
+            else:
+                self._logger.warning("LLM UI update skipped: set_llm_recommendation not found")
+            if hasattr(self._window, "set_llm_status_line"):
+                self._window.set_llm_status_line(status)  # type: ignore[attr-defined]
+            else:
+                self._logger.warning("LLM UI update skipped: set_llm_status_line not found")
+        except Exception:
+            self._logger.exception("Failed to render LLM recommendation to UI")
+
+    def _format_llm_recommendation(self, rec: dict) -> str:
+        validity = rec.get("validity") or "--"
+        rating = rec.get("setup_rating") or "--"
+        reasons = rec.get("reason_codes") or []
+        summary = rec.get("summary") or ""
+        entry = rec.get("entry_price")
+        stop = rec.get("stop_loss")
+        target = rec.get("target_price")
+        rr = rec.get("risk_reward")
+
+        def _fmt(val: Any) -> str:
+            try:
+                return f"{float(val):.4f}"
+            except Exception:
+                return "--"
+
+        lines = [f"{validity} {rating}"]
+        if validity == "VALID_FOR_TRADING" and entry is not None and stop is not None and target is not None and rr is not None:
+            lines.append(f"Entry {_fmt(entry)} | Stop {_fmt(stop)} | Target {_fmt(target)} | RR {float(rr):.2f}")
+        if reasons:
+            lines.append(f"Reasons: {', '.join(reasons)}")
+        if summary:
+            lines.append(f"Summary: {summary}")
+        return "\n".join(lines)
+
+    def _format_llm_status(self, rec: dict, model: str, symbol: str | None) -> str:
+        validity = rec.get("validity") or "--"
+        rating = rec.get("setup_rating") or "--"
+        ts_txt = datetime.now(self._et_tz).strftime("%Y-%m-%d %H:%M:%S")
+        return f"LLM: {model} | {symbol or '--'} | {validity} {rating} | {ts_txt}"
 
     @staticmethod
     def _parse_shares_outstanding(payload: Any, symbol: str) -> float | None:
