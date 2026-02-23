@@ -621,6 +621,8 @@ class UIController:
             self._window._refresh_model_box.setEditText(self._refresh_model)
         if hasattr(self._window, "set_model_values"):
             self._window.set_model_values(self._full_model, self._refresh_model)
+        if self._available_models and hasattr(self._window, "populate_models"):
+            self._window.populate_models(self._available_models)
 
     @staticmethod
     def _parse_shares_outstanding(payload: Any, symbol: str) -> float | None:

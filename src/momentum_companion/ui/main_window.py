@@ -31,6 +31,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_model_callback: Optional[Callable[[str], None]] = None
         self._full_model_box: Optional[QtWidgets.QComboBox] = None
         self._refresh_model_box: Optional[QtWidgets.QComboBox] = None
+        self._models_cache: list[str] = []
 
     def _build_layout(self) -> None:
         central = QtWidgets.QWidget()
@@ -344,6 +345,8 @@ class MainWindow(QtWidgets.QMainWindow):
             model_row.addWidget(self._refresh_model_box)
             self._full_model_box.editTextChanged.connect(self._handle_full_model_changed)
             self._refresh_model_box.editTextChanged.connect(self._handle_refresh_model_changed)
+            if self._models_cache:
+                self.populate_models(self._models_cache)
             layout.addLayout(model_row)
             close_btn = QtWidgets.QPushButton("Close")
             close_btn.clicked.connect(dlg.close)
@@ -381,6 +384,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def populate_models(self, models: list[str]) -> None:
         """Populate model dropdowns with available identifiers."""
+        self._models_cache = models or []
         if hasattr(self, "_full_model_box") and self._full_model_box:
             self._full_model_box.clear()
             self._full_model_box.addItems(models)
