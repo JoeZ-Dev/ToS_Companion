@@ -636,7 +636,7 @@ class UIController:
                         len(messages[1].get("content", "")),
                         len(messages[2].get("content", "")),
                     )
-                    self._logger.debug("LLM payload messages: %s", json.dumps(messages, indent=2))
+                    self._logger.info("LLM payload messages: %s", json.dumps(messages, indent=2))
                 except Exception:
                     self._logger.info("LLM payload messages (unformatted): %s", messages)
                 resp = client.complete(messages=messages, model_override=model)
