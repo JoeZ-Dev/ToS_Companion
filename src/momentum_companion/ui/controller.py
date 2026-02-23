@@ -677,6 +677,11 @@ USER PAYLOAD: You are given the full snapshot JSON (schema_version, status, data
             try:
                 resp = client.complete(messages=messages, model_override=model)
                 content = ""
+                # Log full raw response for debugging/inspection
+                try:
+                    self._logger.info("LLM raw response: %s", json.dumps(resp, indent=2))
+                except Exception:
+                    self._logger.info("LLM raw response (unformatted): %s", resp)
                 try:
                     choices = resp.get("choices") if isinstance(resp, dict) else None
                     if choices and isinstance(choices, list):
