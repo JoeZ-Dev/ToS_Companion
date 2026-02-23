@@ -356,7 +356,8 @@ class UIController:
             return
         self._last_llm_hash[symbol] = snap_hash
         self._refresh_llm_status(symbol)
-        QtCore.QTimer.singleShot(0, lambda: self._run_llm_from_snapshot(snapshot, quote_event, is_first))
+        normalized = self._normalize_snapshot_for_llm(snapshot)
+        QtCore.QTimer.singleShot(0, lambda n=normalized: self._run_llm_from_snapshot(n, quote_event, is_first))
 
     def _run_llm_from_snapshot(self, snapshot: dict, quote_event: QuoteEvent, is_first: bool) -> None:
         try:
