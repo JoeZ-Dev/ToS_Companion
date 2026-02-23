@@ -496,6 +496,7 @@ class AEEngine:
         nearest_res = _nearest_level(last_price, res_clusters_rel, agg_for_levels, kind="resistance")
         nearest_sup = _nearest_level(last_price, sup_clusters_rel, agg_for_levels, kind="support")
         micro = _compute_micro_metrics(agg_bars, last_price)
+        bars_window_5m = _build_bars_window_5m(agg_bars, limit=60)
 
         snapshot_symbol = profile["symbol"] if profile else (resolved_symbol or "")
         snapshot = {
@@ -540,6 +541,7 @@ class AEEngine:
                 "opening_range_low": or_low_val,
                 "gap_pct": ((session_open_val - prior_close) / prior_close * 100) if prior_close and session_open_val else None,
             },
+            "bars_window_5m": bars_window_5m,
         }
         snapshot["levels_book"] = _build_levels_book(
             last_price=last_price,
@@ -550,6 +552,16 @@ class AEEngine:
         )
         if snapshot_symbol:
             self._snapshot_cache[snapshot_symbol] = snapshot
+        try:
+            barish_keys = [k for k in snapshot.keys() if "bar" in k or "ohlc" in k or "candle" in k]
+            logging.getLogger(__name__).debug(
+                "Snapshot built keys=%s barish=%s bars_window_5m_len=%s",
+                list(snapshot.keys()),
+                barish_keys,
+                len(bars_window_5m) if bars_window_5m else 0,
+            )
+        except Exception:
+            pass
         return snapshot
 
     def _market_state(self) -> tuple[bool, Optional[bool]]:
@@ -867,3 +879,36 @@ def _candles_to_df(candles: list[dict]) -> pd.DataFrame:
     if not df.empty:
         df = df.sort_values("ts_utc").reset_index(drop=True)
     return df
+
+
+def _build_bars_window_5m(bars_1m: list[OneMinuteBar], limit: int = 60) -> list[dict]:
+    """Aggregate 1m bars into 5m bars, oldest->newest, capped to limit."""
+    if not bars_1m:
+        return []
+    out: list[dict] = []
+    current: dict | None = None
+    current_bucket: Optional[int] = None
+    for b in bars_1m:
+        bucket = int(b.ts // 300)
+        if current is None or bucket != current_bucket:
+            if current:
+                out.append(current)
+            current_bucket = bucket
+            current = {
+                "ts_ms": int(b.ts * 1000),
+                "o": b.open,
+                "h": b.high,
+                "l": b.low,
+                "c": b.close,
+                "v": b.volume,
+            }
+        else:
+            current["h"] = max(current["h"], b.high)  # type: ignore[index]
+            current["l"] = min(current["l"], b.low)  # type: ignore[index]
+            current["c"] = b.close  # type: ignore[index]
+            current["v"] = current["v"] + b.volume  # type: ignore[index]
+    if current:
+        out.append(current)
+    if len(out) > limit:
+        out = out[-limit:]
+    return out
