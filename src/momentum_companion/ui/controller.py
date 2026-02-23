@@ -696,8 +696,19 @@ USER PAYLOAD: You are given the full snapshot JSON (schema_version, status, data
                 QtCore.QTimer.singleShot(0, lambda txt=content: self._window.llm_reco.setText(f"LLM: {txt}"))  # type: ignore[attr-defined]
                 self._last_llm_ts[self._pending_symbol or ""] = time.time()
                 QtCore.QTimer.singleShot(0, lambda: self._refresh_llm_status())
-            except Exception:
+            except Exception as e:
+                # Surface response details when available (e.g., HTTP errors)
+                try:
+                    if isinstance(e, Exception) and hasattr(e, "response"):
+                        resp_obj = getattr(e, "response", None)
+                        if resp_obj is not None:
+                            self._logger.warning("LLM invocation HTTP error: %s", getattr(resp_obj, "text", resp_obj))
+                except Exception:
+                    pass
                 self._logger.warning("LLM invocation failed", exc_info=True)
+                QtCore.QTimer.singleShot(
+                    0, lambda msg=str(e): self._window.llm_reco.setText(f"LLM error: {msg}")
+                )  # type: ignore[attr-defined]
         threading.Thread(target=task, daemon=True).start()
 
     def _load_stored_api_key(self) -> None:

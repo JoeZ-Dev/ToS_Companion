@@ -4,6 +4,7 @@ import os
 from typing import Any, Dict
 
 import httpx
+from httpx import HTTPStatusError
 
 from momentum_companion.utils.logging import logging
 
