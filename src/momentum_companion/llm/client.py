@@ -46,7 +46,7 @@ class LLMClient:
         resp.raise_for_status()
         return resp.json()
 
-    def list_models(self) -> list[str]:
+    def list_models(self) -> list[dict[str, Any]]:
         resp = self._http.get(
             "https://api.openai.com/v1/models",
             headers={"Authorization": f"Bearer {self._api_key}"},
@@ -54,6 +54,4 @@ class LLMClient:
         resp.raise_for_status()
         data = resp.json()
         models = data.get("data", [])
-        ids = [m.get("id") for m in models if m.get("id")]
-        ids.sort()
-        return ids
+        return models

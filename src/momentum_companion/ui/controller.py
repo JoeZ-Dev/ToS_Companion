@@ -732,10 +732,22 @@ USER PAYLOAD: You are given the full snapshot JSON (schema_version, status, data
             return
         def task() -> None:
             try:
-                models = self._llm_service._client.list_models()  # type: ignore[attr-defined]
-                fetched = len(models)
+                model_records = self._llm_service._client.list_models()  # type: ignore[attr-defined]
+                fetched = len(model_records)
+                ids: list[str] = []
+                for rec in model_records:
+                    mid = rec.get("id") if isinstance(rec, dict) else None
+                    caps = rec.get("capabilities") if isinstance(rec, dict) else {}
+                    is_chat = False
+                    if isinstance(caps, dict):
+                        is_chat = bool(caps.get("chat"))
+                    rec_type = rec.get("type") if isinstance(rec, dict) else None
+                    if not is_chat and rec_type and isinstance(rec_type, str):
+                        is_chat = rec_type == "chat.completions"
+                    if mid and is_chat:
+                        ids.append(mid)
                 defaults = ["gpt-4o", "gpt-4o-mini"]
-                merged = sorted(set(models + defaults)) if models else defaults
+                merged = sorted(set(ids + defaults)) if ids else defaults
                 allowed_prefixes = ["gpt-5", "gpt-4.1", "gpt-4o", "gpt-4", "gpt-3.5", "o3"]
                 banned_snippets = ["audio", "vision", "realtime", "embed", "whisper", "tts", "test", "beta", "sandbox"]
                 filtered = [
