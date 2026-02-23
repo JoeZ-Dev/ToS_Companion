@@ -393,11 +393,13 @@ class MainWindow(QtWidgets.QMainWindow):
         if hasattr(self, "_full_model_box") and self._full_model_box:
             self._full_model_box.clear()
             if self._models_cache:
-                self._full_model_box.addItems(self._models_cache)
+                for m in self._models_cache:
+                    self._full_model_box.addItem(m)
         if hasattr(self, "_refresh_model_box") and self._refresh_model_box:
             self._refresh_model_box.clear()
             if self._models_cache:
-                self._refresh_model_box.addItems(self._models_cache)
+                for m in self._models_cache:
+                    self._refresh_model_box.addItem(m)
         # Preserve current text if set
         if self._full_model_box and self._full_model_box.currentText():
             self._full_model_box.setEditText(self._full_model_box.currentText())
