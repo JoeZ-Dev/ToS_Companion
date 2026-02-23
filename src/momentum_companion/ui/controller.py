@@ -631,10 +631,13 @@ class UIController:
                 self._logger.info("LLM invoking model=%s for symbol=%s prompt_version=%s", model, symbol, self._llm_prompt_version)
                 try:
                     self._logger.info(
-                        "LLM payload sizes: system=%s dev=%s user=%s",
+                        "LLM payload sizes: system=%s dev=%s user=%s | previews: sys=%s ... dev=%s ... user=%s ...",
                         len(messages[0].get("content", "")),
                         len(messages[1].get("content", "")),
                         len(messages[2].get("content", "")),
+                        messages[0].get("content", "")[:200],
+                        messages[1].get("content", "")[:200],
+                        messages[2].get("content", "")[:200],
                     )
                     self._logger.info("LLM payload messages: %s", json.dumps(messages, indent=2))
                 except Exception:
@@ -765,6 +768,34 @@ class UIController:
         if hasattr(self._window, "set_prompt_value"):
             self._window.set_prompt_value(self._llm_prompt)
 
+    def _normalize_snapshot_for_llm(self, snapshot: dict) -> dict:
+        quote_src = snapshot.get("quote") if isinstance(snapshot, dict) else {}
+        quote = {
+            "bid": quote_src.get("bid") if isinstance(quote_src, dict) else None,
+            "ask": quote_src.get("ask") if isinstance(quote_src, dict) else None,
+            "last": quote_src.get("last") if isinstance(quote_src, dict) else None,
+            "volume": quote_src.get("volume") if isinstance(quote_src, dict) else None,
+        }
+        norm = {
+            "schema_version": snapshot.get("schema_version", "AE-1.1"),
+            "status": snapshot.get("status", "ok"),
+            "data_quality": snapshot.get("data_quality"),
+            "as_of_ts_ms": snapshot.get("as_of_ts_ms") or snapshot.get("as_of"),
+            "symbol": snapshot.get("symbol"),
+            "session_mode": snapshot.get("session_mode"),
+            "market_state": snapshot.get("market_state"),
+            "quote": quote,
+            "bars_window": snapshot.get("bars_window"),
+            "invocation_type": snapshot.get("invocation_type", "MANUAL_RECALC"),
+            "in_position": snapshot.get("in_position", False),
+            "side": "LONG" if snapshot.get("in_position") else None,
+            "entry_price": snapshot.get("entry_price"),
+            "qty": snapshot.get("qty"),
+            "current_stop_loss": snapshot.get("current_stop_loss"),
+            "current_target_price": snapshot.get("current_target_price"),
+        }
+        return norm
+
     def _default_developer_prompt(self) -> str:
         reason_codes = [
             "FAILED_BREAKOUT",
@@ -794,16 +825,14 @@ class UIController:
         reason_str = ", ".join(reason_codes)
         return (
             f"PROMPT_VERSION={self._llm_prompt_version}\n"
-            "Return EXACTLY ONE JSON object matching the Output Schema.\n"
-            "If NOT_VALID_FOR_TRADING then entry_price/stop_loss/target_price/risk_reward must be null.\n"
+            "Return exactly ONE JSON object and NOTHING ELSE.\n"
+            "Output keys required (setup mode): validity, setup_rating, entry_price, stop_loss, target_price, risk_reward, summary, reason_codes.\n"
+            "If in_position=true, also include: trade_management_action, action_urgency, updated_stop_loss, add_entry_price, add_qty, management_summary.\n"
             "VALID_FOR_TRADING only if setup_rating>=B- AND risk_reward>=2.0 AND entry_price/stop_loss/target_price are present.\n"
-            "Always include setup_rating and reason_codes (1–3 codes, most important first).\n"
-            f"Use ONLY reason codes from this allowed list: {reason_str}.\n"
-            "In-position (in_position=true): include trade_management_action, action_urgency, updated_stop_loss, add_entry_price, add_qty, management_summary. "
-            "Validity applies only to new entries; actions drive management decisions. Do not silently drift targets in-position.\n"
-            "Self-check: JSON valid; enums valid; null rules met; no extra keys.\n"
-            "Output Schema keys: setup mode requires validity, setup_rating, entry_price, stop_loss, target_price, risk_reward, summary, reason_codes. "
-            "In-position additionally requires trade_management_action, action_urgency, updated_stop_loss, add_entry_price, add_qty, management_summary."
+            "If NOT_VALID_FOR_TRADING then entry_price/stop_loss/target_price/risk_reward MUST be null.\n"
+            "reason_codes MUST be 1–3 items and MUST be from this allowed list ONLY: "
+            f"{reason_str}.\n"
+            "Do not output any other keys. Do not output markdown."
         )
 
     def _build_llm_messages(self, snapshot: dict) -> list[dict[str, str]]:
@@ -817,7 +846,8 @@ class UIController:
             "Summary fields must be <=3 sentences."
         )
         developer_text = self._llm_prompt or self._default_developer_prompt()
-        user_text = json.dumps(snapshot, separators=(",", ":"), sort_keys=True)
+        normalized = self._normalize_snapshot_for_llm(snapshot)
+        user_text = json.dumps(normalized, separators=(",", ":"), sort_keys=True)
         return [
             {"role": "system", "content": system_text},
             {"role": "developer", "content": developer_text},
