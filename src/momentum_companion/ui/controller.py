@@ -85,51 +85,8 @@ class UIController:
         self._available_models: list[str] = []
         self._full_model = "gpt-4o"
         self._refresh_model = "gpt-4o-mini"
-        self._llm_prompt = """\
-SYSTEM PROMPT:
-You are the LLM Coach for a momentum day-trading assistant. Advisory-only, no order actions, no triggers, no indicator math, no fabrication or inference. Longs only. Output must be strict JSON only (no markdown, no extra text). Summaries <= 3 sentences. If required fields are missing, downgrade. Do not contradict tradability rules. Stateless.
-
-DEVELOPER PROMPT:
-PROMPT_VERSION: LLM_COACH_PROMPT_V1
-You receive a self-contained market snapshot JSON. Evaluate with Momentum Long Strategy Rubric.
-VALID_FOR_TRADING only if setup_rating >= B-, risk_reward >= 2.0, and entry_price/stop_loss/target_price are present. Otherwise entry/stop/target/risk_reward = null. Always populate setup_rating.
-In-position mode: validity applies only to new entries; trade_management_action + action_urgency control decision; never drift current_target_price; updated_stop_loss only when recommending stop movement.
-Allowed reason codes (1-3, most important first, no others):
-FAILED_BREAKOUT, LOWER_HIGHS, NO_CLEAR_LEVEL, VWAP_TEST, VWAP_REJECT, VWAP_RECLAIM, VOLUME_FADE, WEAK_VOLUME_ON_EXTENSION, STRONG_VOLUME_CONTINUATION, BUYERS_WEAK, HEAVY_SELL_PRESSURE, HOD_BREAKOUT_HOLDING, HOD_REJECT, SPREAD_WIDENING, THIN_LIQUIDITY, RR_BELOW_MINIMUM, DATA_STALE, ENTRY_APPROACHING, STOP_THREAT, HALT_OR_REJECT, DISCONNECT, EXECUTION_FILL, RISK_BREACH.
-Degrade rating/validity when structure weakens; explain briefly in summary. Setup mode: entries above breakouts when appropriate; stops at structural invalidation; targets at next resistance; justify target changes. Trade management actions: HOLD, EXIT_NOW, SCALE_OUT_50, MOVE_STOP_TO_BREAKEVEN, RAISE_STOP_TO, ADD_TO_POSITION (default HOLD when healthy).
-Self-check: JSON valid, null rules respected, validity consistent with rating/RR, no extra/missing fields.
-
-REQUIRED OUTPUT (setup mode):
-{
-  "validity": "...",
-  "setup_rating": "...",
-  "entry_price": number | null,
-  "stop_loss": number | null,
-  "target_price": number | null,
-  "risk_reward": number | null,
-  "summary": "string <=3 sentences",
-  "reason_codes": ["..."]
-}
-
-REQUIRED OUTPUT (in-position):
-{
-  "validity": "...",
-  "setup_rating": "...",
-  "entry_price": number | null,
-  "stop_loss": number | null,
-  "target_price": number | null,
-  "risk_reward": number | null,
-  "summary": "...",
-  "reason_codes": ["..."],
-  "trade_management_action": "HOLD | EXIT_NOW | SCALE_OUT_50 | MOVE_STOP_TO_BREAKEVEN | RAISE_STOP_TO | ADD_TO_POSITION",
-  "action_urgency": "LOW | MEDIUM | HIGH",
-  "updated_stop_loss": number | null,
-  "add_entry_price": number | null,
-  "add_qty": number | null,
-  "management_summary": "string <=3 sentences"
-}
-
-USER PAYLOAD: You are given the full snapshot JSON (schema_version, status, data_quality, as_of_ts_ms, symbol, session_mode, market_state, quote, bars_window, invocation_type, in_position, side, entry_price, qty, current_stop_loss, current_target_price, etc.). Use only provided data."""
+        self._llm_prompt_version = "LLM_COACH_PROMPT_V1"
+        self._llm_prompt = self._default_developer_prompt()
         self._model_signals = _ModelSignals()
         if hasattr(self._window, "populate_models"):
             # Single signal carries models + selections to enforce ordering
@@ -667,18 +624,19 @@ USER PAYLOAD: You are given the full snapshot JSON (schema_version, status, data
             self._logger.warning("LLM run skipped: no client")
             return
         symbol = self._pending_symbol or ""
-        prompt = self._llm_prompt
-        snapshot_json = json.dumps(self._last_ae_snapshot, indent=2)
-        messages = [
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": f"Snapshot for {symbol}:\n{snapshot_json}"},
-        ]
+        messages = self._build_llm_messages(self._last_ae_snapshot)
 
         def task() -> None:
             try:
-                self._logger.info("LLM invoking model=%s for symbol=%s", model, symbol)
+                self._logger.info("LLM invoking model=%s for symbol=%s prompt_version=%s", model, symbol, self._llm_prompt_version)
                 try:
-                    self._logger.info("LLM payload messages: %s", json.dumps(messages, indent=2))
+                    self._logger.info(
+                        "LLM payload sizes: system=%s dev=%s user=%s",
+                        len(messages[0].get("content", "")),
+                        len(messages[1].get("content", "")),
+                        len(messages[2].get("content", "")),
+                    )
+                    self._logger.debug("LLM payload messages: %s", json.dumps(messages, indent=2))
                 except Exception:
                     self._logger.info("LLM payload messages (unformatted): %s", messages)
                 resp = client.complete(messages=messages, model_override=model)
@@ -806,6 +764,65 @@ USER PAYLOAD: You are given the full snapshot JSON (schema_version, status, data
             self._llm_prompt = stored
         if hasattr(self._window, "set_prompt_value"):
             self._window.set_prompt_value(self._llm_prompt)
+
+    def _default_developer_prompt(self) -> str:
+        reason_codes = [
+            "FAILED_BREAKOUT",
+            "LOWER_HIGHS",
+            "NO_CLEAR_LEVEL",
+            "VWAP_TEST",
+            "VWAP_REJECT",
+            "VWAP_RECLAIM",
+            "VOLUME_FADE",
+            "WEAK_VOLUME_ON_EXTENSION",
+            "STRONG_VOLUME_CONTINUATION",
+            "BUYERS_WEAK",
+            "HEAVY_SELL_PRESSURE",
+            "HOD_BREAKOUT_HOLDING",
+            "HOD_REJECT",
+            "SPREAD_WIDENING",
+            "THIN_LIQUIDITY",
+            "RR_BELOW_MINIMUM",
+            "DATA_STALE",
+            "ENTRY_APPROACHING",
+            "STOP_THREAT",
+            "HALT_OR_REJECT",
+            "DISCONNECT",
+            "EXECUTION_FILL",
+            "RISK_BREACH",
+        ]
+        reason_str = ", ".join(reason_codes)
+        return (
+            f"PROMPT_VERSION={self._llm_prompt_version}\n"
+            "Return EXACTLY ONE JSON object matching the Output Schema.\n"
+            "If NOT_VALID_FOR_TRADING then entry_price/stop_loss/target_price/risk_reward must be null.\n"
+            "VALID_FOR_TRADING only if setup_rating>=B- AND risk_reward>=2.0 AND entry_price/stop_loss/target_price are present.\n"
+            "Always include setup_rating and reason_codes (1–3 codes, most important first).\n"
+            f"Use ONLY reason codes from this allowed list: {reason_str}.\n"
+            "In-position (in_position=true): include trade_management_action, action_urgency, updated_stop_loss, add_entry_price, add_qty, management_summary. "
+            "Validity applies only to new entries; actions drive management decisions. Do not silently drift targets in-position.\n"
+            "Self-check: JSON valid; enums valid; null rules met; no extra keys.\n"
+            "Output Schema keys: setup mode requires validity, setup_rating, entry_price, stop_loss, target_price, risk_reward, summary, reason_codes. "
+            "In-position additionally requires trade_management_action, action_urgency, updated_stop_loss, add_entry_price, add_qty, management_summary."
+        )
+
+    def _build_llm_messages(self, snapshot: dict) -> list[dict[str, str]]:
+        system_text = (
+            "You are the LLM Coach for a momentum day-trading assistant.\n"
+            "You are advisory-only: never place/modify/cancel orders and never arm triggers.\n"
+            "Longs only.\n"
+            "Do not compute indicators or fabricate missing data.\n"
+            "Stateless: evaluate only the provided snapshot.\n"
+            "Output MUST be a single JSON object only (no markdown, no extra text).\n"
+            "Summary fields must be <=3 sentences."
+        )
+        developer_text = self._llm_prompt or self._default_developer_prompt()
+        user_text = json.dumps(snapshot, separators=(",", ":"), sort_keys=True)
+        return [
+            {"role": "system", "content": system_text},
+            {"role": "developer", "content": developer_text},
+            {"role": "user", "content": user_text},
+        ]
 
     @staticmethod
     def _parse_shares_outstanding(payload: Any, symbol: str) -> float | None:
