@@ -927,15 +927,24 @@ class UIController:
                 continue
             try:
                 ts_int = int(ts_ms)
-                compact.append({"ts_ms": ts_int, "o": o, "h": h, "l": l, "c": c, "v": v})
+                compact.append(
+                    {
+                        "ts_ms": ts_int,
+                        "o": round(float(o), 4),
+                        "h": round(float(h), 4),
+                        "l": round(float(l), 4),
+                        "c": round(float(c), 4),
+                        "v": float(v),
+                    }
+                )
             except Exception:
                 continue
         # drop the last bar if it might be forming (assume last may be partial if flagged missing)
         if compact and len(compact) > 1:
             compact = compact[:-1]
-        # keep chronological order and cap length
-        if len(compact) > self._BARS_WINDOW_MAX:
-            compact = compact[-self._BARS_WINDOW_MAX :]
+        # keep chronological order and cap length to 48
+        if len(compact) > 48:
+            compact = compact[-48:]
         return compact
 
     def _compute_market_state(self) -> str | None:
@@ -952,8 +961,7 @@ class UIController:
     def _default_developer_prompt(self) -> str:
         return (
             f"PROMPT_VERSION={self._llm_prompt_version}\n"
-            "Return EXACTLY ONE JSON object and NOTHING ELSE.\n"
-            "No markdown. No extra keys.\n"
+            "Return EXACTLY ONE JSON object and NOTHING ELSE. No markdown. No extra keys.\n"
             "Required keys when in_position=false:\n"
             "validity, setup_rating, entry_price, stop_loss, target_price, risk_reward, summary, reason_codes\n"
             "Additional required keys when in_position=true:\n"
@@ -966,9 +974,12 @@ class UIController:
             "Tradability bar:\n"
             "VALID_FOR_TRADING only if setup_rating>=B- AND risk_reward>=2.0 AND entry_price/stop_loss/target_price are present.\n"
             "If NOT_VALID_FOR_TRADING then entry_price/stop_loss/target_price/risk_reward MUST be null.\n"
+            "Targets must be anchored to structural levels (nearest resistance/micro/HOD/extension). Do NOT back-solve target just to meet RR>=2.0. "
+            "If no clear structural target, set NOT_VALID_FOR_TRADING with NO_CLEAR_LEVEL and null entry/stop/target/risk_reward.\n"
             "reason_codes:\n"
             "Return 1–3 codes, most important first. Codes MUST be from this allowed list ONLY:\n"
             "FAILED_BREAKOUT,LOWER_HIGHS,NO_CLEAR_LEVEL,VWAP_TEST,VWAP_REJECT,VWAP_RECLAIM,VOLUME_FADE,WEAK_VOLUME_ON_EXTENSION,STRONG_VOLUME_CONTINUATION,BUYERS_WEAK,HEAVY_SELL_PRESSURE,HOD_BREAKOUT_HOLDING,HOD_REJECT,SPREAD_WIDENING,THIN_LIQUIDITY,RR_BELOW_MINIMUM,DATA_STALE,ENTRY_APPROACHING,STOP_THREAT,HALT_OR_REJECT,DISCONNECT,EXECUTION_FILL,RISK_BREACH\n"
+            "Only use HOD_* reason codes if snapshot includes explicit HOD/high_of_day; otherwise do not emit HOD_*.\n"
             "Self-check: JSON valid; enums valid; null rules met; no extra keys."
         )
 
