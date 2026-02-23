@@ -339,10 +339,9 @@ class UIController:
             return
         if not self._llm_enabled:
             return
-        # Data quality gates
-        if snapshot.get("data_quality") != "ok":
-            return
-        if not snapshot.get("has_intraday_data") or not snapshot.get("has_4h_data") or not snapshot.get("has_market_data"):
+        ready, missing = self._is_snapshot_ready_for_llm(snapshot)
+        if not ready:
+            self._logger.debug("LLM auto skipped — snapshot not ready (missing %s)", ", ".join(missing))
             return
         # Time gate
         now_sec = time.time()
@@ -681,30 +680,8 @@ class UIController:
         barish_keys = [k for k in snap_keys if "bar" in k.lower() or "ohlc" in k.lower() or "candle" in k.lower() or "5m" in k.lower()]
         self._logger.debug("LLM source snapshot keys: %s | bar-related: %s", snap_keys, barish_keys)
         normalized = self._normalize_snapshot_for_llm(self._last_ae_snapshot)
-        missing: list[str] = []
-        session_mode = normalized.get("session_mode")
-        if session_mode not in self._ALLOWED_SESSION_MODES:
-            missing.append("session_mode")
-        market_state = normalized.get("market_state")
-        if market_state not in self._ALLOWED_MARKET_STATES:
-            missing.append("market_state")
-        quote = normalized.get("quote") or {}
-        last = quote.get("last") if isinstance(quote, dict) else None
-        bid = quote.get("bid") if isinstance(quote, dict) else None
-        ask = quote.get("ask") if isinstance(quote, dict) else None
-        if last is None:
-            missing.append("quote.last")
-        if bid is None and ask is None:
-            missing.append("quote.bid/ask")
         bars = normalized.get("bars_window") if isinstance(normalized, dict) else None
         bars_len = len(bars) if isinstance(bars, list) else 0
-        if not bars or bars_len < self._BARS_WINDOW_MIN_READY:
-            missing.append("bars_window")
-        if missing:
-            msg = f"LLM skipped — snapshot not ready (missing {', '.join(missing)}; bars_len={bars_len})"
-            self._logger.warning(msg)
-            QtCore.QTimer.singleShot(0, lambda m=msg: self._window.llm_reco.setText(m))  # type: ignore[attr-defined]
-            return
         levels_info = normalized.get("levels") or {}
         self._logger.info(
             "LLM normalized snapshot keys=%s bars_window_len=%s levels_fields=%s bars_ts=%s..%s",
@@ -1022,10 +999,8 @@ class UIController:
             missing.append("quote.bid/ask")
         bars = normalized.get("bars_window") if isinstance(normalized, dict) else None
         bars_len = len(bars) if isinstance(bars, list) else 0
-        if not bars:
+        if not isinstance(bars, list) or bars_len < self._BARS_WINDOW_MIN_READY:
             missing.append("bars_window")
-        if bars_len < self._BARS_WINDOW_MIN_READY:
-            missing.append("bars_window_len")
         return (len(missing) == 0, missing)
 
     def _compute_market_state(self) -> str | None:
