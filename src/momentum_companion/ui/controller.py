@@ -1306,19 +1306,28 @@ class UIController:
         if not client:
             return None
         messages = self._build_llm_messages(normalized)
+        plan = normalized.get("structural_plan") or {}
+        entry = plan.get("entry_candidate")
+        stop = plan.get("stop_candidate")
+        target = plan.get("target_candidate")
+        rr = plan.get("rr_candidate")
         reminder = (
-            "REPAIR REQUIRED: Your previous response violated a hard constraint: "
-            f"{reason}. structural_plan indicates a valid structural target/stop with rr_candidate>=2. "
-            "You MUST NOT output NOT_VALID_FOR_TRADING with NO_CLEAR_LEVEL here. "
-            "Either output VALID_FOR_TRADING with entry/stop/target/risk_reward from structural_plan, "
-            "or if not tradable for another reason, choose a different allowed reason_code (not NO_CLEAR_LEVEL) and follow null rules.\n"
+            "REPAIR REQUIRED: Your previous response violated NO_CLEAR_LEVEL_CONTRADICTS_STRUCTURAL_PLAN. "
+            "structural_plan shows rr_candidate>=2 with target>entry and stop<entry, so NO_CLEAR_LEVEL is forbidden. "
+            "You MUST either (A) return VALID_FOR_TRADING with entry/stop/target/risk_reward taken from structural_plan, "
+            "or (B) if not tradable for another reason, return NOT_VALID_FOR_TRADING with a DIFFERENT allowed reason_code (not NO_CLEAR_LEVEL) "
+            "supported by the snapshot and obeying null rules. Return corrected JSON only.\n"
         )
         messages[1]["content"] = messages[1]["content"] + "\n" + reminder
         self._logger.info(
-            "LLM repair retry start (developer prompt len=%s, reminder len=%s, reason=%s)",
+            "LLM repair retry start (developer prompt len=%s, reminder len=%s, reason=%s, entry=%s, stop=%s, target=%s, rr=%s)",
             len(messages[1].get("content", "")),
             len(reminder),
             reason,
+            entry,
+            stop,
+            target,
+            rr,
         )
         try:
             resp = client.complete(messages=messages, model_override=model)
@@ -1334,7 +1343,11 @@ class UIController:
         entry = plan.get("entry_candidate")
         stop = plan.get("stop_candidate")
         target = plan.get("target_candidate")
-        rr = plan.get("rr_candidate")
+        rr_raw = plan.get("rr_candidate")
+        try:
+            rr_val = round(float(rr_raw), 4) if rr_raw is not None else None
+        except Exception:
+            rr_val = rr_raw
         in_position = bool(normalized.get("in_position"))
         rec: dict[str, Any] = {
             "validity": "VALID_FOR_TRADING",
@@ -1342,7 +1355,7 @@ class UIController:
             "entry_price": entry,
             "stop_loss": stop,
             "target_price": target,
-            "risk_reward": rr,
+            "risk_reward": rr_val,
             "summary": "Fallback used due to model inconsistency with structural_plan.",
             "reason_codes": ["ENTRY_APPROACHING"],
         }
@@ -1357,6 +1370,13 @@ class UIController:
                     "management_summary": "Model inconsistent; holding using structural plan.",
                 }
             )
+        self._logger.info(
+            "LLM fallback applied entry=%s stop=%s target=%s rr=%s",
+            entry,
+            stop,
+            target,
+            rr_val,
+        )
         return rec
 
     @staticmethod
