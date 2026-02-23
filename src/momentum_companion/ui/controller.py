@@ -1069,13 +1069,12 @@ class UIController:
             return False, rec
         rr = (target_f - entry_f) / (entry_f - stop_f) if (entry_f - stop_f) != 0 else 0
         self._logger.info(
-            "LLM structural gate check entry=%s stop=%s target=%s rr=%s from nearest_res=%s micro_res=%s",
+            "LLM structural gate check entry=%s stop=%s target=%s rr=%s from target_source=%s",
             entry_f,
             stop_f,
             target_f,
             rr,
-            target if nearest_res else None,
-            micro.get("micro_resistance_15m") if isinstance(micro, dict) else None,
+            plan.get("target_source") if isinstance(plan, dict) else None,
         )
         if rr < 2.0:
             rec = {
