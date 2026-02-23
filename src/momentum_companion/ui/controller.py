@@ -37,6 +37,8 @@ class UIController:
 
     _ALLOWED_SESSION_MODES = {"NORMAL", "SEAMLESS"}
     _ALLOWED_MARKET_STATES = {"premarket", "normal", "afterhours"}
+    _BARS_WINDOW_MAX = 60
+    _BARS_WINDOW_MIN_READY = 20
 
     def __init__(
         self,
@@ -637,6 +639,9 @@ class UIController:
             self._logger.warning("LLM run skipped: no client")
             return
         symbol = self._pending_symbol or ""
+        snap_keys = list(self._last_ae_snapshot.keys()) if isinstance(self._last_ae_snapshot, dict) else []
+        barish_keys = [k for k in snap_keys if "bar" in k.lower() or "ohlc" in k.lower() or "candle" in k.lower() or "5m" in k.lower()]
+        self._logger.debug("LLM source snapshot keys: %s | bar-related: %s", snap_keys, barish_keys)
         normalized = self._normalize_snapshot_for_llm(self._last_ae_snapshot)
         missing: list[str] = []
         session_mode = normalized.get("session_mode")
@@ -653,18 +658,23 @@ class UIController:
             missing.append("quote.last")
         if bid is None and ask is None:
             missing.append("quote.bid/ask")
+        bars = normalized.get("bars_window") if isinstance(normalized, dict) else None
+        bars_len = len(bars) if isinstance(bars, list) else 0
+        if not bars or bars_len < self._BARS_WINDOW_MIN_READY:
+            missing.append("bars_window")
         if missing:
             msg = f"LLM skipped — snapshot not ready (missing {', '.join(missing)})"
             self._logger.warning(msg)
             QtCore.QTimer.singleShot(0, lambda m=msg: self._window.llm_reco.setText(m))  # type: ignore[attr-defined]
             return
-        bars_len = len(normalized.get("bars_window") or []) if isinstance(normalized.get("bars_window"), list) else 0
         levels_info = normalized.get("levels") or {}
         self._logger.info(
-            "LLM normalized snapshot keys=%s bars_window_len=%s levels_fields=%s",
+            "LLM normalized snapshot keys=%s bars_window_len=%s levels_fields=%s bars_ts=%s..%s",
             list(normalized.keys()),
             bars_len,
             list(levels_info.keys()) if isinstance(levels_info, dict) else None,
+            bars[0]["ts_ms"] if bars_len else None,
+            bars[-1]["ts_ms"] if bars_len else None,
         )
         messages = self._build_llm_messages(normalized)
 
@@ -856,10 +866,7 @@ class UIController:
             "micro_support_15m": micro_src.get("micro_support_15m"),
             "micro_state": micro_src.get("micro_state"),
         }
-        bars_window = snapshot.get("bars_window")
-        if bars_window and isinstance(bars_window, list):
-            # cap to last 60 bars if oversized
-            bars_window = bars_window[-60:]
+        bars_window = self._extract_bars_window(snapshot)
         norm = {
             "schema_version": snapshot.get("schema_version", "AE-1.1"),
             "status": snapshot.get("status", "ok"),
@@ -883,6 +890,53 @@ class UIController:
             "levels": levels,
         }
         return norm
+
+    def _extract_bars_window(self, snapshot: dict) -> list[dict]:
+        # Try common bar fields
+        candidates = []
+        for key in ("bars_window_5m", "bars_window", "bars_5m", "ohlcv_5m"):
+            val = snapshot.get(key) if isinstance(snapshot, dict) else None
+            if val:
+                candidates.append(val)
+        bars_raw = None
+        for c in candidates:
+            if isinstance(c, list) and c:
+                bars_raw = c
+                break
+        if not bars_raw or not isinstance(bars_raw, list):
+            return []
+        compact: list[dict] = []
+        for idx, bar in enumerate(bars_raw):
+            if not isinstance(bar, dict):
+                continue
+            # Skip incomplete bars if flagged
+            if bar.get("complete") is False or bar.get("is_partial") is True:
+                continue
+            ts_ms = (
+                bar.get("ts_ms")
+                or bar.get("ts")
+                or bar.get("timestamp_ms")
+                or bar.get("t")
+            )
+            o = bar.get("o") if "o" in bar else bar.get("open")
+            h = bar.get("h") if "h" in bar else bar.get("high")
+            l = bar.get("l") if "l" in bar else bar.get("low")
+            c = bar.get("c") if "c" in bar else bar.get("close")
+            v = bar.get("v") if "v" in bar else bar.get("volume")
+            if ts_ms is None or o is None or h is None or l is None or c is None or v is None:
+                continue
+            try:
+                ts_int = int(ts_ms)
+                compact.append({"ts_ms": ts_int, "o": o, "h": h, "l": l, "c": c, "v": v})
+            except Exception:
+                continue
+        # drop the last bar if it might be forming (assume last may be partial if flagged missing)
+        if compact and len(compact) > 1:
+            compact = compact[:-1]
+        # keep chronological order and cap length
+        if len(compact) > self._BARS_WINDOW_MAX:
+            compact = compact[-self._BARS_WINDOW_MAX :]
+        return compact
 
     def _compute_market_state(self) -> str | None:
         now_et = datetime.now(self._et_tz)
