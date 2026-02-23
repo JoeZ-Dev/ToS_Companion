@@ -638,18 +638,12 @@ class UIController:
                 if final:
                     self._logger.debug("Model sample: %s", final[:10])
                 # Ensure model list is applied before selection is set
-                QtCore.QMetaObject.invokeMethod(  # type: ignore[attr-defined]
-                    self._model_signals,
-                    "models_ready",
-                    QtCore.Qt.ConnectionType.QueuedConnection,
-                    QtCore.Q_ARG(object, final),
-                )
-                QtCore.QMetaObject.invokeMethod(
-                    self._model_signals,
-                    "model_values",
-                    QtCore.Qt.ConnectionType.QueuedConnection,
-                    QtCore.Q_ARG(str, self._full_model or ""),
-                    QtCore.Q_ARG(str, self._refresh_model or ""),
+                QtCore.QTimer.singleShot(
+                    0,
+                    lambda f=final: (
+                        self._model_signals.models_ready.emit(f),
+                        self._model_signals.model_values.emit(self._full_model or "", self._refresh_model or ""),
+                    ),
                 )
             except Exception:
                 self._logger.warning("Failed to list models from OpenAI", exc_info=True)
