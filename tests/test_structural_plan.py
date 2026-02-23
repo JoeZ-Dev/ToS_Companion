@@ -78,3 +78,19 @@ def test_structural_plan_target_too_far_marks_reason():
     assert plan["target_candidate"] == 1.35  # still reported for diagnostics
     assert plan["valid"] is False
     assert "TARGET_TOO_FAR" in plan["invalid_reasons"]
+
+
+def test_structural_plan_ignores_stop_above_entry_and_falls_back():
+    ctl = _make_controller()
+    payload = {
+        "quote": {"last": 1.0, "ask": 1.0},
+        "levels": {
+            "nearest_resistance": {"price": 1.1},
+            "nearest_support": {"price": 1.05},  # above entry, should be ignored
+        },
+        "micro": {"micro_support_15m": 0.9},
+        "bars_window": [],
+    }
+    plan = ctl._build_structural_plan(payload)
+    assert plan["stop_candidate"] == 0.9  # fell back to micro support below entry
+    assert plan["stop_source"] == "micro_support_15m"

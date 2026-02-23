@@ -1140,20 +1140,32 @@ class UIController:
 
         stop = None
         stop_source = None
-        if nearest_sup and isinstance(nearest_sup, dict) and nearest_sup.get("price") is not None:
-            stop = nearest_sup.get("price")
-            stop_source = "nearest_support"
-        elif micro_sup is not None:
-            stop = micro_sup
-            stop_source = "micro_support_15m"
-        else:
-            try:
-                lows = [float(b.get("l")) for b in bars[-self._SWING_LOW_LOOKBACK_BARS :] if isinstance(b, dict) and b.get("l") is not None]
-                if lows:
-                    stop = min(lows)
-                    stop_source = "swing_low"
-            except Exception:
-                pass
+        if entry_f is not None:
+            if nearest_sup and isinstance(nearest_sup, dict) and nearest_sup.get("price") is not None:
+                try:
+                    sup_f = float(nearest_sup.get("price"))
+                    if sup_f < entry_f:
+                        stop = sup_f
+                        stop_source = "nearest_support"
+                except Exception:
+                    pass
+            if stop is None and micro_sup is not None:
+                try:
+                    micro_sup_f = float(micro_sup)
+                    if micro_sup_f < entry_f:
+                        stop = micro_sup_f
+                        stop_source = "micro_support_15m"
+                except Exception:
+                    pass
+            if stop is None:
+                try:
+                    lows = [float(b.get("l")) for b in bars[-self._SWING_LOW_LOOKBACK_BARS :] if isinstance(b, dict) and b.get("l") is not None]
+                    lows = [v for v in lows if v < entry_f]
+                    if lows:
+                        stop = min(lows)
+                        stop_source = "swing_low"
+                except Exception:
+                    pass
 
         target = None
         target_source = None
