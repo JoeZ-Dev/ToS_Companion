@@ -612,7 +612,7 @@ class UIController:
                         self._window,
                         "populate_models",
                         QtCore.Qt.ConnectionType.QueuedConnection,
-                        QtCore.Q_ARG(object, merged),
+                        QtCore.Q_ARG("PyObject", merged),
                     )
                 QtCore.QMetaObject.invokeMethod(
                     self._window,
