@@ -810,6 +810,9 @@ class UIController:
                     parse_error = "LLM response not JSON"
                     rec = {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["DATA_STALE"], "summary": content}
                 # no structural enforcement in strategist mode
+                if refresh_mode:
+                    prior_full_rec = self._last_llm_rec_by_symbol.get(symbol)
+                    rec = self._patch_refresh_output(rec, prior_best_payload, prior_full_rec, refresh_mode=True)
                 if not self._validate_setup_schema(rec):
                     self._logger.warning("Invalid LLM setup schema")
                 self._emit_llm_result(
@@ -1399,9 +1402,13 @@ class UIController:
         return (
             "SETUP_DISCOVERY_REFRESH_V1\n"
             "Return EXACTLY ONE JSON object in the SAME schema as full mode (stock_bias, summary, setups[]...).\n"
+            'stock_bias MUST be one of: "HAS_POTENTIAL" | "NO_EDGE".\n'
+            "Every setup MUST include ALL required keys: name, trigger_condition, entry_trigger_price, stop_price, target_price, rr_to_target1, setup_rating, confirmation_requirements, target1_label, extension_trigger, extension_target, extension_notes, tape_warning.\n"
+            "If you do not change a field, copy it from prior_best_setup. Do not omit fields.\n"
             "Use prior_best_setup plus latest prices/levels to update triggers/targets/stops/RR if needed.\n"
             "Summary must be <=2 sentences.\n"
             "No markdown. No extra keys.\n"
+            "Self-check: ensure every setup has all required keys; ensure stock_bias is one of the two enums.\n"
         )
 
     def _build_llm_messages(self, snapshot: dict) -> list[dict[str, str]]:
@@ -1571,6 +1578,84 @@ class UIController:
             "recent_bars": recent_bars,
             "prior_best_setup": prior_best_payload,
         }
+
+    def _patch_refresh_output(
+        self,
+        rec: dict,
+        prior_best_setup: dict | None,
+        prior_full_rec: dict | None,
+        refresh_mode: bool,
+    ) -> dict:
+        """Patch refresh output to enforce schema and enum sanity without changing full-mode behavior."""
+        if not refresh_mode or not isinstance(rec, dict):
+            return rec
+        # stock_bias sanity
+        stock_bias = rec.get("stock_bias")
+        if stock_bias not in {"HAS_POTENTIAL", "NO_EDGE"}:
+            mapped = None
+            if isinstance(stock_bias, str):
+                lowered = stock_bias.lower()
+                if lowered == "neutral":
+                    mapped = "NO_EDGE"
+                elif lowered == "has_potential":
+                    mapped = "HAS_POTENTIAL"
+                elif lowered == "no_edge":
+                    mapped = "NO_EDGE"
+            if mapped:
+                rec["stock_bias"] = mapped
+            else:
+                fallback = None
+                if prior_full_rec and isinstance(prior_full_rec, dict):
+                    fb = prior_full_rec.get("stock_bias")
+                    if fb in {"HAS_POTENTIAL", "NO_EDGE"}:
+                        fallback = fb
+                rec["stock_bias"] = fallback or "NO_EDGE"
+        # setups patch
+        setups = rec.get("setups")
+        if isinstance(setups, list):
+            for idx, s in enumerate(setups):
+                if not isinstance(s, dict):
+                    continue
+                required_keys = [
+                    "name",
+                    "trigger_condition",
+                    "entry_trigger_price",
+                    "stop_price",
+                    "target_price",
+                    "rr_to_target1",
+                    "setup_rating",
+                    "confirmation_requirements",
+                    "target1_label",
+                    "extension_trigger",
+                    "extension_target",
+                    "extension_notes",
+                    "tape_warning",
+                ]
+                prior = prior_best_setup if isinstance(prior_best_setup, dict) else None
+                for key in required_keys:
+                    if key not in s or s.get(key) is None:
+                        if prior and key in prior:
+                            s[key] = prior.get(key)
+                        else:
+                            if key == "confirmation_requirements":
+                                s[key] = "(unchanged)"
+                            elif key == "target1_label":
+                                s[key] = "(unchanged)"
+                            elif key == "extension_trigger":
+                                s[key] = ""
+                            elif key == "extension_target":
+                                s[key] = None
+                            elif key == "extension_notes":
+                                s[key] = ""
+                # setup_rating sanity
+                rating = s.get("setup_rating")
+                valid_ratings = {"A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D"}
+                if rating not in valid_ratings:
+                    if prior and prior.get("setup_rating") in valid_ratings:
+                        s["setup_rating"] = prior.get("setup_rating")
+                    else:
+                        s["setup_rating"] = "C+"
+        return rec
 
     def _format_llm_recommendation(self, rec: dict) -> str:
         validity = rec.get("validity") or "--"
