@@ -1100,7 +1100,50 @@ class UIController:
         # keep chronological order and cap length to max
         if len(compact) > self._BARS_WINDOW_MAX:
             compact = compact[-self._BARS_WINDOW_MAX :]
+        # If still short, try a 5m backfill from REST history
+        if len(compact) < self._BARS_WINDOW_MIN_READY:
+            symbol = snapshot.get("symbol") if isinstance(snapshot, dict) else None
+            if self._rest_client and symbol:
+                try:
+                    backfill = self._fetch_5m_history(symbol)
+                    if backfill:
+                        combined = compact + backfill
+                        # dedupe by ts_ms and sort
+                        dedup: dict[int, dict] = {}
+                        for b in combined:
+                            ts = b.get("ts_ms")
+                            if ts is None:
+                                continue
+                            dedup[int(ts)] = b
+                        compact = [dedup[k] for k in sorted(dedup.keys())]
+                        if len(compact) > self._BARS_WINDOW_MAX:
+                            compact = compact[-self._BARS_WINDOW_MAX :]
+                except Exception:
+                    self._logger.debug("5m backfill fetch failed for %s", symbol, exc_info=True)
         return compact
+
+    def _fetch_5m_history(self, symbol: str) -> list[dict]:
+        """Fetch 5m candles as a compact bars list."""
+        resp = self._rest_client.fetch_price_history(symbol, None, None, "5m") if self._rest_client else {}
+        candles = resp.get("candles") or []
+        out: list[dict] = []
+        for c in candles:
+            if c.get("datetime") is None:
+                continue
+            try:
+                out.append(
+                    {
+                        "ts_ms": int(c.get("datetime")),
+                        "o": round(float(c.get("open")), 4),
+                        "h": round(float(c.get("high")), 4),
+                        "l": round(float(c.get("low")), 4),
+                        "c": round(float(c.get("close")), 4),
+                        "v": float(c.get("volume") or 0),
+                    }
+                )
+            except Exception:
+                continue
+        return out
 
     def _is_snapshot_ready_for_llm(self, snapshot: dict) -> tuple[bool, list[str]]:
         normalized = self._normalize_snapshot_for_llm(snapshot)
