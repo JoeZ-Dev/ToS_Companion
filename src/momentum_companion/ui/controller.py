@@ -1350,25 +1350,28 @@ class UIController:
             '      "target1_label": string,\n'
             '      "extension_trigger": string,\n'
             '      "extension_target": number|null,\n'
-            '      "extension_notes": string\n'
+            '      "extension_notes": string,\n'
+            '      "tape_warning": "NONE" | "SPIKEY_PULLBACKS"\n'
             "    }\n"
             "  ]\n"
             "}\n\n"
             "Rules:\n"
             "- Maximum 2 setups returned.\n"
             "- If there are 3+ plausible setups, return only the best 1–2 and do NOT include any rated below B+.\n"
-            "- If only 1–2 candidates exist, you may include a lone B- if it is the only actionable idea.\n"
+            "- If only 1–2 candidates exist, you may include a lone B- or C/C+ (rating rules still apply).\n"
+            "- stock_bias must be HAS_POTENTIAL only if at least one setup_rating >= B-. If best setup is C/C+, set stock_bias=NO_EDGE (you may still return the C/C+ setup in setups).\n"
             "- Rating must reflect rr_to_target1:\n"
             "    * rr_to_target1 < 1.0  -> setup_rating cannot be above C+\n"
             "    * 1.0 <= rr_to_target1 < 1.2 -> setup_rating cannot be above B-\n"
             "    * rr_to_target1 >= 1.2 -> rating may be B, B+, A-, etc based on structure/volume quality\n"
             "- Do NOT hard-gate on RR; rate appropriately instead.\n"
-            "- Compute rr_to_target1 = (target_price - entry_trigger_price) / (entry_trigger_price - stop_price).\n"
-            "  If risk<=0 or reward<=0 from those numbers, do not include the setup.\n"
+            "- Compute rr_to_target1 = (target_price - entry_trigger_price) / (entry_trigger_price - stop_price). If risk<=0 or reward<=0, do not include the setup.\n"
+            "- Detect tape_warning via bars_window: if in last 20 bars there are 2+ breakouts of a recent local high/resistance followed by >=50% retrace within 1–3 bars, set SPIKEY_PULLBACKS; else NONE.\n"
+            "- If tape_warning=SPIKEY_PULLBACKS, cap setup_rating at B- unless trigger is explicitly break+hold/retest, and confirmation_requirements must include hold/retest (not just volume).\n"
             "- Entry must be trigger-based (not vague).\n"
-            "- target1_label names the structural level for target_price (e.g., ORH, micro_resistance_15m, premarket_high).\n"
+            "- target1_label must correctly name the structural level for target_price (e.g., ORH, premarket_high, micro_resistance_15m, nearest_resistance).\n"
             "- extension_trigger describes what must happen to treat it as a runner (e.g., 1m close above target1 with volume expansion).\n"
-            "- extension_target is the next structural level from the snapshot if available (premarket_high, session_high, swing_high in bars_window); otherwise null.\n"
+            "- extension_target must be above target_price for longs; otherwise set extension_target=null and extension_notes should state 'No higher structural level provided'.\n"
             "- Ratings are based on rr_to_target1, not extension potential.\n"
             "- If no high-quality setup exists, return stock_bias='NO_EDGE' and setups=[].\n"
             "- No trade validation logic. No risk gates. No null rules.\n"
@@ -1418,6 +1421,7 @@ class UIController:
                 "extension_trigger",
                 "extension_target",
                 "extension_notes",
+                "tape_warning",
             }
             if not required.issubset(setup.keys()):
                 return False
@@ -1437,11 +1441,13 @@ class UIController:
             for field in num_fields:
                 val = setup.get(field)
                 if not isinstance(val, (int, float)):
-                    return False
+                return False
             ext_target = setup.get("extension_target")
             if ext_target is not None and not isinstance(ext_target, (int, float)):
                 return False
             if not isinstance(setup.get("setup_rating"), str):
+                return False
+            if not isinstance(setup.get("tape_warning"), str):
                 return False
         return True
 
