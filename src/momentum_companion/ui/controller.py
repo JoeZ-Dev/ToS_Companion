@@ -465,8 +465,14 @@ class UIController:
             self._append_bar_locked(bar)
 
     def _append_bar_locked(self, bar: TenSecondBar) -> None:
-        volume = bar.volume_norm if bar.volume_norm is not None else bar.volume
-        bar_dict = {"time": bar.ts, "open": bar.open, "high": bar.high, "low": bar.low, "close": bar.close, "volume": volume}
+        bar_dict = {
+            "time": bar.ts,
+            "open": bar.open,
+            "high": bar.high,
+            "low": bar.low,
+            "close": bar.close,
+            "volume": bar.volume,
+        }
         self._bars.append(bar_dict)
 
     def _update_studies(self, bars: list[dict]) -> None:

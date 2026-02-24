@@ -461,14 +461,6 @@ class MainWindow(QtWidgets.QMainWindow):
                     self._pending_refresh_model_text or "",
                 )
 
-            rr_row = QtWidgets.QHBoxLayout()
-            self._rr_gate_checkbox = QtWidgets.QCheckBox("Disable pre-LLM R/R gate (allow calls even if RR<2)")
-            self._rr_gate_checkbox.setChecked(self._pending_rr_gate_disabled)
-            self._rr_gate_checkbox.stateChanged.connect(self._handle_rr_gate_changed)
-            rr_row.addWidget(self._rr_gate_checkbox)
-            rr_row.addStretch()
-            layout.addLayout(rr_row)
-
             prompt_label = QtWidgets.QLabel("LLM Prompt:")
             self._prompt_edit = QtWidgets.QTextEdit()
             self._prompt_edit.setPlaceholderText("Enter base prompt for LLM recommendations...")
