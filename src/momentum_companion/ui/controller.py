@@ -1335,28 +1335,42 @@ class UIController:
             "No markdown. No extra keys.\n\n"
             "Required JSON structure:\n"
             "{\n"
-            '  \"stock_bias\": \"HAS_POTENTIAL\" | \"NO_EDGE\",\n'
-            '  \"summary\": \"2-3 sentence structural read\",\n'
-            '  \"setups\": [\n'
+            '  "stock_bias": "HAS_POTENTIAL" | "NO_EDGE",\n'
+            '  "summary": "2-3 sentence structural read",\n'
+            '  "setups": [\n'
             "    {\n"
-            '      \"name\": string,\n'
-            '      \"trigger_condition\": string,\n'
-            '      \"entry_trigger_price\": number,\n'
-            '      \"stop_price\": number,\n'
-            '      \"target_price\": number,\n'
-            '      \"estimated_rr\": number,\n'
-            '      \"setup_rating\": \"A+|A|A-|B+|B|B-|C+|C|C-|D\",\n'
-            '      \"confirmation_requirements\": string\n'
+            '      "name": string,\n'
+            '      "trigger_condition": string,\n'
+            '      "entry_trigger_price": number,\n'
+            '      "stop_price": number,\n'
+            '      "target_price": number,\n'
+            '      "rr_to_target1": number,\n'
+            '      "setup_rating": "A+|A|A-|B+|B|B-|C+|C|C-|D",\n'
+            '      "confirmation_requirements": string,\n'
+            '      "target1_label": string,\n'
+            '      "extension_trigger": string,\n'
+            '      "extension_target": number|null,\n'
+            '      "extension_notes": string\n'
             "    }\n"
             "  ]\n"
             "}\n\n"
             "Rules:\n"
-            "- Maximum 2 setups.\n"
-            "- Only include setups rated B+ or higher.\n"
-            "- If no high-quality setup exists, return stock_bias='NO_EDGE' and setups=[].\n"
+            "- Maximum 2 setups returned.\n"
+            "- If there are 3+ plausible setups, return only the best 1–2 and do NOT include any rated below B+.\n"
+            "- If only 1–2 candidates exist, you may include a lone B- if it is the only actionable idea.\n"
+            "- Rating must reflect rr_to_target1:\n"
+            "    * rr_to_target1 < 1.0  -> setup_rating cannot be above C+\n"
+            "    * 1.0 <= rr_to_target1 < 1.2 -> setup_rating cannot be above B-\n"
+            "    * rr_to_target1 >= 1.2 -> rating may be B, B+, A-, etc based on structure/volume quality\n"
+            "- Do NOT hard-gate on RR; rate appropriately instead.\n"
+            "- Compute rr_to_target1 = (target_price - entry_trigger_price) / (entry_trigger_price - stop_price).\n"
+            "  If risk<=0 or reward<=0 from those numbers, do not include the setup.\n"
             "- Entry must be trigger-based (not vague).\n"
-            "- Targets must align with structural levels in snapshot.\n"
-            "- Calculate estimated_rr using (target-entry)/(entry-stop).\n"
+            "- target1_label names the structural level for target_price (e.g., ORH, micro_resistance_15m, premarket_high).\n"
+            "- extension_trigger describes what must happen to treat it as a runner (e.g., 1m close above target1 with volume expansion).\n"
+            "- extension_target is the next structural level from the snapshot if available (premarket_high, session_high, swing_high in bars_window); otherwise null.\n"
+            "- Ratings are based on rr_to_target1, not extension potential.\n"
+            "- If no high-quality setup exists, return stock_bias='NO_EDGE' and setups=[].\n"
             "- No trade validation logic. No risk gates. No null rules.\n"
         )
 
@@ -1388,6 +1402,47 @@ class UIController:
             return False
         if len(rec["setups"]) > 2:
             return False
+        for setup in rec["setups"]:
+            if not isinstance(setup, dict):
+                return False
+            required = {
+                "name",
+                "trigger_condition",
+                "entry_trigger_price",
+                "stop_price",
+                "target_price",
+                "rr_to_target1",
+                "setup_rating",
+                "confirmation_requirements",
+                "target1_label",
+                "extension_trigger",
+                "extension_target",
+                "extension_notes",
+            }
+            if not required.issubset(setup.keys()):
+                return False
+            if not isinstance(setup.get("name"), str):
+                return False
+            if not isinstance(setup.get("trigger_condition"), str):
+                return False
+            if not isinstance(setup.get("confirmation_requirements"), str):
+                return False
+            if not isinstance(setup.get("target1_label"), str):
+                return False
+            if not isinstance(setup.get("extension_trigger"), str):
+                return False
+            if not isinstance(setup.get("extension_notes"), str):
+                return False
+            num_fields = ("entry_trigger_price", "stop_price", "target_price", "rr_to_target1")
+            for field in num_fields:
+                val = setup.get(field)
+                if not isinstance(val, (int, float)):
+                    return False
+            ext_target = setup.get("extension_target")
+            if ext_target is not None and not isinstance(ext_target, (int, float)):
+                return False
+            if not isinstance(setup.get("setup_rating"), str):
+                return False
         return True
 
     def _format_llm_recommendation(self, rec: dict) -> str:
