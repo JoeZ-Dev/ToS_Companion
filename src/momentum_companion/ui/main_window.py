@@ -197,7 +197,7 @@ class MainWindow(QtWidgets.QMainWindow):
         btn_row.addStretch()
         llm_layout.addLayout(btn_row)
         llm_group.setLayout(llm_layout)
-        side_panel.addWidget(llm_group, stretch=3)
+        side_panel.addWidget(llm_group, stretch=2)
 
         fundamentals_group = QtWidgets.QGroupBox("Fundamentals")
         fundamentals_layout = QtWidgets.QVBoxLayout()
@@ -235,7 +235,7 @@ class MainWindow(QtWidgets.QMainWindow):
         status_group.setSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Fixed)
         side_panel.addWidget(status_group)
         side_panel.setStretchFactor(ae_group, 2)
-        side_panel.setStretchFactor(llm_group, 3)
+        side_panel.setStretchFactor(llm_group, 2)
         side_panel.setStretchFactor(fundamentals_group, 1)
         side_panel.setStretchFactor(status_group, 0)
         middle.addLayout(side_panel, 1)
