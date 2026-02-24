@@ -161,7 +161,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ae_copy_btn.clicked.connect(self._copy_ae_json)
         ae_layout.addWidget(self.ae_copy_btn, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
         ae_group.setLayout(ae_layout)
-        side_panel.addWidget(ae_group, stretch=0)
+        side_panel.addWidget(ae_group)
 
         llm_group = QtWidgets.QGroupBox("LLM Panel")
         llm_layout = QtWidgets.QVBoxLayout()
@@ -197,7 +197,7 @@ class MainWindow(QtWidgets.QMainWindow):
         btn_row.addStretch()
         llm_layout.addLayout(btn_row)
         llm_group.setLayout(llm_layout)
-        side_panel.addWidget(llm_group, stretch=1)
+        side_panel.addWidget(llm_group)
 
         fundamentals_group = QtWidgets.QGroupBox("Fundamentals")
         fundamentals_layout = QtWidgets.QVBoxLayout()
