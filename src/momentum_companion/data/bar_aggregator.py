@@ -74,7 +74,9 @@ class BarAggregator10s:
         self._current_bar.high = max(self._current_bar.high, update.price)
         self._current_bar.low = min(self._current_bar.low, update.price)
         self._current_bar.close = update.price
-        self._current_bar.volume += self._volume_delta(update)
+        delta_vol = self._volume_delta(update)
+        self._current_bar.volume += delta_vol
+        self._current_bar.volume_norm = self._current_bar.volume * (60 / WINDOW_SEC)
         self._current_bar.stale = (self._current_bar.stale) or is_stale
         return None
 
