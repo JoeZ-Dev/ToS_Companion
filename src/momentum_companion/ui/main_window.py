@@ -161,7 +161,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ae_copy_btn.clicked.connect(self._copy_ae_json)
         ae_layout.addWidget(self.ae_copy_btn, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
         ae_group.setLayout(ae_layout)
-        side_panel.addWidget(ae_group)
+        side_panel.addWidget(ae_group, stretch=2)
 
         llm_group = QtWidgets.QGroupBox("LLM Panel")
         llm_layout = QtWidgets.QVBoxLayout()
@@ -197,7 +197,7 @@ class MainWindow(QtWidgets.QMainWindow):
         btn_row.addStretch()
         llm_layout.addLayout(btn_row)
         llm_group.setLayout(llm_layout)
-        side_panel.addWidget(llm_group)
+        side_panel.addWidget(llm_group, stretch=3)
 
         fundamentals_group = QtWidgets.QGroupBox("Fundamentals")
         fundamentals_layout = QtWidgets.QVBoxLayout()
@@ -234,8 +234,8 @@ class MainWindow(QtWidgets.QMainWindow):
         status_group.setLayout(status_layout)
         status_group.setSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Fixed)
         side_panel.addWidget(status_group)
-        side_panel.setStretchFactor(ae_group, 3)
-        side_panel.setStretchFactor(llm_group, 1)
+        side_panel.setStretchFactor(ae_group, 2)
+        side_panel.setStretchFactor(llm_group, 3)
         side_panel.setStretchFactor(fundamentals_group, 1)
         side_panel.setStretchFactor(status_group, 0)
         middle.addLayout(side_panel, 1)
