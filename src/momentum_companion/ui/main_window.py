@@ -182,6 +182,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.llm_flash.setStyleSheet("color: red; font-weight: bold;")
         llm_layout.addWidget(self.llm_reco)
         llm_layout.addWidget(self.llm_flash)
+        self.llm_prices = QtWidgets.QLabel("Entry/Stop/Target: --")
+        self.llm_prices.setWordWrap(True)
+        self.llm_prices.setStyleSheet("color: #bdc3c7;")
+        llm_layout.addWidget(self.llm_prices)
         self.llm_status_line = QtWidgets.QLabel("LLM Status: --")
         self.llm_status_line.setWordWrap(True)
         self.llm_status_line.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum)
@@ -361,6 +365,23 @@ class MainWindow(QtWidgets.QMainWindow):
             self._logger.info("LLM UI update: setting recommendation text (len=%s)", len(rec_text))
             self.set_llm_recommendation(rec_text)
             self.set_llm_status_line(status)
+            # Prices line
+            prices_txt = "Entry/Stop/Target: --"
+            try:
+                if parsed and parsed.get("validity") == "VALID_FOR_TRADING":
+                    entry = parsed.get("entry_price")
+                    stop = parsed.get("stop_loss")
+                    target = parsed.get("target_price")
+                    rr = parsed.get("risk_reward")
+                    if all(v is not None for v in (entry, stop, target, rr)):
+                        prices_txt = (
+                            f"Entry {float(entry):.4f} | Stop {float(stop):.4f} | "
+                            f"Target {float(target):.4f} | RR {float(rr):.2f}"
+                        )
+            except Exception:
+                prices_txt = "Entry/Stop/Target: --"
+            if hasattr(self, "llm_prices") and self.llm_prices:
+                self.llm_prices.setText(prices_txt)
         except Exception:
             self._logger.warning("Failed to handle LLM result payload", exc_info=True)
 
