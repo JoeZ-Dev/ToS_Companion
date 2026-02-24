@@ -192,7 +192,7 @@ class MainWindow(QtWidgets.QMainWindow):
         llm_layout.addWidget(self.llm_summary)
         self.llm_setups = QtWidgets.QLabel("Setups:\n--")
         self.llm_setups.setWordWrap(True)
-        self.llm_setups.setStyleSheet("color: #ecf0f1;")
+        self.llm_setups.setStyleSheet("color: #ecf0f1; white-space: pre-line;")
         llm_layout.addWidget(self.llm_setups)
         self.llm_status_line = QtWidgets.QLabel("LLM Status: --")
         self.llm_status_line.setWordWrap(True)
@@ -316,6 +316,20 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def apply_llm_recommendation(self, rec: dict) -> None:
         """Render LLM recommendation text using the latest schema (with fallback for legacy)."""
+        def _fmt_price(val: float | None) -> str:
+            try:
+                if val is None:
+                    return "--"
+                return f"{float(val):.4f}" if float(val) < 10 else f"{float(val):.2f}"
+            except Exception:
+                return "--"
+
+        def _fmt_rr(val: float | None) -> str:
+            try:
+                return f"{float(val):.2f}"
+            except Exception:
+                return "--"
+
         reco_txt = "LLM: --"
         summary_txt = "Summary: --"
         prices_txt = "Entry/Stop/Target: --"
@@ -328,58 +342,58 @@ class MainWindow(QtWidgets.QMainWindow):
             if best:
                 rating = best.get("setup_rating") or "--"
                 tape = best.get("tape_warning") or "NONE"
-                reco_txt = f"LLM: {rating} | {tape}"
+                warning = f" | {tape}" if tape != "NONE" else ""
+                reco_txt = f"LLM: {rating}{warning}"
                 entry = best.get("entry_trigger_price")
                 stop = best.get("stop_price")
                 target = best.get("target_price")
                 rr = best.get("rr_to_target1")
                 label = best.get("target1_label") or "--"
-                try:
-                    if all(v is not None for v in (entry, stop, target, rr)):
-                        prices_txt = (
-                            f"Entry (trigger): {float(entry):.4f} | Stop: {float(stop):.4f} | "
-                            f"Target1: {float(target):.4f} ({label}) | RR: {float(rr):.2f}"
-                        )
-                except Exception:
-                    prices_txt = "Entry/Stop/Target: --"
+                prices_txt = (
+                    f"Entry (trigger): {_fmt_price(entry)} | Stop: {_fmt_price(stop)} | "
+                    f"Target1: {_fmt_price(target)} ({label}) | RR: {_fmt_rr(rr)}"
+                )
             else:
                 reco_txt = f"LLM: {stock_bias} | --"
             summary_txt = f"Summary: {rec.get('summary') or '--'}"
             if setups:
                 setup_lines: list[str] = []
-                for s in setups[:2]:
+                limited = setups[:2]
+                for idx, s in enumerate(limited, start=1):
                     rating = s.get("setup_rating") or "--"
                     name = s.get("name") or "--"
                     tape = s.get("tape_warning") or "NONE"
-                    line1 = f"{rating} - {name} [{tape}]"
+                    warning = " ⚠ SPIKEY_PULLBACKS" if tape != "NONE" else ""
+                    header = f"LLM: {rating}{'' if warning == '' else warning}\nBias: {stock_bias} | RR: {_fmt_rr(s.get('rr_to_target1'))}\nSymbol: -- | Last: -- | AsOf: --"
                     trig = s.get("trigger_condition") or "--"
-                    line2 = f"Trigger: {trig}"
                     entry = s.get("entry_trigger_price")
                     stop = s.get("stop_price")
                     target = s.get("target_price")
                     rr = s.get("rr_to_target1")
                     label = s.get("target1_label") or "--"
-                    try:
-                        line3 = (
-                            f"Entry: {float(entry):.4f} | Stop: {float(stop):.4f} | "
-                            f"Target1: {float(target):.4f} ({label}) | RR: {float(rr):.2f}"
-                        )
-                    except Exception:
-                        line3 = "Entry/Stop/Target: --"
+                    line_setup = (
+                        f"[Setup]\nSetup: {name}\n"
+                        f"Trigger: {trig}\n"
+                        f"Entry: {_fmt_price(entry)}  Stop: {_fmt_price(stop)}\n"
+                        f"Target1: {_fmt_price(target)} ({label})  RR: {_fmt_rr(rr)}"
+                    )
                     confirm = s.get("confirmation_requirements") or "--"
-                    line4 = f"Confirm: {confirm}"
+                    line_confirm = f"[Confirmations]\nConfirm: {confirm}"
                     runner = s.get("extension_trigger") or ""
                     ext_tgt = s.get("extension_target")
                     ext_notes = s.get("extension_notes") or ""
-                    line5 = None
+                    runner_block = ""
                     if runner or ext_tgt is not None or ext_notes:
-                        ext_txt = f"{ext_tgt}" if ext_tgt is not None else "n/a"
-                        line5 = f"Runner: {runner} -> {ext_txt} ({ext_notes})"
-                    setup_lines.extend([line1, line2, line3, line4])
-                    if line5:
-                        setup_lines.append(line5)
-                    setup_lines.append("")  # spacer
-                setups_txt = "Setups:\n" + "\n".join(setup_lines).rstrip()
+                        ext_txt = _fmt_price(ext_tgt) if ext_tgt is not None else "n/a"
+                        runner_block = f"[Runner]\nRunner: {runner}\nNext: {ext_txt} — {ext_notes}"
+                    block_parts = [f"[Header]\n{header}", line_setup, line_confirm]
+                    if runner_block:
+                        block_parts.append(runner_block)
+                    block = "\n\n".join(block_parts)
+                    setup_lines.append(block.strip())
+                    if len(limited) > 1 and idx == 1:
+                        setup_lines.append("-----")
+                setups_txt = "\n\n".join(setup_lines)
             else:
                 setups_txt = "Setups:\n--"
         elif isinstance(rec, dict):
