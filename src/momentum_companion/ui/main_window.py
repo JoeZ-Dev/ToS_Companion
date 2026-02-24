@@ -321,6 +321,43 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception:
             self._logger.warning("LLM UI update failed (status widget missing)")
 
+    @QtCore.Slot(object)
+    def _on_llm_result_ready(self, payload: object) -> None:
+        """Handle LLM result payload emitted from controller."""
+        try:
+            data = payload if isinstance(payload, dict) else {}
+            parsed = data.get("parsed") if isinstance(data, dict) else None
+            error = data.get("error") if isinstance(data, dict) else None
+            symbol = data.get("symbol") if isinstance(data, dict) else None
+            ts_ms = data.get("as_of_ts_ms") if isinstance(data, dict) else None
+            model = data.get("model") if isinstance(data, dict) else None
+            if error:
+                rec_text = f"Recommendation: (LLM_PARSE_ERROR) {error}"
+            elif parsed:
+                validity = parsed.get("validity") or "--"
+                rating = parsed.get("setup_rating") or "--"
+                reasons = parsed.get("reason_codes") or []
+                summary = parsed.get("summary") or ""
+                rec_text = f"Recommendation: {validity} | {rating}"
+                if reasons:
+                    rec_text += f" | {', '.join(reasons)}"
+                if summary:
+                    rec_text += f"\nSummary: {summary}"
+            else:
+                rec_text = "Recommendation: --"
+            ts_txt = "--"
+            try:
+                if ts_ms:
+                    ts_txt = datetime.utcfromtimestamp(int(ts_ms) / 1000).strftime("%Y-%m-%d %H:%M:%S UTC")
+            except Exception:
+                ts_txt = "--"
+            status = f"LLM: {model or '--'} | {symbol or '--'} | Last: {ts_txt}"
+            self._logger.info("LLM UI update: setting recommendation text (len=%s)", len(rec_text))
+            self.set_llm_recommendation(rec_text)
+            self.set_llm_status_line(status)
+        except Exception:
+            self._logger.warning("Failed to handle LLM result payload", exc_info=True)
+
     def flash_alert(self, message: str) -> None:
         """Show flash-worthy alert."""
         self.llm_flash.setText(message)

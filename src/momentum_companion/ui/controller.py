@@ -100,6 +100,8 @@ class UIController:
         self._llm_prompt = self._default_developer_prompt()
         self._disable_rr_gate: bool = False
         self._model_signals = _ModelSignals()
+        self._llm_signals = _LLMSignals()
+        self._last_llm_payload: dict | None = None
         if hasattr(self._window, "populate_models"):
             # Single signal carries models + selections to enforce ordering
             self._model_signals.models_ready.connect(  # type: ignore[attr-defined]
@@ -140,6 +142,11 @@ class UIController:
             self._window.set_rr_gate_callback(self._set_rr_gate_disabled)  # type: ignore[attr-defined]
         if hasattr(self._window, "set_tz_callback"):
             self._window.set_tz_callback(self._on_display_tz_changed)  # type: ignore[attr-defined]
+        if hasattr(self._window, "_on_llm_result_ready"):
+            try:
+                self._llm_signals.llm_result_ready.connect(self._window._on_llm_result_ready)  # type: ignore[attr-defined]
+            except Exception:
+                self._logger.warning("Failed to connect LLM result signal to window", exc_info=True)
         if hasattr(self._window, "set_llm_full_callback"):
             self._window.set_llm_full_callback(self._run_llm_full)  # type: ignore[attr-defined]
         if hasattr(self._window, "set_llm_refresh_callback"):
@@ -373,16 +380,6 @@ class UIController:
         allow, rec = self._structural_rr_gate(normalized)
         if not allow:
             self._logger.info("LLM auto skip via structural gate for %s", symbol)
-            if hasattr(self._window, "apply_llm_recommendation"):
-                try:
-                    QtCore.QMetaObject.invokeMethod(
-                        self._window,
-                        "apply_llm_recommendation",
-                        QtCore.Qt.ConnectionType.QueuedConnection,
-                        QtCore.Q_ARG(dict, rec),  # type: ignore[arg-type]
-                    )
-                except Exception:
-                    pass
             return
         QtCore.QTimer.singleShot(0, lambda n=normalized: self._run_llm_from_snapshot(n, quote_event, is_first))
 
@@ -407,24 +404,13 @@ class UIController:
                 messages_override=messages,
             )  # type: ignore[attr-defined]
             rec = self._enforce_llm_output_consistency(rec, snapshot, model)
-            if hasattr(self._window, "apply_llm_recommendation"):
-                QtCore.QMetaObject.invokeMethod(
-                    self._window,
-                    "apply_llm_recommendation",
-                    QtCore.Qt.ConnectionType.QueuedConnection,
-                    QtCore.Q_ARG(dict, rec),  # type: ignore[arg-type]
-                )
-            QtCore.QMetaObject.invokeMethod(  # type: ignore[attr-defined]
-                self._window,
-                "set_llm_recommendation",
-                QtCore.Qt.ConnectionType.QueuedConnection,
-                QtCore.Q_ARG(str, self._format_llm_recommendation(rec)),
-            )
-            QtCore.QMetaObject.invokeMethod(  # type: ignore[attr-defined]
-                self._window,
-                "set_llm_status_line",
-                QtCore.Qt.ConnectionType.QueuedConnection,
-                QtCore.Q_ARG(str, self._format_llm_status(rec, model, snapshot.get("symbol"))),
+            self._emit_llm_result(
+                snapshot,
+                model,
+                invocation="AUTO",
+                parsed=rec,
+                raw_text=json.dumps(rec),
+                error=None,
             )
         except Exception:
             self._logger.exception("LLM evaluate failed")
@@ -799,12 +785,21 @@ class UIController:
                     content = ""
                 if not content:
                     content = json.dumps(resp)
+                parse_error = None
                 try:
                     rec = json.loads(content)
                 except Exception:
+                    parse_error = "LLM response not JSON"
                     rec = {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["DATA_STALE"], "summary": content}
                 rec = self._enforce_llm_output_consistency(rec, normalized, model)
-                QtCore.QTimer.singleShot(0, lambda r=rec, m=model, s=symbol: self._render_llm_to_ui(r, m, s))  # type: ignore[arg-type]
+                self._emit_llm_result(
+                    normalized,
+                    model,
+                    invocation="MANUAL",
+                    parsed=rec,
+                    raw_text=content,
+                    error=parse_error,
+                )
                 self._last_llm_ts[self._pending_symbol or ""] = time.time()
                 QtCore.QTimer.singleShot(0, lambda: self._refresh_llm_status())
             except Exception as e:
@@ -1572,23 +1567,6 @@ class UIController:
                 return resp
         return None
 
-    def _render_llm_to_ui(self, rec: dict, model: str, symbol: str | None) -> None:
-        """Render validated LLM output into the UI."""
-        try:
-            text = self._format_llm_recommendation(rec)
-            status = self._format_llm_status(rec, model, symbol)
-            self._logger.info("LLM UI update: setting recommendation text (len=%s)", len(text))
-            if hasattr(self._window, "set_llm_recommendation"):
-                self._window.set_llm_recommendation(text)  # type: ignore[attr-defined]
-            else:
-                self._logger.warning("LLM UI update skipped: set_llm_recommendation not found")
-            if hasattr(self._window, "set_llm_status_line"):
-                self._window.set_llm_status_line(status)  # type: ignore[attr-defined]
-            else:
-                self._logger.warning("LLM UI update skipped: set_llm_status_line not found")
-        except Exception:
-            self._logger.exception("Failed to render LLM recommendation to UI")
-
     def _format_llm_recommendation(self, rec: dict) -> str:
         validity = rec.get("validity") or "--"
         rating = rec.get("setup_rating") or "--"
@@ -1619,6 +1597,36 @@ class UIController:
         rating = rec.get("setup_rating") or "--"
         ts_txt = datetime.now(self._et_tz).strftime("%Y-%m-%d %H:%M:%S")
         return f"LLM: {model} | {symbol or '--'} | {validity} {rating} | {ts_txt}"
+
+    def _emit_llm_result(
+        self,
+        normalized_snapshot: dict,
+        model: str,
+        invocation: str,
+        parsed: dict | None,
+        raw_text: str,
+        error: str | None,
+    ) -> None:
+        payload = {
+            "symbol": normalized_snapshot.get("symbol"),
+            "as_of_ts_ms": normalized_snapshot.get("as_of_ts_ms"),
+            "model": model,
+            "invocation_type": normalized_snapshot.get("invocation_type") or invocation,
+            "parsed": parsed,
+            "raw_text": raw_text,
+            "error": error,
+        }
+        self._last_llm_payload = payload
+        self._logger.info(
+            "LLM UI payload emitted symbol=%s parsed_ok=%s error=%s",
+            payload.get("symbol"),
+            parsed is not None and error is None,
+            error,
+        )
+        try:
+            self._llm_signals.llm_result_ready.emit(payload)
+        except Exception:
+            self._logger.warning("Failed to emit LLM UI payload", exc_info=True)
 
     @staticmethod
     def _parse_shares_outstanding(payload: Any, symbol: str) -> float | None:
