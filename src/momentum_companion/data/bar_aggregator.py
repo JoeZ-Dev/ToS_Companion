@@ -16,6 +16,7 @@ ET_MARKET_OPEN_MS = (9 * 60 + 30) * 60 * 1000
 ET_MARKET_CLOSE_MS = 16 * 60 * 60 * 1000
 ET_AFTERHOURS_END_MS = 20 * 60 * 60 * 1000
 ET_TZ = ZoneInfo("America/New_York")
+VOLUME_NORM_MULTIPLIER = 12  # amplify 10s volumes to match 1m visual scale
 
 
 @dataclass
@@ -76,7 +77,7 @@ class BarAggregator10s:
         self._current_bar.close = update.price
         delta_vol = self._volume_delta(update)
         self._current_bar.volume += delta_vol
-        self._current_bar.volume_norm = self._current_bar.volume * (60 / WINDOW_SEC)
+        self._current_bar.volume_norm = self._current_bar.volume * VOLUME_NORM_MULTIPLIER
         self._current_bar.stale = (self._current_bar.stale) or is_stale
         return None
 
@@ -94,7 +95,7 @@ class BarAggregator10s:
         return replace(self._current_bar)
 
     def _start_bar(self, ts: int, price: float, volume: float, is_extended: bool) -> None:
-        vol_norm = volume * (60 / WINDOW_SEC)
+        vol_norm = volume * VOLUME_NORM_MULTIPLIER
         self._current_bar = TenSecondBar(
             ts=self._window_start if self._window_start is not None else ts,
             open=price,
