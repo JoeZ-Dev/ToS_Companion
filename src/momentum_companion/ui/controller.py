@@ -324,7 +324,9 @@ class UIController:
                             if snap:
                                 self._last_ae_snapshot = snap
                                 if hasattr(self._window, "update_ae_panel"):
-                                    self._window.update_ae_panel(snap)  # type: ignore[attr-defined]
+                                    QtCore.QTimer.singleShot(
+                                        0, lambda s=snap: self._window.update_ae_panel(s)  # type: ignore[attr-defined]
+                                    )
                                 self._maybe_invoke_llm(snap, event)
                     forming = self._aggregator.forming_bar()
                     sig = (
