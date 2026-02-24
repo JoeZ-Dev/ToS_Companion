@@ -746,8 +746,10 @@ class UIController:
             bars[0]["ts_ms"] if bars_len else None,
             bars[-1]["ts_ms"] if bars_len else None,
         )
+        prior_best_payload: dict | None = None
         if refresh_mode:
             compact_payload = self._build_refresh_payload(normalized)
+            prior_best_payload = compact_payload.get("prior_best_setup") if isinstance(compact_payload, dict) else None
             messages = self._build_llm_refresh_messages(compact_payload)
         else:
             messages = self._build_llm_messages(normalized)
