@@ -102,10 +102,12 @@ class UIController:
         self._refresh_model = "gpt-4o-mini"
         self._llm_prompt_version = "LLM_COACH_PROMPT_V1"
         self._llm_prompt = self._default_developer_prompt()
+        self._llm_prompt_refresh = self._default_developer_prompt_refresh()
         self._disable_rr_gate: bool = False
         self._model_signals = _ModelSignals()
         self._llm_signals = _LLMSignals()
         self._last_llm_payload: dict | None = None
+        self._last_llm_rec_by_symbol: dict[str, dict] = {}
         if hasattr(self._window, "populate_models"):
             # Single signal carries models + selections to enforce ordering
             self._model_signals.models_ready.connect(  # type: ignore[attr-defined]
@@ -703,12 +705,12 @@ class UIController:
             self._window.set_rr_gate_state(self._disable_rr_gate)
 
     def _run_llm_full(self) -> None:
-        self._run_llm_manual(self._full_model)
+        self._run_llm_manual(self._full_model, refresh_mode=False)
 
     def _run_llm_refresh(self) -> None:
-        self._run_llm_manual(self._refresh_model)
+        self._run_llm_manual(self._refresh_model, refresh_mode=True)
 
-    def _run_llm_manual(self, model: str) -> None:
+    def _run_llm_manual(self, model: str, refresh_mode: bool = False) -> None:
         """Invoke LLM with current snapshot using selected model."""
         if not self._llm_enabled:
             return
@@ -744,28 +746,44 @@ class UIController:
             bars[0]["ts_ms"] if bars_len else None,
             bars[-1]["ts_ms"] if bars_len else None,
         )
-        messages = self._build_llm_messages(normalized)
+        if refresh_mode:
+            compact_payload = self._build_refresh_payload(normalized)
+            messages = self._build_llm_refresh_messages(compact_payload)
+        else:
+            messages = self._build_llm_messages(normalized)
 
         def task() -> None:
             try:
                 self._logger.info(
-                    "LLM invoking model=%s for symbol=%s prompt_version=%s invocation=MANUAL bars_len=%s",
+                    "LLM invoking model=%s for symbol=%s prompt_version=%s invocation=%s bars_len=%s",
                     model,
                     symbol,
                     self._llm_prompt_version,
+                    "REFRESH" if refresh_mode else "MANUAL",
                     bars_len,
                 )
                 try:
-                    self._logger.info(
-                        "LLM payload sizes: system=%s dev=%s user=%s | previews: sys=%s ... dev=%s ... user=%s ...",
-                        len(messages[0].get("content", "")),
-                        len(messages[1].get("content", "")),
-                        len(messages[2].get("content", "")),
-                        messages[0].get("content", "")[:200],
-                        messages[1].get("content", "")[:200],
-                        messages[2].get("content", "")[:200],
-                    )
-                    self._logger.info("LLM payload messages: %s", json.dumps(messages, indent=2))
+                    if refresh_mode:
+                        self._logger.info(
+                            "LLM refresh payload sizes: system=%s dev=%s user=%s | previews: sys=%s ... dev=%s ... user=%s ...",
+                            len(messages[0].get("content", "")),
+                            len(messages[1].get("content", "")),
+                            len(messages[2].get("content", "")),
+                            messages[0].get("content", "")[:200],
+                            messages[1].get("content", "")[:200],
+                            messages[2].get("content", "")[:200],
+                        )
+                    else:
+                        self._logger.info(
+                            "LLM payload sizes: system=%s dev=%s user=%s | previews: sys=%s ... dev=%s ... user=%s ...",
+                            len(messages[0].get("content", "")),
+                            len(messages[1].get("content", "")),
+                            len(messages[2].get("content", "")),
+                            messages[0].get("content", "")[:200],
+                            messages[1].get("content", "")[:200],
+                            messages[2].get("content", "")[:200],
+                        )
+                        self._logger.info("LLM payload messages: %s", json.dumps(messages, indent=2))
                 except Exception:
                     self._logger.info("LLM payload messages (unformatted): %s", messages)
                 resp = client.complete(messages=messages, model_override=model)
@@ -1377,6 +1395,15 @@ class UIController:
             "- No trade validation logic. No risk gates. No null rules.\n"
         )
 
+    def _default_developer_prompt_refresh(self) -> str:
+        return (
+            "SETUP_DISCOVERY_REFRESH_V1\n"
+            "Return EXACTLY ONE JSON object in the SAME schema as full mode (stock_bias, summary, setups[]...).\n"
+            "Use prior_best_setup plus latest prices/levels to update triggers/targets/stops/RR if needed.\n"
+            "Summary must be <=2 sentences.\n"
+            "No markdown. No extra keys.\n"
+        )
+
     def _build_llm_messages(self, snapshot: dict) -> list[dict[str, str]]:
         system_text = (
             "You are the LLM Coach for a momentum day-trading assistant.\n"
@@ -1390,6 +1417,20 @@ class UIController:
         developer_text = self._llm_prompt or self._default_developer_prompt()
         normalized = self._normalize_snapshot_for_llm(snapshot)
         user_text = json.dumps(normalized, separators=(",", ":"), sort_keys=True)
+        return [
+            {"role": "system", "content": system_text},
+            {"role": "developer", "content": developer_text},
+            {"role": "user", "content": user_text},
+        ]
+
+    def _build_llm_refresh_messages(self, payload: dict) -> list[dict[str, str]]:
+        system_text = (
+            "You are the LLM Coach. Update the prior best setup using the latest prices/levels and small bar sample.\n"
+            "Keep the SAME JSON schema as full mode (stock_bias, summary, setups[]...).\n"
+            "Summary <=2 sentences. No markdown. JSON only."
+        )
+        developer_text = self._llm_prompt_refresh or self._default_developer_prompt_refresh()
+        user_text = json.dumps(payload, separators=(",", ":"), sort_keys=True)
         return [
             {"role": "system", "content": system_text},
             {"role": "developer", "content": developer_text},
@@ -1451,6 +1492,86 @@ class UIController:
                 return False
         return True
 
+    @staticmethod
+    def _rating_rank(rating: str) -> int:
+        order = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D"]
+        try:
+            return order.index(rating)
+        except Exception:
+            return len(order)
+
+    def _choose_best_setup(self, setups: list[dict] | None) -> dict | None:
+        if not setups:
+            return None
+        sorted_setups = sorted(
+            [s for s in setups if isinstance(s, dict)],
+            key=lambda s: (self._rating_rank(str(s.get("setup_rating", ""))), -(s.get("rr_to_target1") or 0)),
+        )
+        return sorted_setups[0] if sorted_setups else None
+
+    def _build_refresh_payload(self, snapshot: dict) -> dict:
+        quote = snapshot.get("quote") if isinstance(snapshot, dict) else {}
+        if not isinstance(quote, dict):
+            quote = {}
+        session_src = snapshot.get("session") if isinstance(snapshot, dict) else {}
+        if not isinstance(session_src, dict):
+            session_src = {}
+        micro_src = snapshot.get("micro") if isinstance(snapshot, dict) else {}
+        if not isinstance(micro_src, dict):
+            micro_src = {}
+        levels_src = snapshot.get("levels") if isinstance(snapshot, dict) else {}
+        if not isinstance(levels_src, dict):
+            levels_src = {}
+        bars = snapshot.get("bars_window") if isinstance(snapshot, dict) else []
+        recent_bars: list[dict] = []
+        if isinstance(bars, list):
+            recent_bars = bars[-3:] if len(bars) >= 3 else bars
+        symbol = snapshot.get("symbol")
+        prior = self._last_llm_rec_by_symbol.get(str(symbol)) if symbol else None
+        prior_best = self._choose_best_setup(prior.get("setups") if isinstance(prior, dict) else None)
+        prior_best_payload = (
+            {
+                "name": prior_best.get("name"),
+                "trigger_condition": prior_best.get("trigger_condition"),
+                "entry_trigger_price": prior_best.get("entry_trigger_price"),
+                "stop_price": prior_best.get("stop_price"),
+                "target_price": prior_best.get("target_price"),
+                "rr_to_target1": prior_best.get("rr_to_target1"),
+                "setup_rating": prior_best.get("setup_rating"),
+                "tape_warning": prior_best.get("tape_warning"),
+            }
+            if prior_best
+            else None
+        )
+        return {
+            "schema": "REFRESH_COMPACT_V1",
+            "symbol": symbol,
+            "as_of_ts_ms": snapshot.get("as_of_ts_ms"),
+            "quote": {
+                "last": quote.get("last"),
+                "bid": quote.get("bid"),
+                "ask": quote.get("ask"),
+                "volume": quote.get("volume"),
+            },
+            "vwap": snapshot.get("vwap"),
+            "session": {
+                "opening_range_high": session_src.get("opening_range_high"),
+                "opening_range_low": session_src.get("opening_range_low"),
+                "premarket_high": session_src.get("premarket_high"),
+                "premarket_low": session_src.get("premarket_low"),
+            },
+            "micro": {
+                "micro_resistance_15m": micro_src.get("micro_resistance_15m"),
+                "micro_support_15m": micro_src.get("micro_support_15m"),
+            },
+            "levels": {
+                "nearest_resistance": levels_src.get("nearest_resistance"),
+                "nearest_support": levels_src.get("nearest_support"),
+            },
+            "recent_bars": recent_bars,
+            "prior_best_setup": prior_best_payload,
+        }
+
     def _format_llm_recommendation(self, rec: dict) -> str:
         validity = rec.get("validity") or "--"
         rating = rec.get("setup_rating") or "--"
@@ -1507,6 +1628,9 @@ class UIController:
             parsed is not None and error is None,
             error,
         )
+        symbol = normalized_snapshot.get("symbol")
+        if symbol and parsed and isinstance(parsed, dict):
+            self._last_llm_rec_by_symbol[str(symbol)] = parsed
         try:
             self._llm_signals.llm_result_ready.emit(payload)
         except Exception:
