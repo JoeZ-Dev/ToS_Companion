@@ -28,6 +28,7 @@ class TenSecondBar:
     low: float
     close: float
     volume: float
+    volume_norm: float | None
     is_extended: bool
     stale: bool = False
 
@@ -91,6 +92,7 @@ class BarAggregator10s:
         return replace(self._current_bar)
 
     def _start_bar(self, ts: int, price: float, volume: float, is_extended: bool) -> None:
+        vol_norm = volume * (60 / WINDOW_SEC)
         self._current_bar = TenSecondBar(
             ts=self._window_start if self._window_start is not None else ts,
             open=price,
@@ -98,6 +100,7 @@ class BarAggregator10s:
             low=price,
             close=price,
             volume=volume,
+            volume_norm=vol_norm,
             is_extended=is_extended,
             stale=False,
         )
