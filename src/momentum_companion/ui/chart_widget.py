@@ -171,7 +171,8 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                   if(!bar||bar.time===undefined){{return null;}}
                   const up=bar.close===undefined||bar.open===undefined?true:(bar.close>=bar.open);
                   const color=up?'rgba(38,166,154,0.28)':'rgba(239,83,80,0.28)';
-                  return {{time:bar.time,value:bar.volume||0,color}};
+                  const volVal = (bar.volume_norm!==undefined && bar.volume_norm!==null) ? bar.volume_norm : bar.volume;
+                  return {{time:bar.time,value:volVal||0,color}};
                 }}
                 function updateLastPriceLine(bar){{
                   if(!bar||bar.close===undefined){{return;}}
