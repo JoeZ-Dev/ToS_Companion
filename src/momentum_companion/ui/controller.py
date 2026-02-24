@@ -1032,6 +1032,27 @@ class UIController:
             if isinstance(c, list) and c:
                 bars_raw = c
                 break
+        if (not bars_raw or not isinstance(bars_raw, list)) and self._bars:
+            try:
+                bars_raw = []
+                for b in self._bars:
+                    if not isinstance(b, dict):
+                        continue
+                    t = b.get("time")
+                    if t is None:
+                        continue
+                    bars_raw.append(
+                        {
+                            "ts_ms": int(t) * 1000,
+                            "o": b.get("open"),
+                            "h": b.get("high"),
+                            "l": b.get("low"),
+                            "c": b.get("close"),
+                            "v": b.get("volume"),
+                        }
+                    )
+            except Exception:
+                bars_raw = None
         if not bars_raw or not isinstance(bars_raw, list):
             return []
         compact: list[dict] = []
