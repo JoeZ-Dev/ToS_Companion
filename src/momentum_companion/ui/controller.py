@@ -1001,6 +1001,7 @@ class UIController:
             "premarket_low": session_src.get("premarket_low"),
             "opening_range_high": session_src.get("opening_range_high"),
             "opening_range_low": session_src.get("opening_range_low"),
+            "open_price": session_src.get("open_price"),
         }
         micro_src = snapshot.get("micro") if isinstance(snapshot, dict) else {}
         if not isinstance(micro_src, dict):
@@ -1372,6 +1373,7 @@ class UIController:
             '      "stop_price": number,\n'
             '      "target_price": number,\n'
             '      "rr_to_target1": number,\n'
+            '      "move_pct_to_target1": number,\n'
             '      "setup_rating": "A+|A|A-|B+|B|B-|C+|C|C-|D",\n'
             '      "confirmation_requirements": string,\n'
             '      "target1_label": string,\n'
@@ -1391,8 +1393,15 @@ class UIController:
             "    * rr_to_target1 < 1.0  -> setup_rating cannot be above C+\n"
             "    * 1.0 <= rr_to_target1 < 1.2 -> setup_rating cannot be above B-\n"
             "    * rr_to_target1 >= 1.2 -> rating may be B, B+, A-, etc based on structure/volume quality\n"
+            "- Additional caps based on move_pct_to_target1 = (target_price - entry_trigger_price) / entry_trigger_price:\n"
+            "    * move_pct_to_target1 < 0.05 -> setup_rating cannot be above B-\n"
+            "    * 0.05 <= move_pct_to_target1 < 0.10 -> setup_rating cannot be above A-\n"
+            "    * A+ requires move_pct_to_target1 >= 0.10\n"
+            "- VWAP rule (based on entry_trigger_price vs vwap): if entry_trigger_price < vwap, cap at B max (no A+), and mention reclaim/hold behavior in trigger/confirmations.\n"
+            "- Volume rule (no market-hours bias): A or A+ requires trigger/confirmations to reference volume expansion/continuation, and recent ~3 bars should show rising/elevated volume; otherwise cap at B+.\n"
             "- Do NOT hard-gate on RR; rate appropriately instead.\n"
             "- Compute rr_to_target1 = (target_price - entry_trigger_price) / (entry_trigger_price - stop_price). If risk<=0 or reward<=0, do not include the setup.\n"
+            "- Compute move_pct_to_target1 = (target_price - entry_trigger_price) / entry_trigger_price and include it for every setup.\n"
             "- Detect tape_warning via bars_window: if in last 20 bars there are 2+ breakouts of a recent local high/resistance followed by >=50% retrace within 1–3 bars, set SPIKEY_PULLBACKS; else NONE.\n"
             "- If tape_warning=SPIKEY_PULLBACKS, cap setup_rating at B- unless trigger is explicitly break+hold/retest, and confirmation_requirements must include hold/retest (not just volume).\n"
             "- Entry must be trigger-based (not vague).\n"
@@ -1409,9 +1418,10 @@ class UIController:
             "SETUP_DISCOVERY_REFRESH_V1\n"
             "Return EXACTLY ONE JSON object in the SAME schema as full mode (stock_bias, summary, setups[]...).\n"
             'stock_bias MUST be one of: "HAS_POTENTIAL" | "NO_EDGE".\n'
-            "Every setup MUST include ALL required keys: name, trigger_condition, entry_trigger_price, stop_price, target_price, rr_to_target1, setup_rating, confirmation_requirements, target1_label, extension_trigger, extension_target, extension_notes, tape_warning.\n"
+            "Every setup MUST include ALL required keys: name, trigger_condition, entry_trigger_price, stop_price, target_price, rr_to_target1, move_pct_to_target1, setup_rating, confirmation_requirements, target1_label, extension_trigger, extension_target, extension_notes, tape_warning.\n"
             "If you do not change a field, copy it from prior_best_setup. Do not omit fields.\n"
             "Use prior_best_setup plus latest prices/levels to update triggers/targets/stops/RR if needed.\n"
+            "Rating caps must match full mode: rr_to_target1 caps; move_pct_to_target1 caps (B- max <5%, A- max <10%, A+ only if >=10%); VWAP cap (if entry_trigger_price<vwap cap at B and mention reclaim/hold); A/A+ requires volume expansion in triggers/confirmations and rising recent volume; otherwise cap at B+.\n"
             "Summary must be <=2 sentences.\n"
             "No markdown. No extra keys.\n"
             "Self-check: ensure every setup has all required keys; ensure stock_bias is one of the two enums.\n"
@@ -1469,6 +1479,7 @@ class UIController:
                 "stop_price",
                 "target_price",
                 "rr_to_target1",
+                "move_pct_to_target1",
                 "setup_rating",
                 "confirmation_requirements",
                 "target1_label",
@@ -1492,6 +1503,7 @@ class UIController:
             if not isinstance(setup.get("extension_notes"), str):
                 return False
             num_fields = ("entry_trigger_price", "stop_price", "target_price", "rr_to_target1")
+            num_fields = ("entry_trigger_price", "stop_price", "target_price", "rr_to_target1", "move_pct_to_target1")
             for field in num_fields:
                 val = setup.get(field)
                 if not isinstance(val, (int, float)):
@@ -1661,6 +1673,17 @@ class UIController:
                         s["setup_rating"] = prior.get("setup_rating")
                     else:
                         s["setup_rating"] = "C+"
+                # compute move_pct_to_target1 if missing
+                if s.get("move_pct_to_target1") is None:
+                    try:
+                        entry = s.get("entry_trigger_price")
+                        target = s.get("target_price")
+                        if entry is not None and target is not None and float(entry) != 0:
+                            s["move_pct_to_target1"] = (float(target) - float(entry)) / float(entry)
+                    except Exception:
+                        pass
+                if s.get("move_pct_to_target1") is None and prior and prior.get("move_pct_to_target1") is not None:
+                    s["move_pct_to_target1"] = prior.get("move_pct_to_target1")
         return rec
 
     def _format_llm_recommendation(self, rec: dict) -> str:

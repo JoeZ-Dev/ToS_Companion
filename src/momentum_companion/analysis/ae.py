@@ -539,6 +539,7 @@ class AEEngine:
                 "premarket_low": premarket_low_val,
                 "opening_range_high": or_high_val,
                 "opening_range_low": or_low_val,
+                "open_price": session_open_val if session_open_val else None,
                 "gap_pct": ((session_open_val - prior_close) / prior_close * 100) if prior_close and session_open_val else None,
             },
             "bars_window_5m": bars_window_5m,
