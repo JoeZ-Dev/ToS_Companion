@@ -91,6 +91,8 @@ class UIController:
         self._ae_engine = ae_engine or AEEngine(rest_client, Path(db_path) if db_path else None)
         self._last_ae_snapshot: dict | None = None
         self._logger = logging.getLogger(__name__)
+        # Enable verbose debug logs to investigate stability issues (e.g., render/LLM flow).
+        self._logger.setLevel(logging.DEBUG)
         self._et_tz = ZoneInfo("America/New_York")
         self._intraday_suppressed = False
         self._last_llm_ts: dict[str, float] = {}
