@@ -1441,7 +1441,7 @@ class UIController:
             for field in num_fields:
                 val = setup.get(field)
                 if not isinstance(val, (int, float)):
-                return False
+                    return False
             ext_target = setup.get("extension_target")
             if ext_target is not None and not isinstance(ext_target, (int, float)):
                 return False
