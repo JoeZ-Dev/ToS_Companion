@@ -186,6 +186,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.llm_prices.setWordWrap(True)
         self.llm_prices.setStyleSheet("color: #bdc3c7;")
         llm_layout.addWidget(self.llm_prices)
+        self.llm_summary = QtWidgets.QLabel("Summary: --")
+        self.llm_summary.setWordWrap(True)
+        self.llm_summary.setStyleSheet("color: #ecf0f1;")
+        llm_layout.addWidget(self.llm_summary)
+        self.llm_setups = QtWidgets.QLabel("Setups:\n--")
+        self.llm_setups.setWordWrap(True)
+        self.llm_setups.setStyleSheet("color: #ecf0f1;")
+        llm_layout.addWidget(self.llm_setups)
         self.llm_status_line = QtWidgets.QLabel("LLM Status: --")
         self.llm_status_line.setWordWrap(True)
         self.llm_status_line.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum)
@@ -307,13 +315,102 @@ class MainWindow(QtWidgets.QMainWindow):
         self.update_quote_display(bid, ask, last, int(ts_ms) if ts_ms else None)
 
     def apply_llm_recommendation(self, rec: dict) -> None:
-        """Render basic LLM recommendation text."""
-        validity = rec.get("validity", "--")
-        rating = rec.get("setup_rating", "--")
-        entry = rec.get("entry_price")
-        stop = rec.get("stop_loss")
-        target = rec.get("target_price")
-        self.llm_reco.setText(f"LLM: {validity} | Rating {rating} | Entry {entry} Stop {stop} Target {target}")
+        """Render LLM recommendation text using the latest schema (with fallback for legacy)."""
+        reco_txt = "LLM: --"
+        summary_txt = "Summary: --"
+        prices_txt = "Entry/Stop/Target: --"
+        setups_txt = "Setups:\n--"
+
+        if isinstance(rec, dict) and "setups" in rec and "stock_bias" in rec:
+            stock_bias = rec.get("stock_bias") or "NO_EDGE"
+            setups = rec.get("setups") if isinstance(rec.get("setups"), list) else []
+            best = self._choose_best_setup(setups)
+            if best:
+                rating = best.get("setup_rating") or "--"
+                tape = best.get("tape_warning") or "NONE"
+                reco_txt = f"LLM: {rating} | {tape}"
+                entry = best.get("entry_trigger_price")
+                stop = best.get("stop_price")
+                target = best.get("target_price")
+                rr = best.get("rr_to_target1")
+                label = best.get("target1_label") or "--"
+                try:
+                    if all(v is not None for v in (entry, stop, target, rr)):
+                        prices_txt = (
+                            f"Entry (trigger): {float(entry):.4f} | Stop: {float(stop):.4f} | "
+                            f"Target1: {float(target):.4f} ({label}) | RR: {float(rr):.2f}"
+                        )
+                except Exception:
+                    prices_txt = "Entry/Stop/Target: --"
+            else:
+                reco_txt = f"LLM: {stock_bias} | --"
+            summary_txt = f"Summary: {rec.get('summary') or '--'}"
+            if setups:
+                setup_lines: list[str] = []
+                for s in setups[:2]:
+                    rating = s.get("setup_rating") or "--"
+                    name = s.get("name") or "--"
+                    tape = s.get("tape_warning") or "NONE"
+                    line1 = f"{rating} - {name} [{tape}]"
+                    trig = s.get("trigger_condition") or "--"
+                    line2 = f"Trigger: {trig}"
+                    entry = s.get("entry_trigger_price")
+                    stop = s.get("stop_price")
+                    target = s.get("target_price")
+                    rr = s.get("rr_to_target1")
+                    label = s.get("target1_label") or "--"
+                    try:
+                        line3 = (
+                            f"Entry: {float(entry):.4f} | Stop: {float(stop):.4f} | "
+                            f"Target1: {float(target):.4f} ({label}) | RR: {float(rr):.2f}"
+                        )
+                    except Exception:
+                        line3 = "Entry/Stop/Target: --"
+                    confirm = s.get("confirmation_requirements") or "--"
+                    line4 = f"Confirm: {confirm}"
+                    runner = s.get("extension_trigger") or ""
+                    ext_tgt = s.get("extension_target")
+                    ext_notes = s.get("extension_notes") or ""
+                    line5 = None
+                    if runner or ext_tgt is not None or ext_notes:
+                        ext_txt = f"{ext_tgt}" if ext_tgt is not None else "n/a"
+                        line5 = f"Runner: {runner} -> {ext_txt} ({ext_notes})"
+                    setup_lines.extend([line1, line2, line3, line4])
+                    if line5:
+                        setup_lines.append(line5)
+                    setup_lines.append("")  # spacer
+                setups_txt = "Setups:\n" + "\n".join(setup_lines).rstrip()
+            else:
+                setups_txt = "Setups:\n--"
+        elif isinstance(rec, dict):
+            validity = rec.get("validity", "--")
+            rating = rec.get("setup_rating", "--")
+            entry = rec.get("entry_price")
+            stop = rec.get("stop_loss")
+            target = rec.get("target_price")
+            self.llm_reco.setText(f"LLM: {validity} | Rating {rating} | Entry {entry} Stop {stop} Target {target}")
+            if hasattr(self, "llm_prices") and self.llm_prices:
+                try:
+                    if all(v is not None for v in (entry, stop, target)):
+                        self.llm_prices.setText(
+                            f"Entry {float(entry):.4f} | Stop {float(stop):.4f} | Target {float(target):.4f}"
+                        )
+                    else:
+                        self.llm_prices.setText("Entry/Stop/Target: --")
+                except Exception:
+                    self.llm_prices.setText("Entry/Stop/Target: --")
+            if hasattr(self, "llm_summary") and self.llm_summary:
+                self.llm_summary.setText("Summary: --")
+            if hasattr(self, "llm_setups") and self.llm_setups:
+                self.llm_setups.setText("Setups:\n--")
+            return
+        self.llm_reco.setText(reco_txt)
+        if hasattr(self, "llm_summary") and self.llm_summary:
+            self.llm_summary.setText(summary_txt)
+        if hasattr(self, "llm_prices") and self.llm_prices:
+            self.llm_prices.setText(prices_txt)
+        if hasattr(self, "llm_setups") and self.llm_setups:
+            self.llm_setups.setText(setups_txt)
 
     def set_llm_recommendation(self, text: str) -> None:
         """Set human-readable LLM recommendation text."""
@@ -329,6 +426,23 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception:
             self._logger.warning("LLM UI update failed (status widget missing)")
 
+    @staticmethod
+    def _rating_rank(rating: str) -> int:
+        order = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D"]
+        try:
+            return order.index(rating)
+        except Exception:
+            return len(order)
+
+    def _choose_best_setup(self, setups: list[dict]) -> dict | None:
+        if not setups:
+            return None
+        sorted_setups = sorted(
+            [s for s in setups if isinstance(s, dict)],
+            key=lambda s: (self._rating_rank(str(s.get("setup_rating", ""))), -(s.get("rr_to_target1") or 0)),
+        )
+        return sorted_setups[0] if sorted_setups else None
+
     @QtCore.Slot(object)
     def _on_llm_result_ready(self, payload: object) -> None:
         """Handle LLM result payload emitted from controller."""
@@ -339,18 +453,11 @@ class MainWindow(QtWidgets.QMainWindow):
             symbol = data.get("symbol") if isinstance(data, dict) else None
             ts_ms = data.get("as_of_ts_ms") if isinstance(data, dict) else None
             model = data.get("model") if isinstance(data, dict) else None
+            rec_text: str | None = None
             if error:
                 rec_text = f"Recommendation: (LLM_PARSE_ERROR) {error}"
             elif parsed:
-                validity = parsed.get("validity") or "--"
-                rating = parsed.get("setup_rating") or "--"
-                reasons = parsed.get("reason_codes") or []
-                summary = parsed.get("summary") or ""
-                rec_text = f"Recommendation: {validity} | {rating}"
-                if reasons:
-                    rec_text += f" | {', '.join(reasons)}"
-                if summary:
-                    rec_text += f"\nSummary: {summary}"
+                self.apply_llm_recommendation(parsed)
             else:
                 rec_text = "Recommendation: --"
             ts_txt = "--"
@@ -362,26 +469,10 @@ class MainWindow(QtWidgets.QMainWindow):
             except Exception:
                 ts_txt = "--"
             status = f"LLM: {model or '--'} | {symbol or '--'} | Last: {ts_txt}"
-            self._logger.info("LLM UI update: setting recommendation text (len=%s)", len(rec_text))
-            self.set_llm_recommendation(rec_text)
+            if rec_text is not None:
+                self._logger.info("LLM UI update: setting recommendation text (len=%s)", len(rec_text))
+                self.set_llm_recommendation(rec_text)
             self.set_llm_status_line(status)
-            # Prices line
-            prices_txt = "Entry/Stop/Target: --"
-            try:
-                if parsed and parsed.get("validity") == "VALID_FOR_TRADING":
-                    entry = parsed.get("entry_price")
-                    stop = parsed.get("stop_loss")
-                    target = parsed.get("target_price")
-                    rr = parsed.get("risk_reward")
-                    if all(v is not None for v in (entry, stop, target, rr)):
-                        prices_txt = (
-                            f"Entry {float(entry):.4f} | Stop {float(stop):.4f} | "
-                            f"Target {float(target):.4f} | RR {float(rr):.2f}"
-                        )
-            except Exception:
-                prices_txt = "Entry/Stop/Target: --"
-            if hasattr(self, "llm_prices") and self.llm_prices:
-                self.llm_prices.setText(prices_txt)
         except Exception:
             self._logger.warning("Failed to handle LLM result payload", exc_info=True)
 
