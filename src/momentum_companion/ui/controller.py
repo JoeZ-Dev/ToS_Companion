@@ -32,6 +32,10 @@ class _ModelSignals(QtCore.QObject):
     models_ready = QtCore.Signal(object, str, str)
 
 
+class _LLMSignals(QtCore.QObject):
+    llm_result_ready = QtCore.Signal(object)
+
+
 class UIController:
     """Coordinates UI state, signals/slots, and renders updates (§4.1)."""
 
