@@ -352,7 +352,9 @@ class MainWindow(QtWidgets.QMainWindow):
             ts_txt = "--"
             try:
                 if ts_ms:
-                    ts_txt = datetime.utcfromtimestamp(int(ts_ms) / 1000).strftime("%Y-%m-%d %H:%M:%S UTC")
+                    ts_dt = datetime.fromtimestamp(int(ts_ms) / 1000, self._display_tz)
+                    tz_label = getattr(self._display_tz, "key", "tz")
+                    ts_txt = ts_dt.strftime(f"%Y-%m-%d %H:%M:%S {tz_label}")
             except Exception:
                 ts_txt = "--"
             status = f"LLM: {model or '--'} | {symbol or '--'} | Last: {ts_txt}"
