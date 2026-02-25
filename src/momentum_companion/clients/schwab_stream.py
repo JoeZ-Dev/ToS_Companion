@@ -12,6 +12,8 @@ from momentum_companion.clients.stream_mapping import LevelOneCache
 from momentum_companion.data.contracts import QuoteEvent
 from momentum_companion.journal.writer import JournalWriter
 from momentum_companion.utils.logging import logging
+from websocket import WebSocketConnectionClosedException
+from momentum_companion.utils.logging import logging
 
 logger = logging.getLogger(__name__)
 
@@ -121,9 +123,13 @@ class SchwabStreamClient:
         return (now_ms - self._last_ts_ms) <= 5_000
 
     def _auth_token(self) -> str:
+        # Prefer streaming token from streamerInfo; fallback to OAuth token if absent.
+        token = self._streamer_info.get("token") or self._streamer_info.get("access_token", "")
+        if token:
+            return token
         if self._token_provider:
             return self._token_provider()
-        return self._streamer_info.get("access_token", "")
+        return ""
 
     def _on_token_refreshed(self, tokens: dict) -> None:
         """Refresh listener: restart stream with new token."""
@@ -149,7 +155,17 @@ class SchwabStreamClient:
                 "SchwabClientFunctionId": self._streamer_info["schwabClientFunctionId"],
             },
         }
-        ws.send(json.dumps(login_msg))
+        if not getattr(ws, "sock", None):
+            logger.error("Stream login skipped: socket not connected")
+            self._emit_state("ERROR")
+            self._attempt_reconnect()
+            return
+        try:
+            ws.send(json.dumps(login_msg))
+        except WebSocketConnectionClosedException:
+            logger.error("Stream login failed: socket closed")
+            self._emit_state("ERROR")
+            self._attempt_reconnect()
 
     def _on_message(self, ws: websocket.WebSocketApp, message: str) -> None:
         if ws is not self._ws:
@@ -204,6 +220,7 @@ class SchwabStreamClient:
             return
         logger.error("Stream error: %s", error)
         self._emit_state("ERROR")
+        self._attempt_reconnect()
 
     def _on_close(self, ws: websocket.WebSocketApp, close_status_code: int, close_msg: str) -> None:
         if ws is not self._ws:

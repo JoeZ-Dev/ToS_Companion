@@ -311,6 +311,9 @@ class UIController:
         try:
             prefs = self._rest_client.get_user_preference()
             streamer_info = prefs[0]["streamerInfo"][0] if isinstance(prefs, list) else prefs["streamerInfo"][0]
+            # Ensure we pass the streaming token explicitly if provided.
+            if "token" not in streamer_info and "streamerInfo" in streamer_info:
+                streamer_info["token"] = streamer_info["streamerInfo"].get("token")  # type: ignore[index]
         except Exception:
             self._window.banner.setText("Failed to load streamer info")
             return None
