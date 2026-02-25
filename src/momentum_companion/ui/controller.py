@@ -349,8 +349,14 @@ class UIController:
     def _set_massive_field(self, kind: str, status: str, value: float | int | None, as_of: str | None) -> None:
         if hasattr(self._window, "update_massive_fundamental"):
             self._logger.debug("Massive UI update kind=%s status=%s value=%s as_of=%s", kind, status, value, as_of)
-            QtCore.QTimer.singleShot(
-                0, lambda k=kind, s=status, v=value, d=as_of: self._window.update_massive_fundamental(k, s, v, d)
+            QtCore.QMetaObject.invokeMethod(
+                self._window,
+                "update_massive_fundamental",
+                QtCore.Qt.ConnectionType.QueuedConnection,
+                QtCore.Q_ARG(str, kind),
+                QtCore.Q_ARG(str, status),
+                QtCore.Q_ARG(object, value),
+                QtCore.Q_ARG(object, as_of),
             )
 
     def _fetch_massive_fundamentals(self, symbol: str) -> None:
