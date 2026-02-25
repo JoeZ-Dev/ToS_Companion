@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 import threading
 import os
+import base64
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlencode, urlparse, parse_qs
 
@@ -19,7 +20,8 @@ def _basic_auth() -> str:
     cs = os.environ.get("SCHWAB_CLIENT_SECRET")
     if not cid or not cs:
         raise RuntimeError("Set SCHWAB_CLIENT_ID and SCHWAB_CLIENT_SECRET")
-    return httpx.BasicAuth(cid, cs).auth_header  # type: ignore[attr-defined]
+    token = base64.b64encode(f"{cid}:{cs}".encode()).decode()
+    return f"Basic {token}"
 
 
 def build_auth_url(state: str) -> str:

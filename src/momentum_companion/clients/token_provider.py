@@ -166,7 +166,8 @@ class TokenProvider:
             return
         url = self._auth_helper_url.rstrip("/") + "/access_token"
         try:
-            resp = httpx.get(url, timeout=10.0)
+            # Allow helper endpoint to redirect (e.g., via reverse-proxy rules).
+            resp = httpx.get(url, timeout=10.0, follow_redirects=True)
             if resp.status_code == 200:
                 data = resp.json()
                 self._helper_cache = {
