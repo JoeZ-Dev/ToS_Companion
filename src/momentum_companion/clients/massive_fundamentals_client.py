@@ -107,10 +107,8 @@ class MassiveFundamentalsClient:
             parsed = self._maybe_json(resp)
             results = parsed.get("results") if isinstance(parsed, dict) else None
             if resp.status_code == 404:
-                self._logger.info(
-                    "Massive float endpoint not found (404) — likely not enabled for this API key/plan",
-                )
                 data = {"status": "NOT_AVAILABLE", "value": None, "as_of": None}
+                self._logger.info("Massive float endpoint not found (404) — likely not enabled for this API key/plan")
                 self._cache_set(cache_key, data)
                 return data
             if not isinstance(results, list) or not results or not self._has_keys(results[0], ("free_float", "effective_date")):
