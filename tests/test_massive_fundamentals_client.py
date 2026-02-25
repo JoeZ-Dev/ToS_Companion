@@ -52,16 +52,28 @@ def test_sanitize_no_api_key_in_logs(tmp_path, caplog) -> None:
 
 def test_404_text_body_maps_failure(tmp_path) -> None:
     resp1 = _StubResp("404 Not Found", status_code=404)
-    resp2 = _StubResp(json.dumps({"results": [{"free_float": 9, "effective_date": "2025-01-01"}]}), status_code=200)
     client = MassiveFundamentalsClient("k", tmp_path, None)
     client._session = _StubSession(
-        [resp1, resp2],
+        [resp1],
         urls=[
             f"{client.BASE_URL}{client.MASSIVE_FLOAT_PATH}",
-            f"{client.BASE_URL_POLYGON}{client.MASSIVE_FLOAT_PATH}",
         ],
     )  # type: ignore[attr-defined]
     data = client.fetch_float("SYM")
-    assert data["status"] == "OK"
-    assert data["value"] == 9
-    assert client._session.calls == 2  # type: ignore[attr-defined]
+    assert data["status"] == "NOT_AVAILABLE"
+    assert client._session.calls == 1  # type: ignore[attr-defined]
+
+
+def test_not_available_cached(tmp_path) -> None:
+    resp1 = _StubResp("404 Not Found", status_code=404)
+    client = MassiveFundamentalsClient("k", tmp_path, None)
+    client._session = _StubSession(
+        [resp1],
+        urls=[f"{client.BASE_URL}{client.MASSIVE_FLOAT_PATH}"],
+    )  # type: ignore[attr-defined]
+    data1 = client.fetch_float("SYM")
+    assert data1["status"] == "NOT_AVAILABLE"
+    # second call should hit cache (no new network calls)
+    data2 = client.fetch_float("SYM")
+    assert data2["status"] == "NOT_AVAILABLE"
+    assert client._session.calls == 1  # type: ignore[attr-defined]
