@@ -171,6 +171,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.llm_toggle = QtWidgets.QPushButton("Enable LLM")
         self.llm_toggle.setCheckable(True)
         self.llm_toggle.setChecked(False)
+        self.llm_toggle.setStyleSheet("background-color: #6b1b1b; color: #f5eaea;")
         llm_top.addWidget(self.llm_status)
         llm_top.addWidget(self.llm_toggle)
         llm_top.addStretch()
