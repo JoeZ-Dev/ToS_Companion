@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import logging
 
 
 class MassiveFundamentalsClient:
@@ -18,6 +19,7 @@ class MassiveFundamentalsClient:
         self._cache_dir = cache_dir
         self._cache_path = cache_dir / "massive_cache.json"
         self._logger = logger
+        logging.getLogger("httpx").setLevel(logging.WARNING)
         self._session = httpx.Client(timeout=httpx.Timeout(10.0, connect=5.0))
         self._cache: dict[str, Any] = {}
         try:
@@ -53,6 +55,12 @@ class MassiveFundamentalsClient:
             return "FAILURE"
         return "OK"
 
+    @staticmethod
+    def _has_keys(rec: dict | None, keys: tuple[str, ...]) -> bool:
+        if not isinstance(rec, dict):
+            return False
+        return all(k in rec for k in keys)
+
     def fetch_float(self, symbol: str) -> dict:
         cache_key = f"float:{symbol}"
         cached = self._cache_get(cache_key, self.FLOAT_TTL_SEC)
@@ -69,8 +77,15 @@ class MassiveFundamentalsClient:
             }
             try:
                 resp = self._session.get(url, params=params)
-                results = resp.json().get("results") if resp.content else None
-                status = self._status_from_resp(resp, results if isinstance(results, list) else None)
+                try:
+                    results = resp.json().get("results") if resp.content else None
+                except (json.JSONDecodeError, ValueError):
+                    self._logger.debug("Massive float decode failed ep=%s", ep, exc_info=True)
+                    continue
+                if not isinstance(results, list) or not results or not self._has_keys(results[0], ("free_float", "effective_date")):
+                    self._logger.debug("Massive float shape invalid ep=%s", ep)
+                    continue
+                status = self._status_from_resp(resp, results)
                 self._logger.info(
                     "Massive float fetch status=%s symbol=%s ep=%s latency_ms=%s",
                     status,
@@ -79,7 +94,7 @@ class MassiveFundamentalsClient:
                     int(resp.elapsed.total_seconds() * 1000),
                 )
                 if status != "OK":
-                    return {"status": status, "value": None, "as_of": None}
+                    continue
                 rec = results[0] if results else {}
                 data = {"status": "OK", "value": rec.get("free_float"), "as_of": rec.get("effective_date")}
                 self._cache_set(cache_key, data)
@@ -89,7 +104,7 @@ class MassiveFundamentalsClient:
                 continue
             except Exception:
                 self._logger.debug("Massive float fetch failed ep=%s", ep, exc_info=True)
-                return {"status": "FAILURE", "value": None, "as_of": None}
+                continue
         return {"status": "FAILURE", "value": None, "as_of": None}
 
     def fetch_short_interest(self, symbol: str) -> dict:
@@ -106,8 +121,14 @@ class MassiveFundamentalsClient:
         }
         try:
             resp = self._session.get(url, params=params)
-            results = resp.json().get("results") if resp.content else None
-            status = self._status_from_resp(resp, results if isinstance(results, list) else None)
+            try:
+                results = resp.json().get("results") if resp.content else None
+            except (json.JSONDecodeError, ValueError):
+                self._logger.debug("Massive short_interest decode failed", exc_info=True)
+                return {"status": "FAILURE", "value": None, "as_of": None}
+            if not isinstance(results, list) or not results or not self._has_keys(results[0], ("short_interest", "settlement_date")):
+                return {"status": "FAILURE", "value": None, "as_of": None}
+            status = self._status_from_resp(resp, results)
             self._logger.info(
                 "Massive short_interest fetch status=%s symbol=%s latency_ms=%s",
                 status,
@@ -146,8 +167,20 @@ class MassiveFundamentalsClient:
         for label, params in attempts:
             try:
                 resp = self._session.get(url, params=params)
-                results = resp.json().get("results") if resp.content else None
-                status = self._status_from_resp(resp, results if isinstance(results, list) else None)
+                try:
+                    results = resp.json().get("results") if resp.content else None
+                except (json.JSONDecodeError, ValueError):
+                    self._logger.debug("Massive short_volume decode failed (%s)", label, exc_info=True)
+                    if label == "latest":
+                        return {"status": "FAILURE", "value": None, "as_of": None}
+                    continue
+                if not isinstance(results, list) or not results or not self._has_keys(results[0], ("short_volume_ratio", "date")):
+                    if label == "latest":
+                        status = self._status_from_resp(resp, results if isinstance(results, list) else None)
+                        return {"status": status, "value": None, "as_of": None}
+                    self._logger.info("Massive short_volume today empty; falling back to latest")
+                    continue
+                status = self._status_from_resp(resp, results)
                 self._logger.info(
                     "Massive short_volume fetch status=%s symbol=%s attempt=%s latency_ms=%s",
                     status,
