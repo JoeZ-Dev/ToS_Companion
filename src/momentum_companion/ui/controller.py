@@ -114,6 +114,7 @@ class UIController:
         self._llm_signals = _LLMSignals()
         self._last_llm_payload: dict | None = None
         self._last_llm_rec_by_symbol: dict[str, dict] = {}
+        self._bars_1m: list[dict] = []
         if hasattr(self._window, "populate_models"):
             # Single signal carries models + selections to enforce ordering
             self._model_signals.models_ready.connect(  # type: ignore[attr-defined]
@@ -194,6 +195,7 @@ class UIController:
         self._window.connection_label.setText("Connection: REQUESTED")
         self._window.banner.setText(f"Requested symbol: {symbol}")
         self._load_history(symbol)
+        self._load_bars_1m(symbol)
         if self._ae_engine:
             self._ae_engine.compute_profile(symbol)
             snap = self._ae_engine.seed_intraday_from_history(symbol)
@@ -237,6 +239,41 @@ class UIController:
         except Exception as exc:  # noqa: BLE001
             self._window.banner.setText(f"History load failed for {symbol}")
             self._window.connection_label.setText("Connection: HISTORY ERROR")
+
+    def _load_bars_1m(self, symbol: str) -> None:
+        """Fetch last ~90 minutes of 1m bars for LLM microstructure."""
+        self._bars_1m = []
+        if not self._rest_client:
+            return
+        try:
+            end_ms = int(time.time() * 1000)
+            start_ms = end_ms - 90 * 60 * 1000
+            resp = self._rest_client.fetch_price_history(symbol, start_ms, end_ms, "1m")
+            candles = resp.get("candles") or []
+            bars: list[dict] = []
+            for c in candles:
+                if c.get("datetime") is None:
+                    continue
+                try:
+                    bars.append(
+                        {
+                            "ts_ms": int(c.get("datetime")),
+                            "o": float(c.get("open")),
+                            "h": float(c.get("high")),
+                            "l": float(c.get("low")),
+                            "c": float(c.get("close")),
+                            "v": float(c.get("volume") or 0),
+                        }
+                    )
+                except Exception:
+                    continue
+            bars = sorted(bars, key=lambda b: b.get("ts_ms") or 0)
+            if len(bars) > 60:
+                bars = bars[-60:]
+            self._bars_1m = bars
+            self._logger.debug("Loaded 1m bars for %s count=%s", symbol, len(bars))
+        except Exception:
+            self._logger.debug("Failed to load 1m bars for %s", symbol, exc_info=True)
 
     def _fetch_candles(self, symbol: str, start_ms: int | None, end_ms: int | None, freq: str) -> list[dict]:
         resp = self._rest_client.fetch_price_history(symbol, start_ms, end_ms, freq)
@@ -482,7 +519,7 @@ class UIController:
         quote = normalized.get("quote") or {}
         levels = normalized.get("levels") or {}
         micro = normalized.get("micro") or {}
-        bars = normalized.get("bars_window") or []
+        bars = normalized.get("bars_5m") or []
         closes: list[float] = []
         if isinstance(bars, list):
             for b in bars[-10:]:
@@ -819,13 +856,16 @@ class UIController:
         barish_keys = [k for k in snap_keys if "bar" in k.lower() or "ohlc" in k.lower() or "candle" in k.lower() or "5m" in k.lower()]
         self._logger.debug("LLM source snapshot keys: %s | bar-related: %s", snap_keys, barish_keys)
         normalized = self._normalize_snapshot_for_llm(self._last_ae_snapshot)
-        bars = normalized.get("bars_window") if isinstance(normalized, dict) else None
+        bars = normalized.get("bars_5m") if isinstance(normalized, dict) else None
         bars_len = len(bars) if isinstance(bars, list) else 0
+        bars_1m = normalized.get("bars_1m") if isinstance(normalized, dict) else None
+        bars_1m_len = len(bars_1m) if isinstance(bars_1m, list) else 0
         levels_info = normalized.get("levels") or {}
         self._logger.info(
-            "LLM normalized snapshot keys=%s bars_window_len=%s levels_fields=%s bars_ts=%s..%s",
+            "LLM normalized snapshot keys=%s bars_5m_len=%s bars_1m_len=%s levels_fields=%s bars_ts=%s..%s",
             list(normalized.keys()),
             bars_len,
+            bars_1m_len,
             list(levels_info.keys()) if isinstance(levels_info, dict) else None,
             bars[0]["ts_ms"] if bars_len else None,
             bars[-1]["ts_ms"] if bars_len else None,
@@ -1102,6 +1142,9 @@ class UIController:
             "micro_state": micro_src.get("micro_state"),
         }
         bars_window = self._extract_bars_window(snapshot)
+        bars_5m = bars_window
+        bars_1m = self._bars_1m
+        bars_1m_quality = "ok" if isinstance(bars_1m, list) and len(bars_1m) >= 60 else "partial"
         norm = {
             "schema_version": snapshot.get("schema_version", "AE-1.1"),
             "status": snapshot.get("status", "ok"),
@@ -1111,7 +1154,10 @@ class UIController:
             "session_mode": session_mode,
             "market_state": market_state,
             "quote": quote,
-            "bars_window": bars_window,
+            "bars_window": bars_5m,
+            "bars_5m": bars_5m,
+            "bars_1m": bars_1m,
+            "bars_1m_quality": bars_1m_quality,
             "invocation_type": snapshot.get("invocation_type", "MANUAL_RECALC"),
             "in_position": snapshot.get("in_position", False),
             "side": "LONG" if snapshot.get("in_position") else None,
@@ -1268,10 +1314,10 @@ class UIController:
             missing.append("quote.last")
         if bid is None and ask is None:
             missing.append("quote.bid/ask")
-        bars = normalized.get("bars_window") if isinstance(normalized, dict) else None
+        bars = normalized.get("bars_5m") if isinstance(normalized, dict) else normalized.get("bars_window")
         bars_len = len(bars) if isinstance(bars, list) else 0
         if not isinstance(bars, list) or bars_len < self._BARS_WINDOW_MIN_READY:
-            missing.append("bars_window")
+            missing.append("bars_5m")
         return (len(missing) == 0, missing)
 
     def _build_structural_plan(self, payload: dict) -> dict:
@@ -1489,13 +1535,14 @@ class UIController:
             "    * A+ requires move_pct_to_target1 >= 0.10\n"
             "- VWAP rule (based on entry_trigger_price vs vwap): if entry_trigger_price < vwap, cap at B max (no A+), and mention reclaim/hold behavior in trigger/confirmations.\n"
             "- Volume rule (no market-hours bias): A or A+ requires trigger/confirmations to reference volume expansion/continuation, and recent ~3 bars should show rising/elevated volume; otherwise cap at B+.\n"
-            "- Only claim \"volume expansion\" or \"elevated volume\" if: (a) the most recent completed bar volume > each of the prior 2 bars, OR (b) the most recent completed bar volume >= 1.5x median volume of last 10 bars; otherwise use neutral wording.\n"
+            "- Only claim \"volume expansion\" or \"elevated volume\" if: (a) the most recent completed 1m bar volume > each of the prior 2 1m bars, OR (b) the most recent completed 1m bar volume >= 1.5x median volume of last 10 1m bars; otherwise use neutral wording.\n"
             "- Do NOT hard-gate on RR; rate appropriately instead.\n"
             "- Compute rr_to_target1 = (target_price - entry_trigger_price) / (entry_trigger_price - stop_price). If risk<=0 or reward<=0, do not include the setup.\n"
             "- Compute move_pct_to_target1 = (target_price - entry_trigger_price) / entry_trigger_price and include it for every setup.\n"
-            "- Detect tape_warning via bars_window: set SPIKEY_PULLBACKS only if in last 20 bars there are 2+ failed breakouts (price trades above local high/resistance, closes back below within 1–3 bars, retraces >=50% of breakout bar) AND those fails occur on elevated volume vs neighboring bars; else NONE.\n"
+            "- Detect tape_warning via bars_1m: set SPIKEY_PULLBACKS only if in last 20 1m bars there are 2+ failed breakouts (price trades above local high/resistance, closes back below within 1–3 bars, retraces >=50% of breakout bar) AND those fails occur on elevated volume vs neighboring bars; else NONE.\n"
             "- If tape_warning=SPIKEY_PULLBACKS, cap setup_rating at B- unless trigger is explicitly break+hold/retest, and confirmation_requirements must include hold/retest (not just volume).\n"
             "- Entry must be trigger-based (not vague).\n"
+            "- Use bars_5m for structure/regime context; use bars_1m for triggers/tape_warning/volume checks.\n"
             "- target1_label must strictly correspond to the structural source of target_price:\n"
             "    * If target_price equals levels.nearest_resistance.price -> target1_label=\"nearest_resistance\"\n"
             "    * If target_price equals micro.micro_resistance_15m -> target1_label=\"micro_resistance_15m\"\n"
@@ -1504,6 +1551,7 @@ class UIController:
             "    * If target_price matches a recent bar high from bars_window -> target1_label=\"swing_high\"\n"
             "- No freeform labels allowed.\n"
             "- If target1_label=\"swing_high\", target_price MUST match an exact high value from a bar in bars_window (within 0.2% tolerance). Do not round or fabricate structural levels.\n"
+            "- Relevance: if proposing a reclaim setup (e.g., reclaim ORH/premarket_high), that level must have traded in the last 30 bars_1m or current price must be within ~8% of that level; otherwise do not propose that setup.\n"
             "- extension_trigger describes what must happen to treat it as a runner (e.g., 1m close above target1 with volume expansion).\n"
             "- extension_target must be above target_price for longs; otherwise set extension_target=null and extension_notes should state 'No higher structural level provided'.\n"
             "- Ratings are based on rr_to_target1, not extension potential.\n"
@@ -1520,7 +1568,8 @@ class UIController:
             "If you do not change a field, copy it from prior_best_setup. Do not omit fields.\n"
             "Use prior_best_setup plus latest prices/levels to update triggers/targets/stops/RR if needed.\n"
             "Rating caps must match full mode: rr_to_target1 caps; move_pct_to_target1 caps (B- max <5%, A- max <10%, A+ only if >=10%); VWAP cap (if entry_trigger_price<vwap cap at B and mention reclaim/hold); A/A+ requires volume expansion in triggers/confirmations and rising recent volume; otherwise cap at B+.\n"
-            "- Only claim \"volume expansion\" or \"elevated volume\" if: (a) the most recent completed bar volume > each of the prior 2 bars, OR (b) the most recent completed bar volume >= 1.5x median volume of last 10 bars; otherwise use neutral wording.\n"
+            "- Only claim \"volume expansion\" or \"elevated volume\" if: (a) the most recent completed 1m bar volume > each of the prior 2 1m bars, OR (b) the most recent completed 1m bar volume >= 1.5x median volume of last 10 1m bars; otherwise use neutral wording.\n"
+            "- Use bars_5m for structure/regime context; use bars_1m for triggers/tape_warning/volume checks.\n"
             "- target1_label must strictly correspond to the structural source of target_price:\n"
             "    * If target_price equals levels.nearest_resistance.price -> target1_label=\"nearest_resistance\"\n"
             "    * If target_price equals micro.micro_resistance_15m -> target1_label=\"micro_resistance_15m\"\n"
