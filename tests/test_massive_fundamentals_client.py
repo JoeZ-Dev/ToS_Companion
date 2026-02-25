@@ -20,14 +20,17 @@ class _StubResp:
 
 
 class _StubSession:
-    def __init__(self, responses) -> None:
+    def __init__(self, responses, urls=None) -> None:
         self._responses = responses
+        self._urls = urls or []
         self.calls = 0
 
     def get(self, url, params=None):  # noqa: ANN001
-        resp = self._responses[self.calls]
+        idx = self.calls
         self.calls += 1
-        return resp
+        if self._urls:
+            assert self._urls[idx] == url
+        return self._responses[idx]
 
 
 def test_float_fallback_on_bad_json(tmp_path, caplog) -> None:
@@ -48,9 +51,17 @@ def test_sanitize_no_api_key_in_logs(tmp_path, caplog) -> None:
 
 
 def test_404_text_body_maps_failure(tmp_path) -> None:
-    resp = _StubResp("404 Not Found", status_code=404)
+    resp1 = _StubResp("404 Not Found", status_code=404)
+    resp2 = _StubResp(json.dumps({"results": [{"free_float": 9, "effective_date": "2025-01-01"}]}), status_code=200)
     client = MassiveFundamentalsClient("k", tmp_path, None)
-    client._session = _StubSession([resp])  # type: ignore[attr-defined]
+    client._session = _StubSession(
+        [resp1, resp2],
+        urls=[
+            f"{client.BASE_URL}{client.MASSIVE_FLOAT_PATH}",
+            f"{client.BASE_URL_POLYGON}{client.MASSIVE_FLOAT_PATH}",
+        ],
+    )  # type: ignore[attr-defined]
     data = client.fetch_float("SYM")
-    assert data["status"] == "FAILURE"
-    assert client._session.calls == 1  # type: ignore[attr-defined]
+    assert data["status"] == "OK"
+    assert data["value"] == 9
+    assert client._session.calls == 2  # type: ignore[attr-defined]
