@@ -71,7 +71,11 @@ class MassiveFundamentalsClient:
 
     def _maybe_json(self, resp: httpx.Response) -> dict | None:
         headers = getattr(resp, "headers", {}) or {}
-        ctype = headers.get("content-type", "").lower() if isinstance(headers, dict) else ""
+        try:
+            ctype = headers.get("content-type", "")  # httpx.Headers supports get
+        except Exception:
+            ctype = ""
+        ctype = ctype.lower() if isinstance(ctype, str) else ""
         if "json" not in ctype:
             return None
         try:
