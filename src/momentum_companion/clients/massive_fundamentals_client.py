@@ -167,7 +167,7 @@ class MassiveFundamentalsClient:
         url = "https://api.massive.com/stocks/v1/short-interest"
         params = {
             "ticker": symbol,
-            "limit": 1,
+            "limit": 10,
             "sort": "settlement_date.desc",
             "apiKey": self._api_key,
         }
@@ -204,12 +204,21 @@ class MassiveFundamentalsClient:
         attempts = []
         if today:
             attempts.append(
-                ("today", {"date": today, "limit": 1, "apiKey": self._api_key, "ticker": symbol})
+                (
+                    "today",
+                    {
+                        "date": today,
+                        "limit": 10,
+                        "sort": "date.desc",
+                        "apiKey": self._api_key,
+                        "ticker": symbol,
+                    },
+                )
             )
         attempts.append(
             (
                 "latest",
-                {"limit": 1, "sort": "date.desc", "apiKey": self._api_key, "ticker": symbol},
+                {"limit": 10, "sort": "date.desc", "apiKey": self._api_key, "ticker": symbol},
             )
         )
         url = "https://api.massive.com/stocks/v1/short-volume"
