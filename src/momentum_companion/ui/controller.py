@@ -615,7 +615,10 @@ class UIController:
         return True
 
     def _on_stream_state(self, state: str) -> None:
-        """Update UI with stream state transitions."""
+        """Update UI with stream state transitions (marshal to UI thread)."""
+        QtCore.QTimer.singleShot(0, lambda s=state: self._update_stream_state_ui(s))
+
+    def _update_stream_state_ui(self, state: str) -> None:
         self._window.stream_label.setText(f"Stream: {state}")
         if state in {"DOWN", "STREAM_DOWN", "LOGIN_FAILED"}:
             self._window.banner.setText("Stream unavailable. Check auth/connection.")
