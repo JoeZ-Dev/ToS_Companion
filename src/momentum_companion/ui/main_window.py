@@ -335,6 +335,7 @@ class MainWindow(QtWidgets.QMainWindow):
         human = _fmt_human_shares(shares_outstanding)
         self.quote_float.setText(f"Float: {human}")
 
+    @QtCore.Slot(str, str, object, object)
     def update_massive_fundamental(self, kind: str, status: str, value: float | int | None, as_of: str | None) -> None:
         logging.getLogger(__name__).debug(
             "Massive panel render kind=%s status=%s value=%s as_of=%s", kind, status, value, as_of
