@@ -14,6 +14,7 @@ from momentum_companion.clients.oauth_flow import OAuthFlow, BOUNCE_REDIRECT_URI
 
 TOKEN_PATH = Path.home() / ".tos_companion" / "tokens.json"
 TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token"
+DEFAULT_AUTH_HELPER_URL = "http://companion-auth.p3l.co"
 
 
 class TokenProvider:
@@ -34,7 +35,7 @@ class TokenProvider:
         self._refresh_event.set()
         self._refresh_listeners: List[Callable[[dict], None]] = []
         self._state_callback = state_callback
-        self._auth_helper_url = os.environ.get("AUTH_HELPER_URL")
+        self._auth_helper_url = os.environ.get("AUTH_HELPER_URL") or DEFAULT_AUTH_HELPER_URL
         self._helper_cache: dict = {}
         self._client_id = os.environ.get("SCHWAB_CLIENT_ID")
         self._client_secret = os.environ.get("SCHWAB_CLIENT_SECRET")
