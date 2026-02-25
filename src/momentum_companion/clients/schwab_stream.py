@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Callable, Optional
 
 import websocket
+from websocket import WebSocketConnectionClosedException
 
 from momentum_companion.clients.stream_mapping import LevelOneCache
 from momentum_companion.data.contracts import QuoteEvent
@@ -45,6 +46,7 @@ class SchwabStreamClient:
         self._reconnecting = False
         self._reconnect_thread: Optional[threading.Thread] = None
         self._closing = False
+        self._streamer_info_lock = threading.Lock()
         if hasattr(self._token_provider, "add_refresh_listener"):
             try:
                 self._token_provider.add_refresh_listener(self._on_token_refreshed)  # type: ignore[attr-defined]
@@ -143,6 +145,7 @@ class SchwabStreamClient:
     def _on_open(self, ws: websocket.WebSocketApp) -> None:
         if ws is not self._ws:
             return
+        sock = getattr(ws, "sock", None)
         login_msg = {
             "service": "ADMIN",
             "command": "LOGIN",
@@ -155,8 +158,9 @@ class SchwabStreamClient:
                 "SchwabClientFunctionId": self._streamer_info["schwabClientFunctionId"],
             },
         }
-        if not getattr(ws, "sock", None):
+        if not sock:
             logger.error("Stream login skipped: socket not connected")
+            self._cleanup_socket(ws)
             self._emit_state("ERROR")
             self._attempt_reconnect()
             return
@@ -164,6 +168,7 @@ class SchwabStreamClient:
             ws.send(json.dumps(login_msg))
         except WebSocketConnectionClosedException:
             logger.error("Stream login failed: socket closed")
+            self._cleanup_socket(ws)
             self._emit_state("ERROR")
             self._attempt_reconnect()
 
@@ -219,6 +224,7 @@ class SchwabStreamClient:
         if ws is not self._ws:
             return
         logger.error("Stream error: %s", error)
+        self._cleanup_socket(ws)
         self._emit_state("ERROR")
         self._attempt_reconnect()
 
@@ -229,6 +235,7 @@ class SchwabStreamClient:
         self._connected = False
         self._emit_state("DISCONNECTED")
         if not self._closing:
+            self._cleanup_socket(ws)
             self._attempt_reconnect()
 
     def _attempt_reconnect(self) -> None:
@@ -242,6 +249,8 @@ class SchwabStreamClient:
             for delay in backoffs:
                 time.sleep(delay)
                 try:
+                    # Refresh streamer info before reconnecting in case a new token is issued.
+                    self._refresh_streamer_info()
                     self.connect()
                     if self._active_symbol:
                         self.subscribe_level_one(self._active_symbol)
@@ -269,6 +278,22 @@ class SchwabStreamClient:
 
         self._reconnect_thread = threading.Thread(target=_worker, daemon=True, name="schwab-stream-reconnect")
         self._reconnect_thread.start()
+
+    def _refresh_streamer_info(self) -> None:
+        if not self._token_provider or not hasattr(self._token_provider, "interactive_login"):
+            return
+        # TokenProvider does not expose streamer info; ensure we keep the existing info.
+        # Placeholder for future expansion if streamer info can be refreshed here.
+        return
+
+    def _cleanup_socket(self, ws: websocket.WebSocketApp) -> None:
+        if ws is self._ws:
+            try:
+                ws.close()
+            except Exception:
+                pass
+            self._ws = None
+            self._connected = False
 
     def _emit_state(self, state: str) -> None:
         self._connection_state = state
