@@ -32,13 +32,10 @@ class _StubSession:
 
 def test_float_fallback_on_bad_json(tmp_path, caplog) -> None:
     bad = _StubResp("xxxx", status_code=200, elapsed=0.01)
-    good = _StubResp(json.dumps({"results": [{"free_float": 5, "effective_date": "2025-01-01"}]}), status_code=200, elapsed=0.02)
     client = MassiveFundamentalsClient("k", tmp_path, caplog)
-    client._session = _StubSession([bad, good])  # type: ignore[attr-defined]
+    client._session = _StubSession([bad])  # type: ignore[attr-defined]
     data = client.fetch_float("SYM")
-    assert data["status"] == "OK"
-    assert data["value"] == 5
-    assert client._session.calls == 2  # type: ignore[attr-defined]
+    assert data["status"] == "FAILURE"
 
 
 def test_sanitize_no_api_key_in_logs(tmp_path, caplog) -> None:
@@ -56,3 +53,4 @@ def test_404_text_body_maps_failure(tmp_path) -> None:
     client._session = _StubSession([resp])  # type: ignore[attr-defined]
     data = client.fetch_float("SYM")
     assert data["status"] == "FAILURE"
+    assert client._session.calls == 1  # type: ignore[attr-defined]

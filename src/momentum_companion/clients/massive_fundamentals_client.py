@@ -10,6 +10,8 @@ import logging
 
 
 class MassiveFundamentalsClient:
+    BASE_URL = "https://api.massive.com"
+    MASSIVE_FLOAT_PATH = "/stocks/fundamentals/float"
     FLOAT_TTL_SEC = 24 * 60 * 60
     SHORT_INTEREST_TTL_SEC = 7 * 24 * 60 * 60
     SHORT_VOL_TTL_SEC = 5 * 60
@@ -93,47 +95,43 @@ class MassiveFundamentalsClient:
         cached = self._cache_get(cache_key, self.FLOAT_TTL_SEC)
         if cached:
             return cached
-        endpoints = ["/stocks/v1/float", "/stocks/v2/float"]
-        for ep in endpoints:
-            url = f"https://api.massive.com{ep}"
-            params = {
-                "ticker": symbol,
-                "limit": 1,
-                "sort": "effective_date.desc",
-                "apiKey": self._api_key,
-            }
-            try:
-                resp = self._session.get(url, params=params)
-                parsed = self._maybe_json(resp)
-                results = parsed.get("results") if isinstance(parsed, dict) else None
-                if not isinstance(results, list) or not results or not self._has_keys(results[0], ("free_float", "effective_date")):
-                    self._log_debug_failure(ep, resp)
-                    if resp.status_code == 404:
-                        break
-                    continue
-                status = self._status_from_resp(resp, results)
-                self._logger.info(
-                    "Massive float fetch status=%s symbol=%s ep=%s latency_ms=%s",
-                    status,
-                    symbol,
-                    ep,
-                    int(resp.elapsed.total_seconds() * 1000),
-                )
-                if status != "OK":
-                    if resp.status_code == 404:
-                        break
-                    continue
-                rec = results[0] if results else {}
-                data = {"status": "OK", "value": rec.get("free_float"), "as_of": rec.get("effective_date")}
-                self._cache_set(cache_key, data)
-                return data
-            except (httpx.TimeoutException, httpx.RequestError):
-                # retry only on next ep
-                continue
-            except Exception:
-                self._logger.debug("Massive float fetch failed ep=%s", ep, exc_info=True)
-                continue
-        return {"status": "FAILURE", "value": None, "as_of": None}
+        ep = self.MASSIVE_FLOAT_PATH
+        url = f"{self.BASE_URL}{ep}"
+        params = {
+            "ticker": symbol,
+            "limit": 1,
+            "sort": "effective_date.desc",
+            "apiKey": self._api_key,
+        }
+        try:
+            resp = self._session.get(url, params=params)
+            parsed = self._maybe_json(resp)
+            results = parsed.get("results") if isinstance(parsed, dict) else None
+            if not isinstance(results, list) or not results or not self._has_keys(results[0], ("free_float", "effective_date")):
+                if resp.status_code == 404:
+                    self._logger.info("Massive float endpoint not found (404) — verify endpoint route / base URL")
+                    return {"status": "FAILURE", "value": None, "as_of": None}
+                self._log_debug_failure(ep, resp)
+                return {"status": "FAILURE", "value": None, "as_of": None}
+            status = self._status_from_resp(resp, results)
+            self._logger.info(
+                "Massive float fetch status=%s symbol=%s ep=%s latency_ms=%s",
+                status,
+                symbol,
+                ep,
+                int(resp.elapsed.total_seconds() * 1000),
+            )
+            if status != "OK":
+                return {"status": status, "value": None, "as_of": None}
+            rec = results[0] if results else {}
+            data = {"status": "OK", "value": rec.get("free_float"), "as_of": rec.get("effective_date")}
+            self._cache_set(cache_key, data)
+            return data
+        except (httpx.TimeoutException, httpx.RequestError):
+            return {"status": "FAILURE", "value": None, "as_of": None}
+        except Exception:
+            self._logger.debug("Massive float fetch failed ep=%s", ep, exc_info=True)
+            return {"status": "FAILURE", "value": None, "as_of": None}
 
     def fetch_short_interest(self, symbol: str) -> dict:
         cache_key = f"short_interest:{symbol}"
