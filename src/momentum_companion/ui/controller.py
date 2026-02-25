@@ -634,10 +634,13 @@ class UIController:
 
     def _on_llm_toggle(self, checked: bool) -> None:
         self._llm_enabled = checked
-        if hasattr(self._window, "llm_status"):
-            self._window.llm_status.setText("LLM: ON" if checked else "LLM: OFF")
-        if hasattr(self._window, "llm_toggle"):
-            self._window.llm_toggle.setText("Disable LLM" if checked else "Enable LLM")
+        if hasattr(self._window, "update_llm_toggle_button"):
+            try:
+                self._window.update_llm_toggle_button(checked)  # type: ignore[attr-defined]
+            except Exception:
+                self._logger.warning("Failed to update LLM toggle visuals", exc_info=True)
+        elif hasattr(self._window, "llm_toggle"):
+            self._window.llm_toggle.setText("LLM ON" if checked else "LLM OFF")
         self._refresh_llm_status()
 
     def _open_options(self) -> None:

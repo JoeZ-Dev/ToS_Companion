@@ -167,11 +167,10 @@ class MainWindow(QtWidgets.QMainWindow):
         llm_layout = QtWidgets.QVBoxLayout()
         llm_layout.setSpacing(4)
         llm_top = QtWidgets.QHBoxLayout()
-        self.llm_status = QtWidgets.QLabel("LLM: OFF")
-        self.llm_toggle = QtWidgets.QPushButton("Enable LLM")
+        self.llm_toggle = QtWidgets.QPushButton("LLM OFF")
         self.llm_toggle.setCheckable(True)
         self.llm_toggle.setChecked(False)
-        llm_top.addWidget(self.llm_status)
+        self.update_llm_toggle_button(False)
         llm_top.addWidget(self.llm_toggle)
         llm_top.addStretch()
         llm_layout.addLayout(llm_top)
@@ -493,6 +492,24 @@ class MainWindow(QtWidgets.QMainWindow):
     def flash_alert(self, message: str) -> None:
         """Show flash-worthy alert."""
         self.llm_flash.setText(message)
+
+    def update_llm_toggle_button(self, enabled: bool) -> None:
+        """Sync LLM toggle text and color to state."""
+        if not hasattr(self, "llm_toggle"):
+            return
+        self.llm_toggle.setText("LLM ON" if enabled else "LLM OFF")
+        if enabled:
+            self.llm_toggle.setStyleSheet(
+                "QPushButton { background-color: #1f7a3d; color: #ecf0f1; border: 1px solid #1b5e2b; padding: 6px 10px; } "
+                "QPushButton:hover { background-color: #238a46; } "
+                "QPushButton:pressed { background-color: #1b5e2b; }"
+            )
+        else:
+            self.llm_toggle.setStyleSheet(
+                "QPushButton { background-color: #6b1b1b; color: #f5eaea; border: 1px solid #7a2a2a; padding: 6px 10px; } "
+                "QPushButton:hover { background-color: #7f2222; } "
+                "QPushButton:pressed { background-color: #5c1616; }"
+            )
 
     def show_options_dialog(self) -> None:
         if self._options_dialog is None:
