@@ -47,6 +47,7 @@ class SchwabStreamClient:
         self._reconnect_thread: Optional[threading.Thread] = None
         self._closing = False
         self._streamer_info_lock = threading.Lock()
+        self._auth_source = "unknown"
         if hasattr(self._token_provider, "add_refresh_listener"):
             try:
                 self._token_provider.add_refresh_listener(self._on_token_refreshed)  # type: ignore[attr-defined]
@@ -128,9 +129,12 @@ class SchwabStreamClient:
         # Prefer streaming token from streamerInfo; fallback to OAuth token if absent.
         token = self._streamer_info.get("token") or self._streamer_info.get("access_token", "")
         if token:
+            self._auth_source = "streamer_token"
             return token
         if self._token_provider:
+            self._auth_source = "oauth_bearer"
             return self._token_provider()
+        self._auth_source = "missing"
         return ""
 
     def _on_token_refreshed(self, tokens: dict) -> None:
@@ -146,6 +150,7 @@ class SchwabStreamClient:
         if ws is not self._ws:
             return
         sock = getattr(ws, "sock", None)
+        logger.info("Stream login attempt using %s", self._auth_source)
         login_msg = {
             "service": "ADMIN",
             "command": "LOGIN",
@@ -231,7 +236,7 @@ class SchwabStreamClient:
     def _on_close(self, ws: websocket.WebSocketApp, close_status_code: int, close_msg: str) -> None:
         if ws is not self._ws:
             return
-        logger.warning("Stream closed code=%s msg=%s", close_status_code, close_msg)
+        logger.warning("Stream closed code=%s msg=%s (auth=%s)", close_status_code, close_msg, self._auth_source)
         self._connected = False
         self._emit_state("DISCONNECTED")
         if not self._closing:
@@ -245,7 +250,7 @@ class SchwabStreamClient:
         self._emit_state("RECONNECTING")
 
         def _worker() -> None:
-            backoffs = [1, 2, 4, 8, 16, 32]
+            backoffs = [1, 2, 4, 8]
             for delay in backoffs:
                 time.sleep(delay)
                 try:
