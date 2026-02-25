@@ -150,6 +150,7 @@ class SchwabStreamClient:
         if ws is not self._ws:
             return
         sock = getattr(ws, "sock", None)
+        token = self._auth_token()
         logger.info("Stream login attempt using %s", self._auth_source)
         login_msg = {
             "service": "ADMIN",
@@ -158,7 +159,7 @@ class SchwabStreamClient:
             "SchwabClientCustomerId": self._streamer_info["schwabClientCustomerId"],
             "SchwabClientCorrelId": self._streamer_info["schwabClientCorrelId"],
             "parameters": {
-                "Authorization": self._auth_token(),
+                "Authorization": token,
                 "SchwabClientChannel": self._streamer_info["schwabClientChannel"],
                 "SchwabClientFunctionId": self._streamer_info["schwabClientFunctionId"],
             },
