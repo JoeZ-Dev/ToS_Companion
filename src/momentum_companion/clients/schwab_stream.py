@@ -39,6 +39,10 @@ class SchwabStreamClient:
         self._connection_state: str = "DISCONNECTED"
         self._journal = journal
         self._state_callback = state_callback
+        self._conn_id = 0
+        self._reconnecting = False
+        self._reconnect_thread: Optional[threading.Thread] = None
+        self._closing = False
         if hasattr(self._token_provider, "add_refresh_listener"):
             try:
                 self._token_provider.add_refresh_listener(self._on_token_refreshed)  # type: ignore[attr-defined]
@@ -51,6 +55,9 @@ class SchwabStreamClient:
         url = self._streamer_info.get("streamerSocketUrl", "")
         if not url:
             raise ValueError("Missing streamerSocketUrl")
+        self._closing = False
+        self._conn_id += 1
+        conn_id = self._conn_id
         self._ws = websocket.WebSocketApp(
             url,
             on_open=self._on_open,
@@ -58,7 +65,8 @@ class SchwabStreamClient:
             on_error=self._on_error,
             on_close=self._on_close,
         )
-        self._thread = threading.Thread(target=self._ws.run_forever, daemon=True)
+        self._thread = threading.Thread(target=self._ws.run_forever, daemon=True, kwargs={"sslopt": {"check_hostname": False}})
+        self._thread.name = f"schwab-stream-{conn_id}"
         self._thread.start()
 
     def subscribe_level_one(self, symbol: str) -> None:
@@ -93,6 +101,7 @@ class SchwabStreamClient:
     def disconnect(self) -> None:
         """Close the stream connection."""
         if self._ws:
+            self._closing = True
             self._ws.close()
         self._connected = False
         self._emit_state("DISCONNECTED")
@@ -126,6 +135,8 @@ class SchwabStreamClient:
 
     # Internal callbacks
     def _on_open(self, ws: websocket.WebSocketApp) -> None:
+        if ws is not self._ws:
+            return
         login_msg = {
             "service": "ADMIN",
             "command": "LOGIN",
@@ -141,6 +152,8 @@ class SchwabStreamClient:
         ws.send(json.dumps(login_msg))
 
     def _on_message(self, ws: websocket.WebSocketApp, message: str) -> None:
+        if ws is not self._ws:
+            return
         try:
             payload = json.loads(message)
         except json.JSONDecodeError:
@@ -187,43 +200,58 @@ class SchwabStreamClient:
                     self._on_quote(event)
 
     def _on_error(self, ws: websocket.WebSocketApp, error: Exception) -> None:
+        if ws is not self._ws:
+            return
         logger.error("Stream error: %s", error)
         self._emit_state("ERROR")
 
     def _on_close(self, ws: websocket.WebSocketApp, close_status_code: int, close_msg: str) -> None:
+        if ws is not self._ws:
+            return
         logger.warning("Stream closed code=%s msg=%s", close_status_code, close_msg)
         self._connected = False
         self._emit_state("DISCONNECTED")
-        self._attempt_reconnect()
+        if not self._closing:
+            self._attempt_reconnect()
 
     def _attempt_reconnect(self) -> None:
+        if self._reconnecting:
+            return
+        self._reconnecting = True
         self._emit_state("RECONNECTING")
-        backoffs = [1, 2, 4, 8, 16, 32]
-        for delay in backoffs:
-            time.sleep(delay)
-            try:
-                self.connect()
-                if self._active_symbol:
-                    self.subscribe_level_one(self._active_symbol)
-                return
-            except Exception as exc:  # noqa: BLE001
-                logger.error("Reconnect attempt failed: %s", exc)
-        self._emit_state("DOWN")
-        if self._journal:
-            try:
-                self._journal.append_event(
-                    {
-                        "ts_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                        "symbol": self._active_symbol or "",
-                        "event_type": "STREAM_DOWN",
-                        "session_mode": "SEAMLESS",
-                        "connection_state": "RECONNECTING",
-                        "notes_json": "STREAM_DOWN",
-                    }
-                )
-            except Exception:
-                logger.error("Failed to journal STREAM_DOWN")
-        self._emit_state("STREAM_DOWN")
+
+        def _worker() -> None:
+            backoffs = [1, 2, 4, 8, 16, 32]
+            for delay in backoffs:
+                time.sleep(delay)
+                try:
+                    self.connect()
+                    if self._active_symbol:
+                        self.subscribe_level_one(self._active_symbol)
+                    self._reconnecting = False
+                    return
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("Reconnect attempt failed: %s", exc)
+            self._reconnecting = False
+            self._emit_state("DOWN")
+            if self._journal:
+                try:
+                    self._journal.append_event(
+                        {
+                            "ts_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                            "symbol": self._active_symbol or "",
+                            "event_type": "STREAM_DOWN",
+                            "session_mode": "SEAMLESS",
+                            "connection_state": "RECONNECTING",
+                            "notes_json": "STREAM_DOWN",
+                        }
+                    )
+                except Exception:
+                    logger.error("Failed to journal STREAM_DOWN")
+            self._emit_state("STREAM_DOWN")
+
+        self._reconnect_thread = threading.Thread(target=_worker, daemon=True, name="schwab-stream-reconnect")
+        self._reconnect_thread.start()
 
     def _emit_state(self, state: str) -> None:
         self._connection_state = state
