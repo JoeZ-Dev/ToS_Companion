@@ -369,7 +369,6 @@ class MainWindow(QtWidgets.QMainWindow):
                     parsed_value = float(value)
                 except Exception:
                     parsed_value = None
-            as_of_txt = as_of or "--"
             if status == "OK":
                 try:
                     if parsed_value is None:
@@ -379,9 +378,9 @@ class MainWindow(QtWidgets.QMainWindow):
                             pct_val = float(parsed_value)
                             if pct_val <= 1:
                                 pct_val *= 100.0
-                            label.setText(f"{prefix}: {pct_val:.2f}% (as of {as_of_txt})")
+                            label.setText(f"{prefix}: {pct_val:.2f}%")
                         else:
-                            label.setText(f"{prefix}: {_fmt_human_shares(float(parsed_value))} (as of {as_of_txt})")
+                            label.setText(f"{prefix}: {_fmt_human_shares(float(parsed_value))}")
                 except Exception:
                     label.setText(f"{prefix}: --")
             else:
