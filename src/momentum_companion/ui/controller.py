@@ -353,10 +353,10 @@ class UIController:
                 self._window,
                 "update_massive_fundamental",
                 QtCore.Qt.ConnectionType.QueuedConnection,
-                QtCore.Q_ARG(str, kind),
-                QtCore.Q_ARG(str, status),
-                QtCore.Q_ARG("QVariant", value),
-                QtCore.Q_ARG("QVariant", as_of),
+                QtCore.Q_ARG(str, str(kind)),
+                QtCore.Q_ARG(str, str(status)),
+                QtCore.Q_ARG(object, value),
+                QtCore.Q_ARG(object, as_of),
             )
 
     def _fetch_massive_fundamentals(self, symbol: str) -> None:
