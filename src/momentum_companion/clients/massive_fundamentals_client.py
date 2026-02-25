@@ -11,7 +11,8 @@ import logging
 
 class MassiveFundamentalsClient:
     BASE_URL = "https://api.massive.com"
-    MASSIVE_FLOAT_PATH = "/stocks/v1/float"
+    MASSIVE_FLOAT_PATHS = ("/stocks/vX/float", "/stocks/v1/float")
+    CACHE_VERSION = "v2"
     FLOAT_TTL_SEC = 24 * 60 * 60
     SHORT_INTEREST_TTL_SEC = 7 * 24 * 60 * 60
     SHORT_VOL_TTL_SEC = 5 * 60
@@ -20,7 +21,7 @@ class MassiveFundamentalsClient:
         self._api_key = api_key
         self._cache_dir = cache_dir
         self._cache_path = cache_dir / "massive_cache.json"
-        self._logger = logger
+        self._logger = logger if hasattr(logger, "debug") else logging.getLogger(__name__)
         logging.getLogger("httpx").setLevel(logging.WARNING)
         self._session = httpx.Client(timeout=httpx.Timeout(10.0, connect=5.0))
         self._cache: dict[str, Any] = {}
@@ -69,7 +70,8 @@ class MassiveFundamentalsClient:
         return all(k in rec for k in keys)
 
     def _maybe_json(self, resp: httpx.Response) -> dict | None:
-        ctype = resp.headers.get("content-type", "").lower()
+        headers = getattr(resp, "headers", {}) or {}
+        ctype = headers.get("content-type", "").lower() if isinstance(headers, dict) else ""
         if "json" not in ctype:
             return None
         try:
@@ -91,7 +93,7 @@ class MassiveFundamentalsClient:
         )
 
     def fetch_float(self, symbol: str) -> dict:
-        cache_key = f"float:{symbol}"
+        cache_key = f"{self.CACHE_VERSION}:float:{symbol}"
         cached = self._cache_get(cache_key, self.FLOAT_TTL_SEC)
         if cached:
             self._logger.debug(
@@ -105,41 +107,53 @@ class MassiveFundamentalsClient:
         self._logger.debug("Massive float fetch start symbol=%s cache_hit=False status=None", symbol)
         params = {
             "ticker": symbol,
-            "limit": 1,
-            "sort": "effective_date.desc",
+            "limit": 100,
+            "sort": "ticker.asc",
             "apiKey": self._api_key,
         }
-        url = f"{self.BASE_URL}{self.MASSIVE_FLOAT_PATH}"
-        try:
-            resp = self._session.get(url, params=params)
-            parsed = self._maybe_json(resp)
-            results = parsed.get("results") if isinstance(parsed, dict) else None
-            if resp.status_code == 404:
-                data = {"status": "NOT_AVAILABLE", "value": None, "as_of": None}
-                self._logger.info("Massive float endpoint not found (404) — likely not enabled for this API key/plan")
+        last_status = "FAILURE"
+        for path in self.MASSIVE_FLOAT_PATHS:
+            url = f"{self.BASE_URL}{path}"
+            try:
+                resp = self._session.get(url, params=params)
+                parsed = self._maybe_json(resp)
+                results = parsed.get("results") if isinstance(parsed, dict) else None
+                if resp.status_code == 404:
+                    last_status = "NOT_AVAILABLE"
+                    self._logger.info("Massive float endpoint 404 path=%s — trying fallback if any", path)
+                    continue
+                if not isinstance(results, list) or not results or not self._has_keys(results[0], ("free_float", "effective_date")):
+                    self._log_debug_failure(path, resp)
+                    last_status = "FAILURE"
+                    continue
+                status = self._status_from_resp(resp, results)
+                self._logger.info(
+                    "Massive float fetch status=%s symbol=%s path=%s latency_ms=%s",
+                    status,
+                    symbol,
+                    path,
+                    int(resp.elapsed.total_seconds() * 1000),
+                )
+                if status != "OK":
+                    last_status = status
+                    continue
+                rec = results[0] if results else {}
+                data = {"status": "OK", "value": rec.get("free_float"), "as_of": rec.get("effective_date")}
                 self._cache_set(cache_key, data)
                 return data
-            if not isinstance(results, list) or not results or not self._has_keys(results[0], ("free_float", "effective_date")):
-                self._log_debug_failure(self.MASSIVE_FLOAT_PATH, resp)
-                return {"status": "FAILURE", "value": None, "as_of": None}
-            status = self._status_from_resp(resp, results)
-            self._logger.info(
-                "Massive float fetch status=%s symbol=%s attempt=massive latency_ms=%s",
-                status,
-                symbol,
-                int(resp.elapsed.total_seconds() * 1000),
-            )
-            if status != "OK":
-                return {"status": status, "value": None, "as_of": None}
-            rec = results[0] if results else {}
-            data = {"status": "OK", "value": rec.get("free_float"), "as_of": rec.get("effective_date")}
+            except (httpx.TimeoutException, httpx.RequestError):
+                last_status = "FAILURE"
+                continue
+            except Exception:
+                self._logger.debug("Massive float fetch failed path=%s", path, exc_info=True)
+                last_status = "FAILURE"
+                continue
+        # If we exhausted all paths
+        if last_status == "NOT_AVAILABLE":
+            data = {"status": "NOT_AVAILABLE", "value": None, "as_of": None}
             self._cache_set(cache_key, data)
             return data
-        except (httpx.TimeoutException, httpx.RequestError):
-            return {"status": "FAILURE", "value": None, "as_of": None}
-        except Exception:
-            self._logger.debug("Massive float fetch failed attempt=massive", exc_info=True)
-            return {"status": "FAILURE", "value": None, "as_of": None}
+        return {"status": last_status, "value": None, "as_of": None}
 
     def fetch_short_interest(self, symbol: str) -> dict:
         cache_key = f"short_interest:{symbol}"
