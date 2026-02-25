@@ -336,6 +336,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.quote_float.setText(f"Float: {human}")
 
     def update_massive_fundamental(self, kind: str, status: str, value: float | int | None, as_of: str | None) -> None:
+        logging.getLogger(__name__).debug(
+            "Massive panel render kind=%s status=%s value=%s as_of=%s", kind, status, value, as_of
+        )
         status_map = {
             "PENDING": "pending",
             "MISSING_API_KEY": "missing api key",
