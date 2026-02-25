@@ -94,7 +94,15 @@ class MassiveFundamentalsClient:
         cache_key = f"float:{symbol}"
         cached = self._cache_get(cache_key, self.FLOAT_TTL_SEC)
         if cached:
+            self._logger.debug(
+                "Massive float fetch start symbol=%s cache_hit=True status=%s",
+                symbol,
+                cached.get("status"),
+            )
+            if cached.get("status") == "NOT_AVAILABLE":
+                self._logger.info("Massive float unavailable (cached) symbol=%s", symbol)
             return cached
+        self._logger.debug("Massive float fetch start symbol=%s cache_hit=False status=None", symbol)
         params = {
             "ticker": symbol,
             "limit": 1,
