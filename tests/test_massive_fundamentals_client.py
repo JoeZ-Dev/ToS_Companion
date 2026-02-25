@@ -48,3 +48,11 @@ def test_sanitize_no_api_key_in_logs(tmp_path, caplog) -> None:
     client._session = _StubSession([resp])  # type: ignore[attr-defined]
     client.fetch_short_interest("SYM")
     assert not any("SECRETKEY" in rec.message for rec in caplog.records)
+
+
+def test_404_text_body_maps_failure(tmp_path) -> None:
+    resp = _StubResp("404 Not Found", status_code=404)
+    client = MassiveFundamentalsClient("k", tmp_path, None)
+    client._session = _StubSession([resp])  # type: ignore[attr-defined]
+    data = client.fetch_float("SYM")
+    assert data["status"] == "FAILURE"

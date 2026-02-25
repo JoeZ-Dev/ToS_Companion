@@ -47,11 +47,16 @@ class MassiveFundamentalsClient:
             pass
 
     def _status_from_resp(self, resp: httpx.Response, results: list | None) -> str:
-        if resp.status_code in (401, 403):
+        code = resp.status_code
+        if code in (401, 403):
             return "UNAUTHORIZED"
-        if resp.status_code == 429:
+        if code == 429:
             return "RATE_LIMIT"
-        if resp.is_error or not results:
+        if code == 404:
+            return "FAILURE"
+        if code < 200 or code >= 300:
+            return "FAILURE"
+        if not results:
             return "FAILURE"
         return "OK"
 
@@ -61,12 +66,34 @@ class MassiveFundamentalsClient:
             return False
         return all(k in rec for k in keys)
 
+    def _maybe_json(self, resp: httpx.Response) -> dict | None:
+        ctype = resp.headers.get("content-type", "").lower()
+        if "json" not in ctype:
+            return None
+        try:
+            return resp.json()
+        except (json.JSONDecodeError, ValueError):
+            return None
+
+    def _log_debug_failure(self, ep: str, resp: httpx.Response) -> None:
+        try:
+            snippet = resp.text[:120] if resp.text else ""
+        except Exception:
+            snippet = ""
+        self._logger.debug(
+            "Massive float fetch failed ep=%s status=%s ctype=%s body=%s",
+            ep,
+            resp.status_code,
+            resp.headers.get("content-type"),
+            snippet,
+        )
+
     def fetch_float(self, symbol: str) -> dict:
         cache_key = f"float:{symbol}"
         cached = self._cache_get(cache_key, self.FLOAT_TTL_SEC)
         if cached:
             return cached
-        endpoints = ["/stocks/v1/float", "/stocks/v2/float", "/stocks/v3/float"]
+        endpoints = ["/stocks/v1/float", "/stocks/v2/float"]
         for ep in endpoints:
             url = f"https://api.massive.com{ep}"
             params = {
@@ -77,13 +104,12 @@ class MassiveFundamentalsClient:
             }
             try:
                 resp = self._session.get(url, params=params)
-                try:
-                    results = resp.json().get("results") if resp.content else None
-                except (json.JSONDecodeError, ValueError):
-                    self._logger.debug("Massive float decode failed ep=%s", ep, exc_info=True)
-                    continue
+                parsed = self._maybe_json(resp)
+                results = parsed.get("results") if isinstance(parsed, dict) else None
                 if not isinstance(results, list) or not results or not self._has_keys(results[0], ("free_float", "effective_date")):
-                    self._logger.debug("Massive float shape invalid ep=%s", ep)
+                    self._log_debug_failure(ep, resp)
+                    if resp.status_code == 404:
+                        break
                     continue
                 status = self._status_from_resp(resp, results)
                 self._logger.info(
@@ -94,6 +120,8 @@ class MassiveFundamentalsClient:
                     int(resp.elapsed.total_seconds() * 1000),
                 )
                 if status != "OK":
+                    if resp.status_code == 404:
+                        break
                     continue
                 rec = results[0] if results else {}
                 data = {"status": "OK", "value": rec.get("free_float"), "as_of": rec.get("effective_date")}
@@ -121,11 +149,8 @@ class MassiveFundamentalsClient:
         }
         try:
             resp = self._session.get(url, params=params)
-            try:
-                results = resp.json().get("results") if resp.content else None
-            except (json.JSONDecodeError, ValueError):
-                self._logger.debug("Massive short_interest decode failed", exc_info=True)
-                return {"status": "FAILURE", "value": None, "as_of": None}
+            parsed = self._maybe_json(resp)
+            results = parsed.get("results") if isinstance(parsed, dict) else None
             if not isinstance(results, list) or not results or not self._has_keys(results[0], ("short_interest", "settlement_date")):
                 return {"status": "FAILURE", "value": None, "as_of": None}
             status = self._status_from_resp(resp, results)
@@ -167,13 +192,8 @@ class MassiveFundamentalsClient:
         for label, params in attempts:
             try:
                 resp = self._session.get(url, params=params)
-                try:
-                    results = resp.json().get("results") if resp.content else None
-                except (json.JSONDecodeError, ValueError):
-                    self._logger.debug("Massive short_volume decode failed (%s)", label, exc_info=True)
-                    if label == "latest":
-                        return {"status": "FAILURE", "value": None, "as_of": None}
-                    continue
+                parsed = self._maybe_json(resp)
+                results = parsed.get("results") if isinstance(parsed, dict) else None
                 if not isinstance(results, list) or not results or not self._has_keys(results[0], ("short_volume_ratio", "date")):
                     if label == "latest":
                         status = self._status_from_resp(resp, results if isinstance(results, list) else None)
