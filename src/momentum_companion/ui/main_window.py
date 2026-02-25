@@ -27,6 +27,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._display_tz = ZoneInfo("America/New_York")
         self._tz_selector: QtWidgets.QComboBox | None = None
         self._api_key_callback: Optional[Callable[[str], None]] = None
+        self._massive_key_callback: Optional[Callable[[str], None]] = None
+        self._massive_test_callback: Optional[Callable[[], str]] = None
         self._full_model_callback: Optional[Callable[[str], None]] = None
         self._refresh_model_callback: Optional[Callable[[str], None]] = None
         self._prompt_callback: Optional[Callable[[str], None]] = None
@@ -40,8 +42,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_model_box: Optional[QtWidgets.QComboBox] = None
         self._prompt_edit: Optional[QtWidgets.QTextEdit] = None
         self._rr_gate_checkbox: Optional[QtWidgets.QCheckBox] = None
+        self._massive_key_edit: Optional[QtWidgets.QLineEdit] = None
+        self._massive_test_label: Optional[QtWidgets.QLabel] = None
         self._models_cache: list[str] = []
         self._pending_api_key_text: Optional[str] = None
+        self._pending_massive_key_text: Optional[str] = None
         self._pending_prompt_text: Optional[str] = None
         self._pending_full_model_text: Optional[str] = None
         self._pending_refresh_model_text: Optional[str] = None
@@ -223,14 +228,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self.quote_bid = QtWidgets.QLabel("Bid: --")
         self.quote_ask = QtWidgets.QLabel("Ask: --")
         self.quote_float = QtWidgets.QLabel("Float: --")
+        self.quote_short_interest = QtWidgets.QLabel("Short Interest: --")
+        self.quote_short_vol = QtWidgets.QLabel("Short Vol %: --")
         self.quote_last.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
         self.quote_bid.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
         self.quote_ask.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
         self.quote_float.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
+        self.quote_short_interest.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
+        self.quote_short_vol.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
         fundamentals_layout.addWidget(self.quote_last)
         fundamentals_layout.addWidget(self.quote_bid)
         fundamentals_layout.addWidget(self.quote_ask)
         fundamentals_layout.addWidget(self.quote_float)
+        fundamentals_layout.addWidget(self.quote_short_interest)
+        fundamentals_layout.addWidget(self.quote_short_vol)
         fundamentals_group.setLayout(fundamentals_layout)
         fundamentals_group.setStyleSheet(
             "QGroupBox { margin-top: 8px; } QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 2px 6px; }"
@@ -309,6 +320,40 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         human = _fmt_human_shares(shares_outstanding)
         self.quote_float.setText(f"Float: {human}")
+
+    def update_massive_fundamental(self, kind: str, status: str, value: float | int | None, as_of: str | None) -> None:
+        status_map = {
+            "PENDING": "pending",
+            "MISSING_API_KEY": "missing api key",
+            "UNAUTHORIZED": "unauthorized",
+            "RATE_LIMIT": "rate limited",
+            "FAILURE": "failure",
+        }
+        label = None
+        if kind == "float":
+            label = self.quote_float
+            prefix = "Float"
+        elif kind == "short_interest":
+            label = self.quote_short_interest
+            prefix = "Short Interest"
+        elif kind == "short_vol_pct":
+            label = self.quote_short_vol
+            prefix = "Short Vol %"
+        if not label:
+            return
+        if status == "OK":
+            try:
+                if value is None:
+                    label.setText(f"{prefix}: --")
+                else:
+                    if kind == "short_vol_pct":
+                        label.setText(f"{prefix}: {float(value):.2f}% (as of {as_of or '--'})")
+                    else:
+                        label.setText(f"{prefix}: {_fmt_human_shares(float(value))} (as of {as_of or '--'})")
+            except Exception:
+                label.setText(f"{prefix}: --")
+        else:
+            label.setText(f"{prefix}: {status_map.get(status, 'failure')}")
 
     @QtCore.Slot(float, float, float, float)
     def render_quote(self, ts_ms: float, bid: float, ask: float, last: float) -> None:
@@ -545,6 +590,22 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._api_key_edit.setText(self._pending_api_key_text)
             api_row.addWidget(self._api_key_edit)
             layout.addLayout(api_row)
+            massive_row = QtWidgets.QHBoxLayout()
+            massive_row.addWidget(QtWidgets.QLabel("Massive API Key:"))
+            self._massive_key_edit = QtWidgets.QLineEdit()
+            self._massive_key_edit.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
+            self._massive_key_edit.setPlaceholderText("massive-...")
+            self._massive_key_edit.editingFinished.connect(self._handle_massive_key_edit)
+            self._massive_key_edit.returnPressed.connect(self._handle_massive_key_edit)
+            if self._pending_massive_key_text:
+                self._massive_key_edit.setText(self._pending_massive_key_text)
+            massive_row.addWidget(self._massive_key_edit)
+            test_btn = QtWidgets.QPushButton("Test Key")
+            test_btn.clicked.connect(self._handle_massive_test)
+            self._massive_test_label = QtWidgets.QLabel("--")
+            massive_row.addWidget(test_btn)
+            massive_row.addWidget(self._massive_test_label)
+            layout.addLayout(massive_row)
             model_row = QtWidgets.QHBoxLayout()
             model_row.addWidget(QtWidgets.QLabel("Full Model:"))
             self._full_model_box = QtWidgets.QComboBox()
@@ -633,8 +694,23 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._api_key_callback and hasattr(self, "_api_key_edit"):
             self._api_key_callback(self._api_key_edit.text())
 
+    def _handle_massive_key_edit(self) -> None:
+        if self._massive_key_callback and hasattr(self, "_massive_key_edit"):
+            self._massive_key_callback(self._massive_key_edit.text())
+
+    def _handle_massive_test(self) -> None:
+        if self._massive_test_callback:
+            status = self._massive_test_callback()
+            self.set_massive_test_status(status.lower())
+
     def set_api_key_callback(self, cb: Callable[[str], None]) -> None:
         self._api_key_callback = cb
+
+    def set_massive_key_callback(self, cb: Callable[[str], None]) -> None:
+        self._massive_key_callback = cb
+
+    def set_massive_test_callback(self, cb: Callable[[], str]) -> None:
+        self._massive_test_callback = cb
 
     def populate_models(self, models: list[str]) -> None:
         """Populate model dropdowns with available identifiers."""
@@ -758,6 +834,16 @@ class MainWindow(QtWidgets.QMainWindow):
             self._api_key_edit.setText(value)
         else:
             self._pending_api_key_text = value
+
+    def set_massive_key_value(self, value: str) -> None:
+        if self._massive_key_edit:
+            self._massive_key_edit.setText(value)
+        else:
+            self._pending_massive_key_text = value
+
+    def set_massive_test_status(self, status: str) -> None:
+        if self._massive_test_label:
+            self._massive_test_label.setText(status or "--")
 
     def set_prompt_value(self, value: str) -> None:
         """Set prompt text area."""

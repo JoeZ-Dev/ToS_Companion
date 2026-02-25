@@ -14,6 +14,7 @@ from PySide6 import QtCore
 from momentum_companion.llm.service import LLMService
 from momentum_companion.ui.main_window import MainWindow
 from momentum_companion.ui.chart_adapter import ChartAdapter
+from momentum_companion.clients.massive_fundamentals_client import MassiveFundamentalsClient
 from momentum_companion.clients.schwab_stream import SchwabStreamClient
 from momentum_companion.clients.schwab_rest import SchwabRestClient
 from momentum_companion.clients.token_provider import TokenProvider
@@ -106,6 +107,9 @@ class UIController:
         self._llm_prompt = self._default_developer_prompt()
         self._llm_prompt_refresh = self._default_developer_prompt_refresh()
         self._disable_rr_gate: bool = False
+        self._massive_api_key: str | None = None
+        self._massive_client: MassiveFundamentalsClient | None = None
+        self._massive_cache_dir = Path(db_path).parent if db_path else Path.home() / ".tos_companion"
         self._model_signals = _ModelSignals()
         self._llm_signals = _LLMSignals()
         self._last_llm_payload: dict | None = None
@@ -136,6 +140,10 @@ class UIController:
             self._window.llm_toggle.clicked.connect(self._on_llm_toggle)  # type: ignore[attr-defined]
         if hasattr(self._window, "set_api_key_callback"):
             self._window.set_api_key_callback(self._set_api_key)  # type: ignore[attr-defined]
+        if hasattr(self._window, "set_massive_key_callback"):
+            self._window.set_massive_key_callback(self._set_massive_api_key)  # type: ignore[attr-defined]
+        if hasattr(self._window, "set_massive_test_callback"):
+            self._window.set_massive_test_callback(self._test_massive_api_key)  # type: ignore[attr-defined]
         if hasattr(self._window, "options_btn"):
             self._window.options_btn.clicked.connect(self._open_options)  # type: ignore[attr-defined]
         if hasattr(self._window, "set_full_model_callback"):
@@ -160,6 +168,7 @@ class UIController:
         if hasattr(self._window, "set_llm_refresh_callback"):
             self._window.set_llm_refresh_callback(self._run_llm_refresh)  # type: ignore[attr-defined]
         self._load_stored_api_key()
+        self._load_stored_massive_key()
         self._load_stored_models()
         self._load_stored_prompt()
         self._load_stored_rr_gate()
@@ -192,6 +201,7 @@ class UIController:
                 self._last_ae_snapshot = snap
                 self._window.update_ae_panel(snap)  # type: ignore[attr-defined]
         self._load_float(symbol)
+        self._fetch_massive_fundamentals(symbol)
         self._subscribe_stream(symbol)
         self._window.symbol_input.setDisabled(False)
 
@@ -295,6 +305,45 @@ class UIController:
         except Exception as exc:  # noqa: BLE001
             self._logger.warning("Failed to load float for %s: %s", symbol, exc)
             self._window.update_float(None)  # type: ignore[attr-defined]
+
+    def _set_massive_field(self, kind: str, status: str, value: float | int | None, as_of: str | None) -> None:
+        if hasattr(self._window, "update_massive_fundamental"):
+            QtCore.QTimer.singleShot(
+                0, lambda k=kind, s=status, v=value, d=as_of: self._window.update_massive_fundamental(k, s, v, d)
+            )
+
+    def _fetch_massive_fundamentals(self, symbol: str) -> None:
+        kinds = ("float", "short_interest", "short_vol_pct")
+        if not hasattr(self._window, "update_massive_fundamental"):
+            return
+        if not self._massive_api_key:
+            for k in kinds:
+                self._set_massive_field(k, "MISSING_API_KEY", None, None)
+            return
+        for k in kinds:
+            self._set_massive_field(k, "PENDING", None, None)
+        if not self._massive_client and self._massive_api_key:
+            self._massive_client = MassiveFundamentalsClient(self._massive_api_key, self._massive_cache_dir, self._logger)
+
+        def task() -> None:
+            client = self._massive_client
+            if not client:
+                for k in kinds:
+                    self._set_massive_field(k, "FAILURE", None, None)
+                return
+            today = datetime.now(self._et_tz).strftime("%Y-%m-%d")
+            res_float = client.fetch_float(symbol)
+            self._set_massive_field("float", res_float.get("status", "FAILURE"), res_float.get("value"), res_float.get("as_of"))
+            res_si = client.fetch_short_interest(symbol)
+            self._set_massive_field(
+                "short_interest", res_si.get("status", "FAILURE"), res_si.get("value"), res_si.get("as_of")
+            )
+            res_sv = client.fetch_short_volume_pct(symbol, today)
+            self._set_massive_field(
+                "short_vol_pct", res_sv.get("status", "FAILURE"), res_sv.get("value"), res_sv.get("as_of")
+            )
+
+        threading.Thread(target=task, daemon=True).start()
 
     def _handle_quote(self, event: QuoteEvent) -> None:
         bid = event.get("bid")
@@ -678,6 +727,28 @@ class UIController:
                 self._app_state.set("openai_api_key", "")
         self._refresh_llm_status()
 
+    def _set_massive_api_key(self, key: str) -> None:
+        key = key.strip()
+        self._massive_api_key = key or None
+        if self._app_state is not None:
+            if key:
+                self._app_state.set_secret("massive_api_key", key)
+            else:
+                self._app_state.set("massive_api_key", "")
+        if key:
+            self._massive_client = MassiveFundamentalsClient(key, self._massive_cache_dir, self._logger)
+        else:
+            self._massive_client = None
+
+    def _test_massive_api_key(self) -> str:
+        if not self._massive_api_key:
+            return "MISSING_API_KEY"
+        client = self._massive_client or MassiveFundamentalsClient(self._massive_api_key, self._massive_cache_dir, self._logger)
+        status = client.test_key()
+        if hasattr(self._window, "set_massive_test_status"):
+            self._window.set_massive_test_status(status.lower())
+        return status
+
     def _set_full_model(self, model: str) -> None:
         model = model.strip()
         if model:
@@ -873,6 +944,16 @@ class UIController:
             self._load_models_async()
         self._refresh_llm_status()
         self._load_stored_rr_gate()
+
+    def _load_stored_massive_key(self) -> None:
+        if not self._app_state:
+            return
+        stored = self._app_state.get_secret("massive_api_key")
+        if stored:
+            self._massive_api_key = stored
+            self._massive_client = MassiveFundamentalsClient(stored, self._massive_cache_dir, self._logger)
+            if hasattr(self._window, "set_massive_key_value"):
+                self._window.set_massive_key_value(stored)
 
     def _load_models_async(self) -> None:
         if not self._llm_service or not getattr(self._llm_service, "_client", None):
@@ -1439,6 +1520,15 @@ class UIController:
             "If you do not change a field, copy it from prior_best_setup. Do not omit fields.\n"
             "Use prior_best_setup plus latest prices/levels to update triggers/targets/stops/RR if needed.\n"
             "Rating caps must match full mode: rr_to_target1 caps; move_pct_to_target1 caps (B- max <5%, A- max <10%, A+ only if >=10%); VWAP cap (if entry_trigger_price<vwap cap at B and mention reclaim/hold); A/A+ requires volume expansion in triggers/confirmations and rising recent volume; otherwise cap at B+.\n"
+            "- Only claim \"volume expansion\" or \"elevated volume\" if: (a) the most recent completed bar volume > each of the prior 2 bars, OR (b) the most recent completed bar volume >= 1.5x median volume of last 10 bars; otherwise use neutral wording.\n"
+            "- target1_label must strictly correspond to the structural source of target_price:\n"
+            "    * If target_price equals levels.nearest_resistance.price -> target1_label=\"nearest_resistance\"\n"
+            "    * If target_price equals micro.micro_resistance_15m -> target1_label=\"micro_resistance_15m\"\n"
+            "    * If target_price equals session.opening_range_high -> target1_label=\"opening_range_high\"\n"
+            "    * If target_price equals session.premarket_high -> target1_label=\"premarket_high\"\n"
+            "    * If target_price matches a recent bar high from bars_window -> target1_label=\"swing_high\"\n"
+            "- No freeform labels allowed.\n"
+            "- If target1_label=\"swing_high\", target_price MUST match an exact high value from a bar in bars_window (within 0.2% tolerance). Do not round or fabricate structural levels.\n"
             "Summary must be <=2 sentences.\n"
             "No markdown. No extra keys.\n"
             "Self-check: ensure every setup has all required keys; ensure stock_bias is one of the two enums.\n"
