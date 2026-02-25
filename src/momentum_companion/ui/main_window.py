@@ -131,9 +131,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ae_pill_res_prox = self._make_pill()
         self.ae_pill_state = self._make_pill()
         self.ae_pill_micro_r = self._make_pill()
-        for pill in [self.ae_pill_state, self.ae_pill_range, self.ae_pill_vol, self.ae_pill_gap, self.ae_pill_micro_r, self.ae_pill_res_prox]:
+        for pill in [self.ae_pill_state, self.ae_pill_range, self.ae_pill_vol, self.ae_pill_gap, self.ae_pill_micro_r]:
             self.ae_row_context.addWidget(pill)
         self.ae_row_context.addStretch()
+        self.ae_row_res = QtWidgets.QHBoxLayout()
+        self.ae_row_res.setSpacing(4)
+        self.ae_row_res.addWidget(self.ae_pill_res_prox)
+        self.ae_row_res.addStretch()
 
         self.ae_levels_line1 = QtWidgets.QLabel("")
         self.ae_levels_line2 = QtWidgets.QLabel("")
@@ -151,6 +155,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         ae_layout.addLayout(self.ae_row_regime)
         ae_layout.addLayout(self.ae_row_context)
+        ae_layout.addLayout(self.ae_row_res)
         ae_layout.addWidget(self.ae_levels_line1)
         ae_layout.addWidget(self.ae_levels_line2)
         ae_layout.addWidget(self.ae_levels_line3)
