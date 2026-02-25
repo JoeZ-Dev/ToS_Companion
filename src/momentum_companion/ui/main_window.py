@@ -172,6 +172,10 @@ class MainWindow(QtWidgets.QMainWindow):
         side_panel.addWidget(ae_group, stretch=2)
 
         llm_group = QtWidgets.QGroupBox("LLM Panel")
+        llm_outer_layout = QtWidgets.QVBoxLayout()
+        llm_scroll = QtWidgets.QScrollArea()
+        llm_scroll.setWidgetResizable(True)
+        llm_content = QtWidgets.QWidget()
         llm_layout = QtWidgets.QVBoxLayout()
         llm_layout.setSpacing(4)
         llm_top = QtWidgets.QHBoxLayout()
@@ -215,7 +219,10 @@ class MainWindow(QtWidgets.QMainWindow):
         btn_row.addWidget(self.llm_refresh_btn)
         btn_row.addStretch()
         llm_layout.addLayout(btn_row)
-        llm_group.setLayout(llm_layout)
+        llm_content.setLayout(llm_layout)
+        llm_scroll.setWidget(llm_content)
+        llm_outer_layout.addWidget(llm_scroll)
+        llm_group.setLayout(llm_outer_layout)
         side_panel.addWidget(llm_group, stretch=2)
 
         fundamentals_group = QtWidgets.QGroupBox("Fundamentals")
