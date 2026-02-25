@@ -358,22 +358,28 @@ class MainWindow(QtWidgets.QMainWindow):
             prefix = "Short Vol %"
         if not label:
             return
-        if status == "OK":
-            try:
-                if value is None:
-                    label.setText(f"{prefix}: --")
-                else:
-                    if kind == "short_vol_pct":
-                        pct_val = float(value)
-                        if pct_val <= 1:
-                            pct_val *= 100.0
-                        label.setText(f"{prefix}: {pct_val:.2f}% (as of {as_of or '--'})")
+
+        def _apply() -> None:
+            if status == "OK":
+                try:
+                    if value is None:
+                        label.setText(f"{prefix}: --")
                     else:
-                        label.setText(f"{prefix}: {_fmt_human_shares(float(value))} (as of {as_of or '--'})")
-            except Exception:
-                label.setText(f"{prefix}: --")
-        else:
-            label.setText(f"{prefix}: {status_map.get(status, 'failure')}")
+                        if kind == "short_vol_pct":
+                            pct_val = float(value)
+                            if pct_val <= 1:
+                                pct_val *= 100.0
+                            label.setText(f"{prefix}: {pct_val:.2f}% (as of {as_of or '--'})")
+                        else:
+                            label.setText(f"{prefix}: {_fmt_human_shares(float(value))} (as of {as_of or '--'})")
+                except Exception:
+                    label.setText(f"{prefix}: --")
+            else:
+                label.setText(f"{prefix}: {status_map.get(status, 'failure')}")
+            label.repaint()
+
+        # Ensure UI-thread update similar to render_quote
+        QtCore.QTimer.singleShot(0, _apply)
 
     @QtCore.Slot(float, float, float, float)
     def render_quote(self, ts_ms: float, bid: float, ask: float, last: float) -> None:
