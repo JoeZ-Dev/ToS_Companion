@@ -500,13 +500,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.llm_toggle.setText("LLM ON" if enabled else "LLM OFF")
         if enabled:
             self.llm_toggle.setStyleSheet(
-                "QPushButton { background-color: #1f7a3d; color: #ecf0f1; border: 1px solid #1b5e2b; padding: 6px 10px; } "
+                "QPushButton { background-color: #1f7a3d; color: #ecf0f1; border: 1px solid #1b5e2b; padding: 4px 8px; } "
                 "QPushButton:hover { background-color: #238a46; } "
                 "QPushButton:pressed { background-color: #1b5e2b; }"
             )
         else:
             self.llm_toggle.setStyleSheet(
-                "QPushButton { background-color: #6b1b1b; color: #f5eaea; border: 1px solid #7a2a2a; padding: 6px 10px; } "
+                "QPushButton { background-color: #6b1b1b; color: #f5eaea; border: 1px solid #7a2a2a; padding: 4px 8px; } "
                 "QPushButton:hover { background-color: #7f2222; } "
                 "QPushButton:pressed { background-color: #5c1616; }"
             )
