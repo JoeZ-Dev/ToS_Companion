@@ -335,8 +335,8 @@ class MainWindow(QtWidgets.QMainWindow):
         human = _fmt_human_shares(shares_outstanding)
         self.quote_float.setText(f"Float: {human}")
 
-    @QtCore.Slot(str, str, object, object)
-    def update_massive_fundamental(self, kind: str, status: str, value: float | int | None, as_of: str | None) -> None:
+    @QtCore.Slot(str, str, str, str)
+    def update_massive_fundamental(self, kind: str, status: str, value: str, as_of: str) -> None:
         logging.getLogger(__name__).debug(
             "Massive panel render kind=%s status=%s value=%s as_of=%s", kind, status, value, as_of
         )
@@ -361,18 +361,27 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         def _apply() -> None:
+            parsed_value: float | int | None
+            if value == "" or value is None:
+                parsed_value = None
+            else:
+                try:
+                    parsed_value = float(value)
+                except Exception:
+                    parsed_value = None
+            as_of_txt = as_of or "--"
             if status == "OK":
                 try:
-                    if value is None:
+                    if parsed_value is None:
                         label.setText(f"{prefix}: --")
                     else:
                         if kind == "short_vol_pct":
-                            pct_val = float(value)
+                            pct_val = float(parsed_value)
                             if pct_val <= 1:
                                 pct_val *= 100.0
-                            label.setText(f"{prefix}: {pct_val:.2f}% (as of {as_of or '--'})")
+                            label.setText(f"{prefix}: {pct_val:.2f}% (as of {as_of_txt})")
                         else:
-                            label.setText(f"{prefix}: {_fmt_human_shares(float(value))} (as of {as_of or '--'})")
+                            label.setText(f"{prefix}: {_fmt_human_shares(float(parsed_value))} (as of {as_of_txt})")
                 except Exception:
                     label.setText(f"{prefix}: --")
             else:
