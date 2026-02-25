@@ -638,6 +638,14 @@ class UIController:
             self._window.llm_status.setText("LLM: ON" if checked else "LLM: OFF")
         if hasattr(self._window, "llm_toggle"):
             self._window.llm_toggle.setText("Disable LLM" if checked else "Enable LLM")
+            if checked:
+                self._window.llm_toggle.setStyleSheet(
+                    "background-color: #1f7a3d; color: #ecf0f1; border: 1px solid #1b5e2b;"
+                )
+            else:
+                self._window.llm_toggle.setStyleSheet(
+                    "background-color: #6b1b1b; color: #f5eaea; border: 1px solid #7a2a2a;"
+                )
         self._refresh_llm_status()
 
     def _open_options(self) -> None:
