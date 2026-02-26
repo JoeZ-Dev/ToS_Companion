@@ -223,11 +223,11 @@ class MainWindow(QtWidgets.QMainWindow):
         llm_scroll.setWidget(llm_content)
         llm_outer_layout.addWidget(llm_scroll)
         llm_group.setLayout(llm_outer_layout)
-        side_panel.addWidget(llm_group, stretch=2)
+        side_panel.addWidget(llm_group, stretch=3)
 
         fundamentals_group = QtWidgets.QGroupBox("Fundamentals")
         fundamentals_layout = QtWidgets.QGridLayout()
-        fundamentals_layout.setContentsMargins(6, 4, 6, 6)
+        fundamentals_layout.setContentsMargins(6, 16, 6, 6)
         fundamentals_layout.setHorizontalSpacing(16)
         fundamentals_layout.setVerticalSpacing(4)
         self.quote_last = QtWidgets.QLabel("Last: --")
@@ -255,7 +255,7 @@ class MainWindow(QtWidgets.QMainWindow):
         fundamentals_group.setStyleSheet(
             "QGroupBox { margin-top: 8px; } QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 2px 6px; }"
         )
-        side_panel.addWidget(fundamentals_group)
+        side_panel.addWidget(fundamentals_group, stretch=1)
 
         status_group = QtWidgets.QGroupBox("Status")
         status_layout = QtWidgets.QHBoxLayout()
