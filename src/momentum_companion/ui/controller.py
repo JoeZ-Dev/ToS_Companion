@@ -324,6 +324,8 @@ class UIController:
                 token_provider=self._token_provider,
                 state_callback=self._on_stream_state,
             )
+            # Allow stream client to refresh streamerInfo via REST if available.
+            setattr(self._token_provider, "rest_client", self._rest_client)
             self._window.connection_label.setText("Connection: CONNECTING")
             self._stream_client.connect()
         except Exception as exc:  # noqa: BLE001

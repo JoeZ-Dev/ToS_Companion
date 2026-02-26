@@ -63,6 +63,12 @@ class SchwabStreamClient:
         url = self._streamer_info.get("streamerSocketUrl", "")
         if not url:
             raise ValueError("Missing streamerSocketUrl")
+        # Preflight token check to avoid hammering with bad/missing creds
+        probe_token = self._auth_token()
+        if not probe_token:
+            logger.error("Stream connect skipped: missing streaming token; AUTH_REQUIRED")
+            self._emit_state("AUTH_REQUIRED")
+            return
         self._closing = False
         self._conn_id += 1
         conn_id = self._conn_id
