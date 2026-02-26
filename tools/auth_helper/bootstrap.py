@@ -32,7 +32,8 @@ def build_auth_url(state: str) -> str:
         "client_id": os.environ["SCHWAB_CLIENT_ID"],
         "redirect_uri": os.environ.get("SCHWAB_REDIRECT_URI", "https://companion-auth.p3l.co/callback"),
         "response_type": "code",
-        "scope": os.environ.get("SCHWAB_SCOPE", DEFAULT_SCOPE),
+        # Always request streaming + readonly + trading scopes; no override from client env.
+        "scope": DEFAULT_SCOPE,
         "state": state,
     }
     return f"{AUTH_BASE}?{urlencode(params)}"

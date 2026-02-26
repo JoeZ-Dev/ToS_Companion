@@ -11,6 +11,7 @@ import httpx
 from platformdirs import user_config_dir
 
 TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token"
+DEFAULT_SCOPE = "readonly streamerapi trade"
 
 
 def default_token_path() -> Path:
@@ -49,7 +50,7 @@ def refresh_tokens(current: Dict[str, str]) -> Dict[str, str]:
     refresh_token = current.get("refresh_token")
     if not refresh_token:
         raise RuntimeError("No refresh_token present; run interactive bootstrap.")
-    scope = os.environ.get("SCHWAB_SCOPE", "readonly streamerapi trade")
+    scope = DEFAULT_SCOPE
     headers = {
         "Authorization": f"Basic {_basic_auth()}",
         "Content-Type": "application/x-www-form-urlencoded",
