@@ -226,27 +226,31 @@ class MainWindow(QtWidgets.QMainWindow):
         side_panel.addWidget(llm_group, stretch=2)
 
         fundamentals_group = QtWidgets.QGroupBox("Fundamentals")
-        fundamentals_layout = QtWidgets.QVBoxLayout()
+        fundamentals_layout = QtWidgets.QGridLayout()
         fundamentals_layout.setContentsMargins(6, 4, 6, 6)
-        fundamentals_layout.setSpacing(4)
+        fundamentals_layout.setHorizontalSpacing(16)
+        fundamentals_layout.setVerticalSpacing(4)
         self.quote_last = QtWidgets.QLabel("Last: --")
         self.quote_bid = QtWidgets.QLabel("Bid: --")
         self.quote_ask = QtWidgets.QLabel("Ask: --")
         self.quote_float = QtWidgets.QLabel("Float: --")
         self.quote_short_interest = QtWidgets.QLabel("Short Interest: --")
         self.quote_short_vol = QtWidgets.QLabel("Short Vol %: --")
-        self.quote_last.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
-        self.quote_bid.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
-        self.quote_ask.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
-        self.quote_float.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
-        self.quote_short_interest.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
-        self.quote_short_vol.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
-        fundamentals_layout.addWidget(self.quote_last)
-        fundamentals_layout.addWidget(self.quote_bid)
-        fundamentals_layout.addWidget(self.quote_ask)
-        fundamentals_layout.addWidget(self.quote_float)
-        fundamentals_layout.addWidget(self.quote_short_interest)
-        fundamentals_layout.addWidget(self.quote_short_vol)
+        for lbl in (
+            self.quote_last,
+            self.quote_bid,
+            self.quote_ask,
+            self.quote_float,
+            self.quote_short_interest,
+            self.quote_short_vol,
+        ):
+            lbl.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
+        fundamentals_layout.addWidget(self.quote_last, 0, 0)
+        fundamentals_layout.addWidget(self.quote_bid, 1, 0)
+        fundamentals_layout.addWidget(self.quote_ask, 2, 0)
+        fundamentals_layout.addWidget(self.quote_float, 0, 1)
+        fundamentals_layout.addWidget(self.quote_short_interest, 1, 1)
+        fundamentals_layout.addWidget(self.quote_short_vol, 2, 1)
         fundamentals_group.setLayout(fundamentals_layout)
         fundamentals_group.setStyleSheet(
             "QGroupBox { margin-top: 8px; } QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 2px 6px; }"
