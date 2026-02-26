@@ -4,6 +4,7 @@ import json
 import threading
 import time
 from datetime import datetime, timezone
+import random
 from typing import Callable, Optional
 
 import websocket
@@ -48,6 +49,8 @@ class SchwabStreamClient:
         self._closing = False
         self._streamer_info_lock = threading.Lock()
         self._auth_source = "unknown"
+        self._max_retries = 6
+        self._rest_provider = getattr(token_provider, "rest_client", None)
         if hasattr(self._token_provider, "add_refresh_listener"):
             try:
                 self._token_provider.add_refresh_listener(self._on_token_refreshed)  # type: ignore[attr-defined]
@@ -131,9 +134,7 @@ class SchwabStreamClient:
         if token:
             self._auth_source = "streamer_token"
             return token
-        if self._token_provider:
-            self._auth_source = "oauth_bearer"
-            return self._token_provider()
+        # Avoid hammering with OAuth bearer if streamer token is missing; force refresh path instead.
         self._auth_source = "missing"
         return ""
 
@@ -251,12 +252,18 @@ class SchwabStreamClient:
         self._emit_state("RECONNECTING")
 
         def _worker() -> None:
-            backoffs = [1, 2, 4, 8]
-            for delay in backoffs:
-                time.sleep(delay)
+            attempts = 0
+            backoffs = [1, 2, 4, 8, 16]
+            while attempts < self._max_retries:
+                delay = backoffs[min(attempts, len(backoffs) - 1)]
+                time.sleep(delay + random.uniform(0, 0.25))
+                attempts += 1
                 try:
-                    # Refresh streamer info before reconnecting in case a new token is issued.
-                    self._refresh_streamer_info()
+                    refreshed = self._refresh_streamer_info()
+                    if not refreshed:
+                        logger.error("Reconnect aborted: missing streamer token; AUTH_REQUIRED")
+                        self._emit_state("AUTH_REQUIRED")
+                        break
                     self.connect()
                     if self._active_symbol:
                         self.subscribe_level_one(self._active_symbol)
@@ -285,12 +292,24 @@ class SchwabStreamClient:
         self._reconnect_thread = threading.Thread(target=_worker, daemon=True, name="schwab-stream-reconnect")
         self._reconnect_thread.start()
 
-    def _refresh_streamer_info(self) -> None:
-        if not self._token_provider or not hasattr(self._token_provider, "interactive_login"):
-            return
-        # TokenProvider does not expose streamer info; ensure we keep the existing info.
-        # Placeholder for future expansion if streamer info can be refreshed here.
-        return
+    def _refresh_streamer_info(self) -> bool:
+        """Attempt to reload streamer info/token; return True if a streaming token is present."""
+        # Try via TokenProvider if it exposes rest_client
+        rest = getattr(self._token_provider, "rest_client", None)
+        if rest:
+            try:
+                prefs = rest.get_user_preference()
+                info = prefs[0]["streamerInfo"][0] if isinstance(prefs, list) else prefs["streamerInfo"][0]
+                if "token" not in info and "streamerInfo" in info:
+                    info["token"] = info["streamerInfo"].get("token")  # type: ignore[index]
+                if info.get("token"):
+                    with self._streamer_info_lock:
+                        self._streamer_info = info
+                    return True
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Failed to refresh streamer info: %s", exc)
+        # No token available
+        return bool(self._streamer_info.get("token"))
 
     def _cleanup_socket(self, ws: websocket.WebSocketApp) -> None:
         if ws is self._ws:
