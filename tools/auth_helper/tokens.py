@@ -49,11 +49,12 @@ def refresh_tokens(current: Dict[str, str]) -> Dict[str, str]:
     refresh_token = current.get("refresh_token")
     if not refresh_token:
         raise RuntimeError("No refresh_token present; run interactive bootstrap.")
+    scope = os.environ.get("SCHWAB_SCOPE", "readonly streamerapi trade")
     headers = {
         "Authorization": f"Basic {_basic_auth()}",
         "Content-Type": "application/x-www-form-urlencoded",
     }
-    data = {"grant_type": "refresh_token", "refresh_token": refresh_token}
+    data = {"grant_type": "refresh_token", "refresh_token": refresh_token, "scope": scope}
     resp = httpx.post(TOKEN_URL, data=data, headers=headers, timeout=15.0)
     resp.raise_for_status()
     body = resp.json()
