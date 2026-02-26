@@ -66,9 +66,12 @@ class SchwabStreamClient:
         # Preflight token check to avoid hammering with bad/missing creds
         probe_token = self._auth_token()
         if not probe_token:
-            logger.error("Stream connect skipped: missing streaming token; AUTH_REQUIRED")
-            self._emit_state("AUTH_REQUIRED")
-            return
+            refreshed = self._refresh_streamer_info()
+            probe_token = self._auth_token()
+            if not refreshed or not probe_token:
+                logger.error("Stream connect skipped: missing streaming token; AUTH_REQUIRED")
+                self._emit_state("AUTH_REQUIRED")
+                return
         self._closing = False
         self._conn_id += 1
         conn_id = self._conn_id
@@ -140,12 +143,6 @@ class SchwabStreamClient:
         if token:
             self._auth_source = "streamer_token"
             return token
-        if self._token_provider:
-            self._auth_source = "oauth_bearer"
-            try:
-                return self._token_provider()
-            except Exception:
-                return ""
         self._auth_source = "missing"
         return ""
 
@@ -270,7 +267,7 @@ class SchwabStreamClient:
                 time.sleep(delay + random.uniform(0, 0.25))
                 attempts += 1
                 refreshed = self._refresh_streamer_info()
-                if not refreshed:
+                if not refreshed or not self._streamer_info.get("token"):
                     logger.error("Reconnect aborted: missing streamer token; AUTH_REQUIRED")
                     self._emit_state("AUTH_REQUIRED")
                     break
