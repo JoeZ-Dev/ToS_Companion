@@ -134,7 +134,12 @@ class SchwabStreamClient:
         if token:
             self._auth_source = "streamer_token"
             return token
-        # Avoid hammering with OAuth bearer if streamer token is missing; force refresh path instead.
+        if self._token_provider:
+            self._auth_source = "oauth_bearer"
+            try:
+                return self._token_provider()
+            except Exception:
+                return ""
         self._auth_source = "missing"
         return ""
 
@@ -258,12 +263,12 @@ class SchwabStreamClient:
                 delay = backoffs[min(attempts, len(backoffs) - 1)]
                 time.sleep(delay + random.uniform(0, 0.25))
                 attempts += 1
+                refreshed = self._refresh_streamer_info()
+                if not refreshed:
+                    logger.error("Reconnect aborted: missing streamer token; AUTH_REQUIRED")
+                    self._emit_state("AUTH_REQUIRED")
+                    break
                 try:
-                    refreshed = self._refresh_streamer_info()
-                    if not refreshed:
-                        logger.error("Reconnect aborted: missing streamer token; AUTH_REQUIRED")
-                        self._emit_state("AUTH_REQUIRED")
-                        break
                     self.connect()
                     if self._active_symbol:
                         self.subscribe_level_one(self._active_symbol)
