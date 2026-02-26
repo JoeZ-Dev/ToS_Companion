@@ -255,7 +255,7 @@ class MainWindow(QtWidgets.QMainWindow):
         fundamentals_group.setStyleSheet(
             "QGroupBox { margin-top: 8px; } QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 2px 6px; }"
         )
-        side_panel.addWidget(fundamentals_group, stretch=1)
+        side_panel.addWidget(fundamentals_group, stretch=0)
 
         status_group = QtWidgets.QGroupBox("Status")
         status_layout = QtWidgets.QHBoxLayout()
