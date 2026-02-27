@@ -28,12 +28,14 @@ class SchwabStreamClient:
         self,
         streamer_info: dict,
         on_quote: Callable[[QuoteEvent], None],
+        on_chart_bar: Optional[Callable[[dict], None]] = None,
         token_provider: Optional[object] = None,
         journal: Optional[JournalWriter] = None,
         state_callback: Optional[Callable[[str], None]] = None,
     ) -> None:
         self._streamer_info = streamer_info
         self._on_quote = on_quote
+        self._on_chart_bar = on_chart_bar
         self._token_provider = token_provider
         self._cache = LevelOneCache()
         self._ws: Optional[websocket.WebSocketApp] = None
@@ -57,8 +59,8 @@ class SchwabStreamClient:
                 self._token_provider.add_refresh_listener(self._on_token_refreshed)  # type: ignore[attr-defined]
             except Exception:
                 logger.warning("Failed to register token refresh listener")
-        self._timesale_enabled = os.environ.get("ENABLE_TIMESALE", "1") != "0"
-        self._timesale_logged_keys = False
+        self._chart_enabled = os.environ.get("ENABLE_CHART_STREAM", "1") != "0"
+        self._chart_logged_keys = False
 
     def connect(self) -> None:
         """Open WebSocket and authenticate."""
@@ -117,30 +119,34 @@ class SchwabStreamClient:
             "parameters": {"keys": symbol},
         }
         self._ws.send(json.dumps(unsub_msg))
-        if self._timesale_enabled:
-            self.unsubscribe_timesale(symbol)
+        if self._chart_enabled:
+            self.unsubscribe_chart(symbol)
 
-    def subscribe_timesale(self, symbol: str) -> None:
-        """Subscribe to TIMESALE_EQUITIES for trade prints."""
+    def subscribe_chart(self, symbol: str) -> None:
+        """Subscribe to CHART_EQUITY for 10s bars."""
         if not self._connected or not self._ws:
             return
         sub_msg = {
-            "service": "TIMESALE_EQUITIES",
+            "service": "CHART_EQUITY",
             "command": "SUBS",
             "requestid": "4",
             "SchwabClientCustomerId": self._streamer_info["schwabClientCustomerId"],
             "SchwabClientCorrelId": self._streamer_info["schwabClientCorrelId"],
-            "parameters": {"keys": symbol, "fields": "0,1,2"},
+            "parameters": {
+                "keys": symbol,
+                "fields": "0,1,2,3,4,5,6,7,8",
+                "frequency": "10",
+            },
         }
-        logger.info("TimeSales enabled; subscribing TIMESALE_EQUITIES for %s", symbol)
+        logger.info("Chart stream enabled; subscribing CHART_EQUITY for %s", symbol)
         self._ws.send(json.dumps(sub_msg))
 
-    def unsubscribe_timesale(self, symbol: str) -> None:
-        """Unsubscribe from TIMESALE_EQUITIES."""
+    def unsubscribe_chart(self, symbol: str) -> None:
+        """Unsubscribe from CHART_EQUITY."""
         if not self._connected or not self._ws:
             return
         unsub_msg = {
-            "service": "TIMESALE_EQUITIES",
+            "service": "CHART_EQUITY",
             "command": "UNSUBS",
             "requestid": "5",
             "SchwabClientCustomerId": self._streamer_info["schwabClientCustomerId"],
@@ -257,8 +263,8 @@ class SchwabStreamClient:
                     self._emit_state("CONNECTED")
                     if self._active_symbol:
                         self.subscribe_level_one(self._active_symbol)
-                        if self._timesale_enabled:
-                            self.subscribe_timesale(self._active_symbol)
+                        if self._chart_enabled:
+                            self.subscribe_chart(self._active_symbol)
                 elif command == "LOGIN" and code != 0:
                     logger.error("Stream LOGIN failed code=%s", code)
                     self._emit_state("LOGIN_FAILED")
@@ -277,40 +283,37 @@ class SchwabStreamClient:
                 if event:
                     self._last_ts_ms = event["ts_ms"]
                     self._on_quote(event)
-            elif service == "TIMESALE_EQUITIES":
+            elif service == "CHART_EQUITY":
                 content = msg.get("content") or []
-                if isinstance(content, list):
-                    if content and not self._timesale_logged_keys:
+                if isinstance(content, list) and self._on_chart_bar:
+                    if content and not self._chart_logged_keys:
                         try:
                             keys = list(content[0].keys())
-                            logger.debug("TIMESALE_EQUITIES first payload keys=%s", keys)
+                            logger.debug("CHART_EQUITY first payload keys=%s", keys)
                         except Exception:
                             pass
-                        self._timesale_logged_keys = True
-                    for trade in content:
+                        self._chart_logged_keys = True
+                    for bar in content:
                         try:
-                            symbol = trade.get("key")
-                            price = trade.get("1")
-                            size = trade.get("2")
-                            ts_ms = msg.get("timestamp")
-                            if symbol is None or price is None or size is None or ts_ms is None:
+                            symbol = bar.get("key")
+                            ts_ms = bar.get("7") or msg.get("timestamp")
+                            if symbol is None or ts_ms is None:
                                 continue
-                            event: QuoteEvent = {
-                                "ts_ms": int(ts_ms),
+                            # Field mapping: 2=open,3=high,4=low,5=close,6=volume
+                            mapped = {
                                 "symbol": symbol,
-                                "bid": None,
-                                "ask": None,
-                                "last": float(price),
-                                "bid_size": None,
-                                "ask_size": None,
-                                "last_size": float(size),
-                                "volume": None,
-                                "source_ts_type": "TRADE_TS",
-                                "raw_source": "SCHWAB_STREAM",
+                                "ts_ms": int(ts_ms),
+                                "open": float(bar.get("2")) if bar.get("2") is not None else None,
+                                "high": float(bar.get("3")) if bar.get("3") is not None else None,
+                                "low": float(bar.get("4")) if bar.get("4") is not None else None,
+                                "close": float(bar.get("5")) if bar.get("5") is not None else None,
+                                "volume": float(bar.get("6")) if bar.get("6") is not None else None,
                             }
-                            self._on_quote(event)
+                            if None in (mapped["open"], mapped["high"], mapped["low"], mapped["close"], mapped["volume"]):
+                                continue
+                            self._on_chart_bar(mapped)
                         except Exception:
-                            logger.debug("Failed to process TIMESALE_EQUITIES trade", exc_info=True)
+                            logger.debug("Failed to process CHART_EQUITY bar", exc_info=True)
 
     def _on_error(self, ws: websocket.WebSocketApp, error: Exception) -> None:
         if ws is not self._ws:

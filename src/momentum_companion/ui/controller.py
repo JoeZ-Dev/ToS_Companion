@@ -8,6 +8,7 @@ from functools import partial
 import statistics
 from pathlib import Path
 from datetime import datetime, time as dtime
+import os
 from zoneinfo import ZoneInfo
 from PySide6 import QtCore
 
@@ -27,6 +28,7 @@ from momentum_companion.indicators.engine import IndicatorsEngine
 import pandas as pd
 from momentum_companion.analysis.ae import AEEngine
 from momentum_companion.utils.logging import logging
+from momentum_companion.data.bar_aggregator import TenSecondBar
 
 
 class _ModelSignals(QtCore.QObject):
@@ -115,6 +117,7 @@ class UIController:
         self._last_llm_payload: dict | None = None
         self._last_llm_rec_by_symbol: dict[str, dict] = {}
         self._bars_1m: list[dict] = []
+        self._use_chart_stream: bool = os.environ.get("ENABLE_CHART_STREAM", "1") != "0"
         if hasattr(self._window, "populate_models"):
             # Single signal carries models + selections to enforce ordering
             self._model_signals.models_ready.connect(  # type: ignore[attr-defined]
@@ -336,6 +339,7 @@ class UIController:
             self._stream_client = SchwabStreamClient(
                 streamer_info,
                 on_quote=self._handle_quote,
+                on_chart_bar=self._handle_chart_bar if self._use_chart_stream else None,
                 token_provider=self._token_provider,
                 state_callback=self._on_stream_state,
             )
@@ -491,6 +495,33 @@ class UIController:
             QtCore.Q_ARG(float, float(ask_ui) if ask_ui is not None else 0.0),
             QtCore.Q_ARG(float, float(last_ui) if last_ui is not None else 0.0),
         )
+
+    def _handle_chart_bar(self, bar: dict) -> None:
+        """Ingest CHART_EQUITY 10s bars directly."""
+        try:
+            symbol = bar.get("symbol")
+            ts_ms = bar.get("ts_ms")
+            if symbol != self._active_symbol or ts_ms is None:
+                return
+            ts_sec = int(int(ts_ms) // 1000)
+            volume = float(bar.get("volume", 0) or 0)
+            is_extended = self._aggregator._is_extended(int(ts_ms)) if hasattr(self._aggregator, "_is_extended") else False  # type: ignore[attr-defined]
+            ten_bar = TenSecondBar(
+                ts=ts_sec,
+                open=float(bar.get("open")),
+                high=float(bar.get("high")),
+                low=float(bar.get("low")),
+                close=float(bar.get("close")),
+                volume=volume,
+                is_extended=is_extended,
+                stale=False,
+            )
+            with self._bars_lock:
+                self._aggregator = BarAggregator10s()
+                self._append_bar_locked(ten_bar)
+                self._request_render()
+        except Exception:
+            self._logger.debug("Failed to handle chart bar", exc_info=True)
 
     def _maybe_invoke_llm(self, snapshot: dict, quote_event: QuoteEvent) -> None:
         """Gate and invoke LLM coach off the UI thread."""
