@@ -308,41 +308,69 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                   el.innerHTML=parts.join(' | ');
                   lastHeader=hdr;
                 }}
+                window._errLast=0;
+                window.onerror=function(msg, src, line, col, err){{
+                  const now=Date.now();
+                  if(now-window._errLast>1000){{
+                    window._errLast=now;
+                    console.error("WINDOW.ONERROR", msg, src, line, col, err && err.stack);
+                  }}
+                  return false;
+                }};
+                window.__lwcBadCount=0;
+                function logBad(label, payload){{
+                  if(window.__lwcBadCount>=5) return;
+                  window.__lwcBadCount+=1;
+                  console.error(label, payload);
+                }}
+                function isFiniteNum(x){{const n=Number(x); return Number.isFinite(n);}}
+                function badSeriesPoint(p){{return !p || p.time==null || p.value==null || !isFiniteNum(p.value);}}
+                function badCandle(c){{
+                  return !c || c.time==null || c.open==null || c.high==null || c.low==null || c.close==null ||
+                         !isFiniteNum(c.open) || !isFiniteNum(c.high) || !isFiniteNum(c.low) || !isFiniteNum(c.close);
+                }}
                 window.lwc_setSymbol=function(s){{window.__symbol=s||'';}};
                 window.lwc_setData=function(data){{
-                  const bars=data||[];
-                  barStore.clear();
-                  bars.forEach(b=>{{ if(b && b.time!==undefined) barStore.set(b.time,b); }});
-                  candleSeries.setData(bars);
-                  const vol=bars.map(volumePoint).filter(v=>v);
-                  volumeSeries.setData(vol);
-                  if(bars.length>0){{updateLastPriceLine(bars[bars.length-1]);}}
+                  try{{
+                    const bars=(data||[]).filter(b=>{{if(badCandle(b)){{logBad("BAD CANDLE setData", b); return false;}} return true;}});
+                    barStore.clear();
+                    bars.forEach(b=>{{ if(b && b.time!==undefined) barStore.set(b.time,b); }});
+                    candleSeries.setData(bars);
+                    const vol=bars.map(volumePoint).filter(v=>v);
+                    volumeSeries.setData(vol);
+                    if(bars.length>0){{updateLastPriceLine(bars[bars.length-1]);}}
+                  }}catch(e){{console.error("lwc_setData error", e);}}
                 }};
                 window.lwc_update=function(bar){{
-                  if(!bar){{return;}}
-                  if(bar.time!==undefined){{barStore.set(bar.time, bar);}}
-                  candleSeries.update(bar);
-                  const vb=volumePoint(bar);
-                  if(vb){{volumeSeries.update(vb);}}
-                  updateLastPriceLine(bar);
+                  try{{
+                    if(!bar){{return;}}
+                    if(badCandle(bar)){{logBad("BAD CANDLE update", bar); return;}}
+                    if(bar.time!==undefined){{barStore.set(bar.time, bar);}}
+                    candleSeries.update(bar);
+                    const vb=volumePoint(bar);
+                    if(vb){{volumeSeries.update(vb);}}
+                    updateLastPriceLine(bar);
+                  }}catch(e){{console.error("lwc_update error", e);}}
                 }};
                 function cleanPoints(points){{
                   return (points||[])
-                    .filter(p=>p&&p.time!==undefined&&p.time!==null&&p.value!==undefined&&p.value!==null&&Number.isFinite(Number(p.value)))
+                    .filter(p=>{{if(badSeriesPoint(p)){{logBad("BAD SERIES POINT", p); return false;}} return true;}})
                     .map(p=>{{return {{...p, time:p.time, value:Number(p.value)}};}});
                 }}
                 window.lwc_setSeries=function(name, points){{
-                  if(name.startsWith('MACD_HIST')){{
-                    const target=ensureMacdSeries('MACD_HIST');
-                    const clean=cleanPoints(points).map(p=>{{const v=p.value; const c=v>=0 ? '#27ae60' : '#c0392b'; return {{...p, value:v, color:c}};}});
+                  try{{
+                    if(name.startsWith('MACD_HIST')){{
+                      const target=ensureMacdSeries('MACD_HIST');
+                      const clean=cleanPoints(points).map(p=>{{const v=p.value; const c=v>=0 ? '#27ae60' : '#c0392b'; return {{...p, value:v, color:c}};}});
+                      target.setData(clean);
+                      return;
+                    }}
+                    let target;
+                    if(name.startsWith('MACD')){{target=ensureMacdSeries(name);}}
+                    else {{target=ensureLineSeries(name, 0);}}
+                    const clean=cleanPoints(points);
                     target.setData(clean);
-                    return;
-                  }}
-                  let target;
-                  if(name.startsWith('MACD')){{target=ensureMacdSeries(name);}}
-                  else {{target=ensureLineSeries(name, 0);}}
-                  const clean=cleanPoints(points);
-                  target.setData(clean);
+                  }}catch(e){{console.error("lwc_setSeries error", e);}}
                 }};
                 window.lwc_setHeader=function(hdr){{renderHeader(hdr);}};
               </script>
