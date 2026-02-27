@@ -327,16 +327,18 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                   updateLastPriceLine(bar);
                 }};
                 window.lwc_setSeries=function(name, points){{
+                  const filt=(points||[]).filter(p=>p&&p.time!==undefined&&p.time!==null&&p.value!==undefined&&p.value!==null&&Number.isFinite(Number(p.value)));
                   if(name.startsWith('MACD_HIST')){{
                     const target=ensureMacdSeries('MACD_HIST');
-                    const mapped=(points||[]).map(p=>{{const c=(p.value||0)>=0 ? '#27ae60' : '#c0392b'; return {{...p, color:c}};}});
+                    const mapped=filt.map(p=>{{const v=Number(p.value); const c=v>=0 ? '#27ae60' : '#c0392b'; return {{...p, value:v, color:c}};}});
                     target.setData(mapped);
                     return;
                   }}
                   let target;
                   if(name.startsWith('MACD')){{target=ensureMacdSeries(name);}}
                   else {{target=ensureLineSeries(name, 0);}}
-                  target.setData(points||[]);
+                  const clean=filt.map(p=>{{return {{time:p.time, value:Number(p.value)}};}});
+                  target.setData(clean);
                 }};
                 window.lwc_setHeader=function(hdr){{renderHeader(hdr);}};
               </script>
@@ -410,6 +412,14 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
         self.page().runJavaScript(f"window.lwc_update({payload});")
 
     def set_series(self, name: str, points: list[dict]) -> None:
+        if self._series_null_warning_count < 5:
+            for pt in points or []:
+                if not isinstance(pt, dict):
+                    continue
+                if pt.get("time") is None or pt.get("value") is None:
+                    self._series_null_warning_count += 1
+                    logger.warning("Chart set_series got None time/value series=%s sample=%s", name, pt)
+                    break
         sanitized = self._sanitize_series_points(name, points)
         if not sanitized:
             return
