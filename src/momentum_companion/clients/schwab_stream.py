@@ -167,7 +167,6 @@ class SchwabStreamClient:
     def _on_open(self, ws: websocket.WebSocketApp) -> None:
         if ws is not self._ws:
             return
-        sock = getattr(ws, "sock", None)
         token = self._auth_token()
         logger.info("Stream login attempt using %s", self._auth_source)
         login_msg = {
@@ -182,16 +181,15 @@ class SchwabStreamClient:
                 "SchwabClientFunctionId": self._streamer_info["schwabClientFunctionId"],
             },
         }
-        if not sock:
-            logger.error("Stream login skipped: socket not connected")
-            self._cleanup_socket(ws)
-            self._emit_state("ERROR")
-            self._attempt_reconnect()
-            return
         try:
             ws.send(json.dumps(login_msg))
         except WebSocketConnectionClosedException:
             logger.error("Stream login failed: socket closed")
+            self._cleanup_socket(ws)
+            self._emit_state("ERROR")
+            self._attempt_reconnect()
+        except Exception:
+            logger.error("Stream login send failed unexpectedly", exc_info=True)
             self._cleanup_socket(ws)
             self._emit_state("ERROR")
             self._attempt_reconnect()
@@ -247,20 +245,26 @@ class SchwabStreamClient:
     def _on_error(self, ws: websocket.WebSocketApp, error: Exception) -> None:
         if ws is not self._ws:
             return
-        logger.error("Stream error: %s", error)
-        self._cleanup_socket(ws)
-        self._emit_state("ERROR")
-        self._attempt_reconnect()
+        try:
+            logger.error("Stream error: %s", error)
+            self._cleanup_socket(ws)
+            self._emit_state("ERROR")
+            self._attempt_reconnect()
+        except Exception:
+            logger.warning("Stream on_error handling failed", exc_info=True)
 
     def _on_close(self, ws: websocket.WebSocketApp, close_status_code: int, close_msg: str) -> None:
         if ws is not self._ws:
             return
-        logger.warning("Stream closed code=%s msg=%s (auth=%s)", close_status_code, close_msg, self._auth_source)
-        self._connected = False
-        self._emit_state("DISCONNECTED")
-        if not self._closing:
-            self._cleanup_socket(ws)
-            self._attempt_reconnect()
+        try:
+            logger.warning("Stream closed code=%s msg=%s (auth=%s)", close_status_code, close_msg, self._auth_source)
+            self._connected = False
+            self._emit_state("DISCONNECTED")
+            if not self._closing:
+                self._cleanup_socket(ws)
+                self._attempt_reconnect()
+        except Exception:
+            logger.warning("Stream on_close handling failed", exc_info=True)
 
     def _attempt_reconnect(self) -> None:
         if self._reconnecting:

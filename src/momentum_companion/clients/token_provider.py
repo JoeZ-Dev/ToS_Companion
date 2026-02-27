@@ -10,6 +10,8 @@ import base64
 import os
 import httpx
 
+from momentum_companion.utils.logging import logging
+
 from momentum_companion.clients.oauth_flow import OAuthFlow, BOUNCE_REDIRECT_URI
 
 TOKEN_PATH = Path.home() / ".tos_companion" / "tokens.json"
@@ -39,6 +41,9 @@ class TokenProvider:
         self._helper_cache: dict = {}
         self._client_id = os.environ.get("SCHWAB_CLIENT_ID")
         self._client_secret = os.environ.get("SCHWAB_CLIENT_SECRET")
+        self._logger = logging.getLogger(__name__)
+        self._helper_http: httpx.Client | None = None
+        self._helper_backoff_until: float = 0.0
 
     def __call__(self) -> str:
         if self._auth_helper_url:
@@ -160,15 +165,29 @@ class TokenProvider:
         now = time.time()
         if expires_at and now < expires_at - 60 and self._helper_cache.get("access_token"):
             return
+        if now < self._helper_backoff_until:
+            self._logger.info(
+                "Auth helper backoff active for %.0fs", self._helper_backoff_until - now
+            )
+            return
         self._fetch_from_helper()
 
     def _fetch_from_helper(self) -> None:
         if not self._auth_helper_url:
             return
         url = self._auth_helper_url.rstrip("/") + "/access_token"
+        if self._helper_http is None:
+            self._helper_http = httpx.Client(
+                timeout=10.0,
+                follow_redirects=True,
+                trust_env=False,
+            )
         try:
-            # Allow helper endpoint to redirect (e.g., via reverse-proxy rules).
-            resp = httpx.get(url, timeout=10.0, follow_redirects=True)
+            start = time.time()
+            self._logger.info("Auth helper fetch start url=%s", url)
+            resp = self._helper_http.get(url)
+            latency_ms = int((time.time() - start) * 1000)
+            self._logger.info("Auth helper fetch status=%s latency_ms=%s", resp.status_code, latency_ms)
             if resp.status_code == 200:
                 data = resp.json()
                 self._helper_cache = {
@@ -176,12 +195,15 @@ class TokenProvider:
                     "expires_at": data.get("expires_at") or (time.time() + 900),
                 }
                 self._notify_listeners()
+                self._helper_backoff_until = 0.0
             else:
                 if self._state_callback:
                     self._state_callback("AUTH_REQUIRED")
-        except Exception:
+        except Exception as exc:
+            self._logger.warning("Auth helper fetch failed: %s", type(exc).__name__, exc_info=True)
             if self._state_callback:
                 self._state_callback("AUTH_REQUIRED")
+            self._helper_backoff_until = time.time() + 15
 
     def interactive_login(self) -> dict:
         """Run full interactive OAuth using bounce server and local loopback."""
