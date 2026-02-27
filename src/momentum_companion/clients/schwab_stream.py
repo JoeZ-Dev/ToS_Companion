@@ -6,6 +6,7 @@ import time
 from datetime import datetime, timezone
 import random
 from typing import Callable, Optional
+import os
 
 import websocket
 from websocket import WebSocketConnectionClosedException
@@ -56,6 +57,8 @@ class SchwabStreamClient:
                 self._token_provider.add_refresh_listener(self._on_token_refreshed)  # type: ignore[attr-defined]
             except Exception:
                 logger.warning("Failed to register token refresh listener")
+        self._timesale_enabled = os.environ.get("ENABLE_TIMESALE", "1") != "0"
+        self._timesale_logged_keys = False
 
     def connect(self) -> None:
         """Open WebSocket and authenticate."""
@@ -109,6 +112,37 @@ class SchwabStreamClient:
             "service": "LEVELONE_EQUITIES",
             "command": "UNSUBS",
             "requestid": "3",
+            "SchwabClientCustomerId": self._streamer_info["schwabClientCustomerId"],
+            "SchwabClientCorrelId": self._streamer_info["schwabClientCorrelId"],
+            "parameters": {"keys": symbol},
+        }
+        self._ws.send(json.dumps(unsub_msg))
+        if self._timesale_enabled:
+            self.unsubscribe_timesale(symbol)
+
+    def subscribe_timesale(self, symbol: str) -> None:
+        """Subscribe to TIMESALE_EQUITIES for trade prints."""
+        if not self._connected or not self._ws:
+            return
+        sub_msg = {
+            "service": "TIMESALE_EQUITIES",
+            "command": "SUBS",
+            "requestid": "4",
+            "SchwabClientCustomerId": self._streamer_info["schwabClientCustomerId"],
+            "SchwabClientCorrelId": self._streamer_info["schwabClientCorrelId"],
+            "parameters": {"keys": symbol, "fields": "0,1,2"},
+        }
+        logger.info("TimeSales enabled; subscribing TIMESALE_EQUITIES for %s", symbol)
+        self._ws.send(json.dumps(sub_msg))
+
+    def unsubscribe_timesale(self, symbol: str) -> None:
+        """Unsubscribe from TIMESALE_EQUITIES."""
+        if not self._connected or not self._ws:
+            return
+        unsub_msg = {
+            "service": "TIMESALE_EQUITIES",
+            "command": "UNSUBS",
+            "requestid": "5",
             "SchwabClientCustomerId": self._streamer_info["schwabClientCustomerId"],
             "SchwabClientCorrelId": self._streamer_info["schwabClientCorrelId"],
             "parameters": {"keys": symbol},
@@ -223,6 +257,8 @@ class SchwabStreamClient:
                     self._emit_state("CONNECTED")
                     if self._active_symbol:
                         self.subscribe_level_one(self._active_symbol)
+                        if self._timesale_enabled:
+                            self.subscribe_timesale(self._active_symbol)
                 elif command == "LOGIN" and code != 0:
                     logger.error("Stream LOGIN failed code=%s", code)
                     self._emit_state("LOGIN_FAILED")
@@ -241,6 +277,40 @@ class SchwabStreamClient:
                 if event:
                     self._last_ts_ms = event["ts_ms"]
                     self._on_quote(event)
+            elif service == "TIMESALE_EQUITIES":
+                content = msg.get("content") or []
+                if isinstance(content, list):
+                    if content and not self._timesale_logged_keys:
+                        try:
+                            keys = list(content[0].keys())
+                            logger.debug("TIMESALE_EQUITIES first payload keys=%s", keys)
+                        except Exception:
+                            pass
+                        self._timesale_logged_keys = True
+                    for trade in content:
+                        try:
+                            symbol = trade.get("key")
+                            price = trade.get("1")
+                            size = trade.get("2")
+                            ts_ms = msg.get("timestamp")
+                            if symbol is None or price is None or size is None or ts_ms is None:
+                                continue
+                            event: QuoteEvent = {
+                                "ts_ms": int(ts_ms),
+                                "symbol": symbol,
+                                "bid": None,
+                                "ask": None,
+                                "last": float(price),
+                                "bid_size": None,
+                                "ask_size": None,
+                                "last_size": float(size),
+                                "volume": None,
+                                "source_ts_type": "TRADE_TS",
+                                "raw_source": "SCHWAB_STREAM",
+                            }
+                            self._on_quote(event)
+                        except Exception:
+                            logger.debug("Failed to process TIMESALE_EQUITIES trade", exc_info=True)
 
     def _on_error(self, ws: websocket.WebSocketApp, error: Exception) -> None:
         if ws is not self._ws:

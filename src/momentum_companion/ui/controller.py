@@ -416,6 +416,8 @@ class UIController:
         ask = event.get("ask")
         last = event.get("last")
         ts_ms = event.get("ts_ms")
+        source_ts_type = event.get("source_ts_type") or "QUOTE_TS"
+        is_trade = source_ts_type == "TRADE_TS"
         try:
             self._logger.debug(
                 "Quote received: ts=%s bid=%s ask=%s last=%s vol=%s",
@@ -428,7 +430,13 @@ class UIController:
             if ts_ms and last is not None:
                 if self._ae_engine:
                     self._ae_engine.record_quote_ts(ts_ms)
-                pu = PriceUpdate(timestamp=int(ts_ms // 1000), price=last, size=event.get("volume"), source="L1")
+                size = event.get("last_size") if is_trade else event.get("volume")
+                pu = PriceUpdate(
+                    timestamp=int(ts_ms // 1000),
+                    price=last,
+                    size=size,
+                    source="TNS" if is_trade else "L1",
+                )
                 with self._bars_lock:
                     completed = self._aggregator.ingest_price(pu)
                     if completed:
@@ -455,26 +463,33 @@ class UIController:
                     if sig != self._last_forming_sig:
                         self._last_forming_sig = sig
                         self._request_render()
-            # track latest quote for header
-            self._last_quote = {
-                "bid": bid,
-                "ask": ask,
-                "last": last,
-                "total_volume": event.get("volume"),
-            }
+            # track latest quote for header (prefer L1 for bid/ask)
+            if not is_trade:
+                self._last_quote = {
+                    "bid": bid,
+                    "ask": ask,
+                    "last": last,
+                    "total_volume": event.get("volume"),
+                }
+            else:
+                # Preserve last_trade while keeping prior bid/ask
+                self._last_quote["last"] = last
         except Exception as exc:  # noqa: BLE001
             from momentum_companion.utils.logging import logging
 
             logging.getLogger(__name__).error("Quote handling failed: %s", exc, exc_info=True)
         # UI label updates on main thread via queued invoke
+        bid_ui = bid if not is_trade else self._last_quote.get("bid")
+        ask_ui = ask if not is_trade else self._last_quote.get("ask")
+        last_ui = last if last is not None else self._last_quote.get("last")
         QtCore.QMetaObject.invokeMethod(
             self._window,
             "render_quote",
             QtCore.Qt.ConnectionType.QueuedConnection,
             QtCore.Q_ARG(float, float(ts_ms) if ts_ms is not None else 0.0),
-            QtCore.Q_ARG(float, float(bid) if bid is not None else 0.0),
-            QtCore.Q_ARG(float, float(ask) if ask is not None else 0.0),
-            QtCore.Q_ARG(float, float(last) if last is not None else 0.0),
+            QtCore.Q_ARG(float, float(bid_ui) if bid_ui is not None else 0.0),
+            QtCore.Q_ARG(float, float(ask_ui) if ask_ui is not None else 0.0),
+            QtCore.Q_ARG(float, float(last_ui) if last_ui is not None else 0.0),
         )
 
     def _maybe_invoke_llm(self, snapshot: dict, quote_event: QuoteEvent) -> None:
