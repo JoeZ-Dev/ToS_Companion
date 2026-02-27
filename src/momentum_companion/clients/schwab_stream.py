@@ -139,6 +139,7 @@ class SchwabStreamClient:
 
     def _auth_token(self) -> str:
         # Prefer streaming token from streamerInfo; fallback to OAuth token if absent.
+        # Safe fallback: prefer streamer token if ever provided, but accept OAuth bearer for LOGIN.
         token = self._streamer_info.get("token") or self._streamer_info.get("access_token", "")
         if token:
             self._auth_source = "streamer_token"
