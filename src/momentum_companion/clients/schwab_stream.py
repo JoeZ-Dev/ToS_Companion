@@ -68,8 +68,8 @@ class SchwabStreamClient:
         if not probe_token:
             refreshed = self._refresh_streamer_info()
             probe_token = self._auth_token()
-            if not refreshed:
-                logger.error("Stream connect skipped: missing streaming token; AUTH_REQUIRED")
+            if not probe_token:
+                logger.error("Stream connect skipped: missing OAuth access token; AUTH_REQUIRED")
                 self._emit_state("AUTH_REQUIRED")
                 return
         self._closing = False
@@ -275,8 +275,8 @@ class SchwabStreamClient:
                 time.sleep(delay + random.uniform(0, 0.25))
                 attempts += 1
                 refreshed = self._refresh_streamer_info()
-                if not refreshed and not self._streamer_info.get("token"):
-                    logger.error("Reconnect aborted: missing streamer token; AUTH_REQUIRED")
+                if not self._auth_token():
+                    logger.error("Reconnect aborted: missing OAuth access token; AUTH_REQUIRED")
                     self._emit_state("AUTH_REQUIRED")
                     break
                 try:
@@ -309,23 +309,23 @@ class SchwabStreamClient:
         self._reconnect_thread.start()
 
     def _refresh_streamer_info(self) -> bool:
-        """Attempt to reload streamer info/token; return True if a streaming token is present."""
+        """Attempt to reload streamer info; return True if identity fields are present."""
         # Try via TokenProvider if it exposes rest_client
         rest = getattr(self._token_provider, "rest_client", None)
         if rest:
             try:
                 prefs = rest.get_user_preference()
                 info = prefs[0]["streamerInfo"][0] if isinstance(prefs, list) else prefs["streamerInfo"][0]
-                if "token" not in info and "streamerInfo" in info:
-                    info["token"] = info["streamerInfo"].get("token")  # type: ignore[index]
-                if info.get("token"):
+                required_keys = {"streamerSocketUrl", "schwabClientCustomerId", "schwabClientCorrelId", "schwabClientChannel", "schwabClientFunctionId"}
+                if required_keys.issubset(info):
                     with self._streamer_info_lock:
                         self._streamer_info = info
                     return True
             except Exception as exc:  # noqa: BLE001
                 logger.error("Failed to refresh streamer info: %s", exc)
-        # No token available
-        return bool(self._streamer_info.get("token"))
+        # No update; fall back to existing streamer_info if it has identity fields
+        required_keys = {"streamerSocketUrl", "schwabClientCustomerId", "schwabClientCorrelId", "schwabClientChannel", "schwabClientFunctionId"}
+        return required_keys.issubset(self._streamer_info)
 
     def _cleanup_socket(self, ws: websocket.WebSocketApp) -> None:
         if ws is self._ws:
