@@ -190,8 +190,8 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                   if(!bar||bar.close===undefined){{return;}}
                   const up=bar.open===undefined?true:(bar.close>=bar.open);
                   const color=up?'#26a69a':'#ef5350';
-                  if(lastPriceLine){{candleSeries.removePriceLine(lastPriceLine);}}
-                  lastPriceLine=candleSeries.createPriceLine({{price:bar.close,color,lineWidth:1,lineStyle:LightweightCharts.LineStyle.Dotted,axisLabelVisible:true}});
+                  if(lastPriceLine){{safeCall("removePriceLine", ()=>candleSeries.removePriceLine(lastPriceLine), lastPriceLine);}}
+                  lastPriceLine=safeCall("createPriceLine", ()=>candleSeries.createPriceLine({{price:bar.close,color,lineWidth:1,lineStyle:LightweightCharts.LineStyle.Dotted,axisLabelVisible:true}}), bar);
                 }}
                 function ensureLineSeries(name, paneIndex=0){{
                   const key=`${{name}}_${{paneIndex}}`;
@@ -324,7 +324,7 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 }};
                 window.__lwcBadCount=0;
                 function logBad(label, payload){{
-                  if(window.__lwcBadCount>=20) return;
+                  if(window.__lwcBadCount>=50) return;
                   window.__lwcBadCount+=1;
                   console.error(label, payload);
                 }}
@@ -332,7 +332,7 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                   try {{ return fn(); }}
                   catch(e){{
                     logBad("LWC_THROW " + label, payload);
-                    console.error("LWC_THROW", label, e, payload);
+                    console.error("LWC_THROW", label, payload, e);
                     throw e;
                   }}
                 }}
@@ -352,9 +352,9 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                     const bars=(data||[]).filter(b=>{{if(badCandle(b)){{logBad("BAD CANDLE setData", b); return false;}} b.time=Number(b.time); return true;}});
                     barStore.clear();
                     bars.forEach(b=>{{ if(b && b.time!==undefined) barStore.set(b.time,b); }});
-                    safeCall("candleSeries.setData", ()=>candleSeries.setData(bars), bars);
+                    safeCall("candleSeries.setData", ()=>candleSeries.setData(bars), bars.slice(-3));
                     const vol=bars.map(volumePoint).filter(v=>v);
-                    safeCall("volumeSeries.setData", ()=>volumeSeries.setData(vol), vol);
+                    safeCall("volumeSeries.setData", ()=>volumeSeries.setData(vol), vol.slice(-3));
                     if(bars.length>0){{updateLastPriceLine(bars[bars.length-1]);}}
                   }}catch(e){{console.error("lwc_setData error", e);}}
                 }};
@@ -380,14 +380,14 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                     if(name.startsWith('MACD_HIST')){{
                       const target=ensureMacdSeries('MACD_HIST');
                       const clean=cleanPoints(points).map(p=>{{const v=p.value; const c=v>=0 ? '#27ae60' : '#c0392b'; return {{...p, value:v, color:c}};}});
-                      safeCall("macd_hist.setData", ()=>target.setData(clean), clean);
+                      safeCall("macd_hist.setData", ()=>target.setData(clean), clean.slice(-3));
                       return;
                     }}
                     let target;
                     if(name.startsWith('MACD')){{target=ensureMacdSeries(name);}}
                     else {{target=ensureLineSeries(name, 0);}}
                     const clean=cleanPoints(points);
-                    safeCall("lineSeries.setData", ()=>target.setData(clean), clean);
+                    safeCall("lineSeries.setData", ()=>target.setData(clean), clean.slice(-3));
                   }}catch(e){{console.error("lwc_setSeries error", e);}}
                 }};
                 window.lwc_setHeader=function(hdr){{renderHeader(hdr);}};
