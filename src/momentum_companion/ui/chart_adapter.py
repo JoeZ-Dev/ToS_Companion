@@ -25,25 +25,40 @@ class ChartAdapter:
     @staticmethod
     def _sanitize_bar(bar: Dict) -> Optional[BarDict]:
         try:
-            ts_ms = bar.get("ts_ms")
-            ts_sec = int(bar.get("time")) if "time" in bar else int(int(ts_ms) / 1000) if ts_ms is not None else None
-            if ts_sec is None:
+            if bar is None:
                 return None
+            ts = bar.get("time")
+            if ts is None and bar.get("ts_ms") is not None:
+                ts = int(int(bar["ts_ms"]) / 1000)
+            if ts is None:
+                return None
+            ts_i = int(ts)
+            # Handle ms accidentally
+            if ts_i > 10**12:
+                ts_i = int(ts_i / 1000)
             o = bar.get("open")
             h = bar.get("high")
             l = bar.get("low")
             c = bar.get("close")
-            v_raw = bar.get("volume")
-            if None in (o, h, l, c):
+            v_raw = bar.get("volume", 0.0)
+            if any(x is None for x in (o, h, l, c)):
                 return None
-            v = float(v_raw) if v_raw is not None else 0.0
+            o_f = float(o)
+            h_f = float(h)
+            l_f = float(l)
+            c_f = float(c)
+            if not all(math.isfinite(x) for x in (o_f, h_f, l_f, c_f)):
+                return None
+            v_f = float(v_raw) if v_raw is not None else 0.0
+            if not math.isfinite(v_f):
+                v_f = 0.0
             return {
-                "time": int(ts_sec),
-                "open": float(o),
-                "high": float(h),
-                "low": float(l),
-                "close": float(c),
-                "volume": float(v),
+                "time": ts_i,
+                "open": o_f,
+                "high": h_f,
+                "low": l_f,
+                "close": c_f,
+                "volume": v_f,
             }
         except Exception:
             return None
@@ -79,19 +94,21 @@ class ChartAdapter:
         try:
             if p is None:
                 return None
-            if "time" in p and p.get("time") is not None:
-                t = int(p["time"])
-            elif "ts_ms" in p and p.get("ts_ms") is not None:
+            t = p.get("time")
+            if t is None and p.get("ts_ms") is not None:
                 t = int(int(p["ts_ms"]) / 1000)
-            else:
+            if t is None:
                 return None
+            t_i = int(t)
+            if t_i > 10**12:
+                t_i = int(t_i / 1000)
             val = p.get("value")
             if val is None:
                 return None
             val_f = float(val)
-            if math.isnan(val_f):
+            if not math.isfinite(val_f):
                 return None
-            return {"time": t, "value": val_f}
+            return {"time": t_i, "value": val_f}
         except Exception:
             return None
 
@@ -130,6 +147,7 @@ class ChartAdapter:
         if dropped_sample is not None and not self._series_drop_logged:
             self._series_drop_logged = True
             logger.debug("Dropped invalid series points for %s sample=%s", name, dropped_sample)
+        sanitized = sorted(sanitized, key=lambda x: x["time"])
         self._widget.set_series(name, sanitized)
 
     def set_header(self, header: Dict) -> None:
@@ -138,6 +156,10 @@ class ChartAdapter:
     def set_markers(self, markers: List[Dict]) -> None:
         # Placeholder for future markers
         return None
+
+    def set_disable_series(self, flag: bool) -> None:
+        if hasattr(self._widget, "set_disable_series"):
+            self._widget.set_disable_series(flag)
 
     def shutdown(self) -> None:
         return None

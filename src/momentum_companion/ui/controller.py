@@ -88,6 +88,9 @@ class UIController:
             None,
         )
         self._chart_adapter = ChartAdapter(self._window.chart_widget)
+        self._disable_studies = os.getenv("MOMENTUM_COMPANION_DISABLE_STUDIES", "0") not in ("", "0", "false", "False")
+        if self._disable_studies:
+            self._chart_adapter.set_disable_series(True)
         self._initial_render_done = False
         self._indicators = IndicatorsEngine()
         self._last_quote: dict[str, Any] = {"bid": None, "ask": None, "last": None, "total_volume": None}
@@ -647,6 +650,8 @@ class UIController:
 
     def _update_studies(self, bars: list[dict]) -> None:
         """Compute VWAP/EMA studies and push to chart adapter."""
+        if self._disable_studies:
+            return
         if not bars:
             return
         try:

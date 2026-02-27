@@ -346,6 +346,8 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                          c.open==null || c.high==null || c.low==null || c.close==null ||
                          !isFiniteNum(c.open) || !isFiniteNum(c.high) || !isFiniteNum(c.low) || !isFiniteNum(c.close);
                 }}
+                window.__DISABLE_SERIES=false;
+                window.lwc_setDisableSeries=function(flag){{ window.__DISABLE_SERIES=!!flag; }};
                 window.lwc_setSymbol=function(s){{window.__symbol=s||'';}};
                 window.lwc_setData=function(data){{
                   try{{
@@ -372,11 +374,12 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 }};
                 function cleanPoints(points){{
                   return (points||[])
-                    .filter(p=>{{if(badSeriesPoint(p)){{logBad("BAD SERIES POINT", p); return false;}} return true;}})
-                    .map(p=>{{return {{...p, time:Number(p.time), value:Number(p.value)}};}});
+                    .map(p=>{{return {{...p, time:Number(p?.time), value:Number(p?.value)}};}})
+                    .filter(p=>{{if(badSeriesPoint(p)){{logBad("BAD SERIES POINT", p); return false;}} return true;}});
                 }}
                 window.lwc_setSeries=function(name, points){{
                   try{{
+                    if(window.__DISABLE_SERIES){{ return; }}
                     if(name.startsWith('MACD_HIST')){{
                       const target=ensureMacdSeries('MACD_HIST');
                       const clean=cleanPoints(points).map(p=>{{const v=p.value; const c=v>=0 ? '#27ae60' : '#c0392b'; return {{...p, value:v, color:c}};}});
@@ -475,6 +478,9 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
             return
         payload = json.dumps(sanitized)
         self.page().runJavaScript(f"window.lwc_setSeries('{name}', {payload});")
+
+    def set_disable_series(self, flag: bool) -> None:
+        self.page().runJavaScript(f"window.lwc_setDisableSeries({str(bool(flag)).lower()});")
 
     def set_header(self, header: dict) -> None:
         payload = json.dumps(header)
