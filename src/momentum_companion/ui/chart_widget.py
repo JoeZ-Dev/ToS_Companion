@@ -324,9 +324,17 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 }};
                 window.__lwcBadCount=0;
                 function logBad(label, payload){{
-                  if(window.__lwcBadCount>=5) return;
+                  if(window.__lwcBadCount>=20) return;
                   window.__lwcBadCount+=1;
                   console.error(label, payload);
+                }}
+                function safeCall(label, fn, payload){{
+                  try {{ return fn(); }}
+                  catch(e){{
+                    logBad("LWC_THROW " + label, payload);
+                    console.error("LWC_THROW", label, e, payload);
+                    throw e;
+                  }}
                 }}
                 function isFiniteNum(x){{const n=Number(x); return Number.isFinite(n);}}
                 function isFiniteTime(t){{const n=Number(t); return Number.isFinite(n) && n>0;}}
@@ -344,9 +352,9 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                     const bars=(data||[]).filter(b=>{{if(badCandle(b)){{logBad("BAD CANDLE setData", b); return false;}} b.time=Number(b.time); return true;}});
                     barStore.clear();
                     bars.forEach(b=>{{ if(b && b.time!==undefined) barStore.set(b.time,b); }});
-                    candleSeries.setData(bars);
+                    safeCall("candleSeries.setData", ()=>candleSeries.setData(bars), bars);
                     const vol=bars.map(volumePoint).filter(v=>v);
-                    volumeSeries.setData(vol);
+                    safeCall("volumeSeries.setData", ()=>volumeSeries.setData(vol), vol);
                     if(bars.length>0){{updateLastPriceLine(bars[bars.length-1]);}}
                   }}catch(e){{console.error("lwc_setData error", e);}}
                 }};
@@ -356,9 +364,9 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                     if(badCandle(bar)){{logBad("BAD CANDLE update", bar); return;}}
                     bar.time=Number(bar.time);
                     if(bar.time!==undefined){{barStore.set(bar.time, bar);}}
-                    candleSeries.update(bar);
+                    safeCall("candleSeries.update", ()=>candleSeries.update(bar), bar);
                     const vb=volumePoint(bar);
-                    if(vb){{volumeSeries.update(vb);}}
+                    if(vb){{safeCall("volumeSeries.update", ()=>volumeSeries.update(vb), vb);}}
                     updateLastPriceLine(bar);
                   }}catch(e){{console.error("lwc_update error", e);}}
                 }};
@@ -372,14 +380,14 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                     if(name.startsWith('MACD_HIST')){{
                       const target=ensureMacdSeries('MACD_HIST');
                       const clean=cleanPoints(points).map(p=>{{const v=p.value; const c=v>=0 ? '#27ae60' : '#c0392b'; return {{...p, value:v, color:c}};}});
-                      target.setData(clean);
+                      safeCall("macd_hist.setData", ()=>target.setData(clean), clean);
                       return;
                     }}
                     let target;
                     if(name.startsWith('MACD')){{target=ensureMacdSeries(name);}}
                     else {{target=ensureLineSeries(name, 0);}}
                     const clean=cleanPoints(points);
-                    target.setData(clean);
+                    safeCall("lineSeries.setData", ()=>target.setData(clean), clean);
                   }}catch(e){{console.error("lwc_setSeries error", e);}}
                 }};
                 window.lwc_setHeader=function(hdr){{renderHeader(hdr);}};
