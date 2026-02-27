@@ -28,9 +28,10 @@ class ChartAdapter:
             h = bar.get("high")
             l = bar.get("low")
             c = bar.get("close")
-            v = bar.get("volume")
-            if None in (o, h, l, c, v):
+            v_raw = bar.get("volume")
+            if None in (o, h, l, c):
                 return None
+            v = float(v_raw) if v_raw is not None else 0.0
             return {
                 "time": int(ts_sec),
                 "open": float(o),
@@ -44,10 +45,18 @@ class ChartAdapter:
 
     def set_history(self, bars: List[BarDict]) -> None:
         sanitized: List[BarDict] = []
-        for b in sorted(bars, key=lambda x: int(x.get("time") or 0)):
+        for b in bars:
             sb = self._sanitize_bar(b)
             if sb is not None:
                 sanitized.append(sb)
+            else:
+                if not self._debug_logged:
+                    try:
+                        self._debug_logged = True
+                        self._widget._logger.debug("Dropped malformed candle=%s", b)  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+        sanitized = sorted(sanitized, key=lambda x: int(x.get("time") or 0))
         if not sanitized:
             return
         self._last_full = list(sanitized)
