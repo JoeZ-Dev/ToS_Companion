@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from pathlib import Path
 import textwrap
 
@@ -19,6 +20,8 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
     def __init__(self) -> None:
         super().__init__()
         self._null_payload_logs = 0
+        self._series_null_warning_count = 0
+        self._series_warned: set[str] = set()
         self._init_chart()
 
     def resizeEvent(self, event: QtCore.QResizeEvent) -> None:  # noqa: N802
@@ -358,6 +361,44 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 logger.warning("Chart payload missing field(s) %s via %s: %s", required, label, entry)
                 break
 
+    def _sanitize_series_points(self, name: str, points: list[dict] | None) -> list[dict]:
+        sanitized: list[dict] = []
+        dropped = 0
+        sample = None
+        for pt in points or []:
+            if not isinstance(pt, dict):
+                dropped += 1
+                sample = sample or pt
+                continue
+            t = pt.get("time")
+            if t is None:
+                dropped += 1
+                sample = sample or pt
+                continue
+            try:
+                t_int = int(t)
+            except Exception:
+                dropped += 1
+                sample = sample or pt
+                continue
+            val = pt.get("value")
+            try:
+                val_f = float(val)
+            except Exception:
+                dropped += 1
+                sample = sample or pt
+                continue
+            if val is None or not math.isfinite(val_f):
+                dropped += 1
+                sample = sample or pt
+                continue
+            sanitized.append({"time": t_int, "value": val_f})
+        if dropped and name not in self._series_warned and self._series_null_warning_count < 10:
+            self._series_warned.add(name)
+            self._series_null_warning_count += 1
+            logger.warning("Dropped %s invalid series points for %s sample=%s", dropped, name, sample)
+        return sanitized
+
     def set_data(self, bars: list[dict]) -> None:
         self._log_if_nulls("set_data", bars)
         payload = json.dumps(bars)
@@ -369,7 +410,10 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
         self.page().runJavaScript(f"window.lwc_update({payload});")
 
     def set_series(self, name: str, points: list[dict]) -> None:
-        payload = json.dumps(points)
+        sanitized = self._sanitize_series_points(name, points)
+        if not sanitized:
+            return
+        payload = json.dumps(sanitized)
         self.page().runJavaScript(f"window.lwc_setSeries('{name}', {payload});")
 
     def set_header(self, header: dict) -> None:
