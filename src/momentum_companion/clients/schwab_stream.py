@@ -47,6 +47,7 @@ class SchwabStreamClient:
         self._journal = journal
         self._state_callback = state_callback
         self._conn_id = 0
+        self._connecting = False
         self._reconnecting = False
         self._reconnect_thread: Optional[threading.Thread] = None
         self._closing = False
@@ -69,27 +70,34 @@ class SchwabStreamClient:
         if not url:
             raise ValueError("Missing streamerSocketUrl")
         # Preflight token check to avoid hammering with bad/missing creds
-        probe_token = self._auth_token()
-        if not probe_token:
-            refreshed = self._refresh_streamer_info()
-            probe_token = self._auth_token()
+        self._connecting = True
+        try:
+            probe_token = self._peek_token()
+            if not probe_token and hasattr(self._token_provider, "refresh"):
+                try:
+                    self._token_provider.refresh()
+                except Exception:
+                    logger.warning("Stream connect token refresh failed", exc_info=True)
+                probe_token = self._peek_token()
             if not probe_token:
                 logger.error("Stream connect skipped: missing OAuth access token; AUTH_REQUIRED")
                 self._emit_state("AUTH_REQUIRED")
                 return
-        self._closing = False
-        self._conn_id += 1
-        conn_id = self._conn_id
-        self._ws = websocket.WebSocketApp(
-            url,
-            on_open=self._on_open,
-            on_message=self._on_message,
-            on_error=self._on_error,
-            on_close=self._on_close,
-        )
-        self._thread = threading.Thread(target=self._ws.run_forever, daemon=True, kwargs={"sslopt": {"check_hostname": False}})
-        self._thread.name = f"schwab-stream-{conn_id}"
-        self._thread.start()
+            self._closing = False
+            self._conn_id += 1
+            conn_id = self._conn_id
+            self._ws = websocket.WebSocketApp(
+                url,
+                on_open=self._on_open,
+                on_message=self._on_message,
+                on_error=self._on_error,
+                on_close=self._on_close,
+            )
+            self._thread = threading.Thread(target=self._ws.run_forever, daemon=True, kwargs={"sslopt": {"check_hostname": False}})
+            self._thread.name = f"schwab-stream-{conn_id}"
+            self._thread.start()
+        finally:
+            self._connecting = False
 
     def subscribe_level_one(self, symbol: str) -> None:
         """Subscribe to LEVELONE_EQUITIES for the active symbol."""
@@ -180,7 +188,7 @@ class SchwabStreamClient:
     def _auth_token(self) -> str:
         # Prefer streaming token from streamerInfo; fallback to OAuth token if absent.
         # Safe fallback: prefer streamer token if ever provided, but accept OAuth bearer for LOGIN.
-        token = self._streamer_info.get("token") or self._streamer_info.get("access_token", "")
+        token = self._peek_token()
         if token:
             self._auth_source = "streamer_token"
             return token
@@ -197,11 +205,21 @@ class SchwabStreamClient:
 
     def _on_token_refreshed(self, tokens: dict) -> None:
         """Refresh listener: restart stream with new token."""
+        if self._connecting:
+            logger.debug("Stream token refresh ignored (connect in progress)")
+            return
+        if not self._connected and self._connection_state != "CONNECTED":
+            return
         try:
             self.disconnect()
             self.connect()
         except Exception as exc:  # noqa: BLE001
             logger.error("Stream restart on token refresh failed: %s", exc)
+
+    def _peek_token(self) -> str:
+        if self._token_provider and hasattr(self._token_provider, "peek_access_token"):
+            return self._token_provider.peek_access_token()  # type: ignore[attr-defined]
+        return self._streamer_info.get("token") or self._streamer_info.get("access_token", "") or ""
 
     # Internal callbacks
     def _on_open(self, ws: websocket.WebSocketApp) -> None:

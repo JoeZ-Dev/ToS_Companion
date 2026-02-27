@@ -44,6 +44,7 @@ class TokenProvider:
         self._logger = logging.getLogger(__name__)
         self._helper_http: httpx.Client | None = None
         self._helper_backoff_until: float = 0.0
+        self._last_notified: tuple[str | None, float | None] = (None, None)
 
     def __call__(self) -> str:
         if self._auth_helper_url:
@@ -51,6 +52,12 @@ class TokenProvider:
             return self._helper_cache.get("access_token", "")
         self._maybe_refresh()
         return self._token_cache.get("access_token", "")
+
+    def peek_access_token(self) -> str:
+        """Return cached access token without refreshing or notifying listeners."""
+        if self._auth_helper_url:
+            return self._helper_cache.get("access_token", "") or ""
+        return self._token_cache.get("access_token", "") or ""
 
     def set_access_token(self, token: str, expires_at: Optional[float] = None) -> None:
         self._token_cache["access_token"] = token
@@ -220,6 +227,11 @@ class TokenProvider:
         self._refresh_listeners.append(listener)
 
     def _notify_listeners(self) -> None:
+        access = self.peek_access_token()
+        expires_at = self._helper_cache.get("expires_at") if self._auth_helper_url else self._token_cache.get("expires_at")
+        if (access, expires_at) == self._last_notified:
+            return
+        self._last_notified = (access, expires_at)
         for listener in self._refresh_listeners:
             try:
                 listener(self._token_cache)
