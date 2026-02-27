@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 import textwrap
 
@@ -9,11 +10,15 @@ from PySide6 import QtWebEngineWidgets, QtCore
 ASSET_JS = Path(__file__).parent / "assets" / "lightweight-charts.standalone.production.js"
 
 
+logger = logging.getLogger(__name__)
+
+
 class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
     """Lightweight Charts via inlined HTML/JS using bundled standalone script."""
 
     def __init__(self) -> None:
         super().__init__()
+        self._null_payload_logs = 0
         self._init_chart()
 
     def resizeEvent(self, event: QtCore.QResizeEvent) -> None:  # noqa: N802
@@ -336,11 +341,30 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
         )
         self.setHtml(html)
 
+    def _log_if_nulls(self, label: str, payload: list[dict] | dict) -> None:
+        if self._null_payload_logs >= 3:
+            return
+        to_check: list[dict]
+        if isinstance(payload, dict):
+            to_check = [payload]
+        else:
+            to_check = payload or []
+        required = ("time", "open", "high", "low", "close", "volume")
+        for entry in to_check:
+            if not isinstance(entry, dict):
+                continue
+            if any(entry.get(k) is None for k in required):
+                self._null_payload_logs += 1
+                logger.warning("Chart payload missing field(s) %s via %s: %s", required, label, entry)
+                break
+
     def set_data(self, bars: list[dict]) -> None:
+        self._log_if_nulls("set_data", bars)
         payload = json.dumps(bars)
         self.page().runJavaScript(f"window.lwc_setData({payload});")
 
     def update_bar(self, bar: dict) -> None:
+        self._log_if_nulls("update_bar", bar)
         payload = json.dumps(bar)
         self.page().runJavaScript(f"window.lwc_update({payload});")
 
