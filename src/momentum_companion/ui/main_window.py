@@ -685,8 +685,11 @@ class MainWindow(QtWidgets.QMainWindow):
             update_btn.clicked.connect(self._handle_update_clicked)
             reset_btn = QtWidgets.QPushButton("Reset Prompt")
             reset_btn.clicked.connect(self._handle_reset_prompt_clicked)
+            refresh_token_btn = QtWidgets.QPushButton("Refresh Token")
+            refresh_token_btn.clicked.connect(lambda: getattr(self, "_handle_refresh_token_clicked", lambda: None)())
             btn_row = QtWidgets.QHBoxLayout()
             btn_row.addStretch()
+            btn_row.addWidget(refresh_token_btn)
             btn_row.addWidget(reset_btn)
             btn_row.addWidget(update_btn)
             btn_row.addWidget(close_btn)
@@ -741,6 +744,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._massive_test_callback:
             status = self._massive_test_callback()
             self.set_massive_test_status(status.lower())
+
+    def _handle_refresh_token_clicked(self) -> None:
+        if hasattr(self, "_refresh_token_callback") and self._refresh_token_callback:
+            self._refresh_token_callback()
 
     def set_api_key_callback(self, cb: Callable[[str], None]) -> None:
         self._api_key_callback = cb
@@ -829,6 +836,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def set_refresh_model_callback(self, cb: Callable[[str], None]) -> None:
         self._refresh_model_callback = cb
+
+    def set_refresh_token_callback(self, cb: Callable[[], None]) -> None:
+        self._refresh_token_callback = cb
     def set_rr_gate_callback(self, cb: Callable[[bool], None]) -> None:
         self._rr_gate_callback = cb
     def set_tz_callback(self, cb: Callable[[str], None]) -> None:

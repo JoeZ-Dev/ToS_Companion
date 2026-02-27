@@ -124,6 +124,8 @@ class UIController:
                 )
             )
         self._hook_symbol_input()
+        if hasattr(self._window, "set_refresh_token_callback"):
+            self._window.set_refresh_token_callback(self._refresh_token_manual)  # type: ignore[attr-defined]
 
     def handle_flash(self, symbol: str, rec: dict, payload: dict) -> None:
         """Trigger flash alert in UI."""
@@ -159,6 +161,8 @@ class UIController:
             self._window.set_rr_gate_callback(self._set_rr_gate_disabled)  # type: ignore[attr-defined]
         if hasattr(self._window, "set_tz_callback"):
             self._window.set_tz_callback(self._on_display_tz_changed)  # type: ignore[attr-defined]
+        if hasattr(self._window, "set_refresh_token_callback"):
+            self._window.set_refresh_token_callback(self._refresh_token_manual)  # type: ignore[attr-defined]
         if hasattr(self._window, "_on_llm_result_ready"):
             try:
                 self._llm_signals.llm_result_ready.connect(self._window._on_llm_result_ready)  # type: ignore[attr-defined]
@@ -274,6 +278,17 @@ class UIController:
             self._logger.debug("Loaded 1m bars for %s count=%s", symbol, len(bars))
         except Exception:
             self._logger.debug("Failed to load 1m bars for %s", symbol, exc_info=True)
+
+    def _refresh_token_manual(self) -> None:
+        """Manual refresh of access/refresh token via token provider."""
+        try:
+            if self._token_provider and hasattr(self._token_provider, "refresh"):
+                self._token_provider.refresh()
+                self._logger.info("Manual token refresh invoked")
+                self._window.banner.setText("Token refreshed")
+        except Exception:
+            self._logger.warning("Manual token refresh failed", exc_info=True)
+            self._window.banner.setText("Token refresh failed")
 
     def _fetch_candles(self, symbol: str, start_ms: int | None, end_ms: int | None, freq: str) -> list[dict]:
         resp = self._rest_client.fetch_price_history(symbol, start_ms, end_ms, freq)
