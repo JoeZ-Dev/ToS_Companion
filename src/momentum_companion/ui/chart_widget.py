@@ -324,15 +324,19 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                   console.error(label, payload);
                 }}
                 function isFiniteNum(x){{const n=Number(x); return Number.isFinite(n);}}
-                function badSeriesPoint(p){{return !p || p.time==null || p.value==null || !isFiniteNum(p.value);}}
+                function isFiniteTime(t){{const n=Number(t); return Number.isFinite(n) && n>0;}}
+                function badSeriesPoint(p){{
+                  return !p || p.time==null || !isFiniteTime(p.time) || p.value==null || !isFiniteNum(p.value);
+                }}
                 function badCandle(c){{
-                  return !c || c.time==null || c.open==null || c.high==null || c.low==null || c.close==null ||
+                  return !c || c.time==null || !isFiniteTime(c.time) ||
+                         c.open==null || c.high==null || c.low==null || c.close==null ||
                          !isFiniteNum(c.open) || !isFiniteNum(c.high) || !isFiniteNum(c.low) || !isFiniteNum(c.close);
                 }}
                 window.lwc_setSymbol=function(s){{window.__symbol=s||'';}};
                 window.lwc_setData=function(data){{
                   try{{
-                    const bars=(data||[]).filter(b=>{{if(badCandle(b)){{logBad("BAD CANDLE setData", b); return false;}} return true;}});
+                    const bars=(data||[]).filter(b=>{{if(badCandle(b)){{logBad("BAD CANDLE setData", b); return false;}} b.time=Number(b.time); return true;}});
                     barStore.clear();
                     bars.forEach(b=>{{ if(b && b.time!==undefined) barStore.set(b.time,b); }});
                     candleSeries.setData(bars);
@@ -345,6 +349,7 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                   try{{
                     if(!bar){{return;}}
                     if(badCandle(bar)){{logBad("BAD CANDLE update", bar); return;}}
+                    bar.time=Number(bar.time);
                     if(bar.time!==undefined){{barStore.set(bar.time, bar);}}
                     candleSeries.update(bar);
                     const vb=volumePoint(bar);
@@ -355,7 +360,7 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 function cleanPoints(points){{
                   return (points||[])
                     .filter(p=>{{if(badSeriesPoint(p)){{logBad("BAD SERIES POINT", p); return false;}} return true;}})
-                    .map(p=>{{return {{...p, time:p.time, value:Number(p.value)}};}});
+                    .map(p=>{{return {{...p, time:Number(p.time), value:Number(p.value)}};}});
                 }}
                 window.lwc_setSeries=function(name, points){{
                   try{{
