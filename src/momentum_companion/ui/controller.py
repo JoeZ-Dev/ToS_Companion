@@ -118,6 +118,7 @@ class UIController:
         self._last_llm_rec_by_symbol: dict[str, dict] = {}
         self._bars_1m: list[dict] = []
         self._use_chart_stream: bool = os.environ.get("ENABLE_CHART_STREAM", "1") != "0"
+        self._active_symbol: str | None = None
         if hasattr(self._window, "populate_models"):
             # Single signal carries models + selections to enforce ordering
             self._model_signals.models_ready.connect(  # type: ignore[attr-defined]
@@ -188,6 +189,7 @@ class UIController:
         self._window.symbol_input.setText(symbol)
         if not symbol:
             return
+        self._active_symbol = symbol
         self._pending_symbol = symbol
         self._aggregator = BarAggregator10s()
         self._bars = []
@@ -501,7 +503,8 @@ class UIController:
         try:
             symbol = bar.get("symbol")
             ts_ms = bar.get("ts_ms")
-            if symbol != self._active_symbol or ts_ms is None:
+            current = getattr(self, "_active_symbol", None)
+            if current is None or symbol != current or ts_ms is None:
                 return
             ts_sec = int(int(ts_ms) // 1000)
             volume = float(bar.get("volume", 0) or 0)
