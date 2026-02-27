@@ -176,10 +176,15 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                 window.__symbol = window.__symbol || '';
                 const MACD_PANE_INDEX=1;
                 function volumePoint(bar){{
-                  if(!bar||bar.time===undefined){{return null;}}
+                  if(!bar || bar.time==null){{return null;}}
+                  const t=Number(bar.time);
+                  if(!Number.isFinite(t)) return null;
+                  if(bar.volume==null){{logBad("BAD VOLUME (null)->0", bar);}}
+                  const v=Number(bar.volume);
+                  const vv=Number.isFinite(v) ? v : 0;
                   const up=bar.close===undefined||bar.open===undefined?true:(bar.close>=bar.open);
                   const color=up?'rgba(38,166,154,0.28)':'rgba(239,83,80,0.28)';
-                  return {{time:bar.time,value:bar.volume||0,color}};
+                  return {{time:t,value:vv,color}};
                 }}
                 function updateLastPriceLine(bar){{
                   if(!bar||bar.close===undefined){{return;}}
