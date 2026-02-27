@@ -326,18 +326,22 @@ class LightweightChartWidget(QtWebEngineWidgets.QWebEngineView):
                   if(vb){{volumeSeries.update(vb);}}
                   updateLastPriceLine(bar);
                 }};
+                function cleanPoints(points){{
+                  return (points||[])
+                    .filter(p=>p&&p.time!==undefined&&p.time!==null&&p.value!==undefined&&p.value!==null&&Number.isFinite(Number(p.value)))
+                    .map(p=>{{return {{...p, time:p.time, value:Number(p.value)}};}});
+                }}
                 window.lwc_setSeries=function(name, points){{
-                  const filt=(points||[]).filter(p=>p&&p.time!==undefined&&p.time!==null&&p.value!==undefined&&p.value!==null&&Number.isFinite(Number(p.value)));
                   if(name.startsWith('MACD_HIST')){{
                     const target=ensureMacdSeries('MACD_HIST');
-                    const mapped=filt.map(p=>{{const v=Number(p.value); const c=v>=0 ? '#27ae60' : '#c0392b'; return {{...p, value:v, color:c}};}});
-                    target.setData(mapped);
+                    const clean=cleanPoints(points).map(p=>{{const v=p.value; const c=v>=0 ? '#27ae60' : '#c0392b'; return {{...p, value:v, color:c}};}});
+                    target.setData(clean);
                     return;
                   }}
                   let target;
                   if(name.startsWith('MACD')){{target=ensureMacdSeries(name);}}
                   else {{target=ensureLineSeries(name, 0);}}
-                  const clean=filt.map(p=>{{return {{time:p.time, value:Number(p.value)}};}});
+                  const clean=cleanPoints(points);
                   target.setData(clean);
                 }};
                 window.lwc_setHeader=function(hdr){{renderHeader(hdr);}};
