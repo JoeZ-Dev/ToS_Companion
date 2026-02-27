@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
+import math
 from typing import List, Dict, Optional
 
 from momentum_companion.ui.chart_widget import LightweightChartWidget
+
+logger = logging.getLogger(__name__)
 
 BarDict = Dict[str, float]
 
@@ -16,6 +20,7 @@ class ChartAdapter:
         self._last_full: Optional[List[BarDict]] = None
         self._last_time_sec: Optional[int] = None
         self._debug_logged = False
+        self._series_drop_logged = False
 
     @staticmethod
     def _sanitize_bar(bar: Dict) -> Optional[BarDict]:
@@ -69,6 +74,27 @@ class ChartAdapter:
                 pass
         self._widget.set_data(sanitized)
 
+    @staticmethod
+    def _sanitize_point(p: Dict) -> Optional[Dict]:
+        try:
+            if p is None:
+                return None
+            if "time" in p and p.get("time") is not None:
+                t = int(p["time"])
+            elif "ts_ms" in p and p.get("ts_ms") is not None:
+                t = int(int(p["ts_ms"]) / 1000)
+            else:
+                return None
+            val = p.get("value")
+            if val is None:
+                return None
+            val_f = float(val)
+            if math.isnan(val_f):
+                return None
+            return {"time": t, "value": val_f}
+        except Exception:
+            return None
+
     def upsert_bar(self, bar: BarDict) -> None:
         sb = self._sanitize_bar(bar)
         if sb is None:
@@ -87,7 +113,24 @@ class ChartAdapter:
         self._last_time_sec = max(self._last_time_sec or t, t)
 
     def set_series(self, name: str, points: List[Dict]) -> None:
-        self._widget.set_series(name, points)
+        sanitized: List[Dict] = []
+        dropped_sample: Optional[Dict] = None
+        for pt in points:
+            sp = self._sanitize_point(pt)
+            if sp is None:
+                if dropped_sample is None:
+                    dropped_sample = pt
+                continue
+            sanitized.append(sp)
+        if not sanitized:
+            if dropped_sample is not None and not self._series_drop_logged:
+                self._series_drop_logged = True
+                logger.debug("Dropped invalid series points for %s sample=%s", name, dropped_sample)
+            return
+        if dropped_sample is not None and not self._series_drop_logged:
+            self._series_drop_logged = True
+            logger.debug("Dropped invalid series points for %s sample=%s", name, dropped_sample)
+        self._widget.set_series(name, sanitized)
 
     def set_header(self, header: Dict) -> None:
         self._widget.set_header(header)
