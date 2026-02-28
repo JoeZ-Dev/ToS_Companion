@@ -20,7 +20,8 @@ def test_pricehistory_range_omits_period_params():
     client.fetch_price_history("CDIO", start_ms=1000, end_ms=2000, freq="1m")
     assert client.last_params is not None
     assert "startDate" in client.last_params and "endDate" in client.last_params
-    assert "periodType" not in client.last_params and "period" not in client.last_params
+    assert client.last_params.get("periodType") == "day"
+    assert client.last_params.get("period") == 1
 
 
 def test_pricehistory_period_omits_explicit_range():

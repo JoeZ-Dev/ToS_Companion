@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any, Dict, Optional
 
 import httpx
@@ -92,17 +93,18 @@ class SchwabRestClient:
         """Retrieve historical candles used for AE inputs."""
         params: Dict[str, Any] = {"symbol": symbol}
         params.update(self._freq_params(freq))
-        if start_ms is not None and end_ms is not None:
-            if start_ms >= end_ms:
-                logger.warning("pricehistory start_ms >= end_ms — swapping start/end")
-                start_ms, end_ms = end_ms, start_ms
-            params["startDate"] = int(start_ms)
-            params["endDate"] = int(end_ms)
-            params.pop("periodType", None)
-            params.pop("period", None)
-        else:
-            params.pop("startDate", None)
-            params.pop("endDate", None)
+        start = int(start_ms) if start_ms is not None else None
+        end = int(end_ms) if end_ms is not None else None
+        if end is not None:
+            now_ms = int(time.time() * 1000)
+            end = min(end, now_ms - 2000)
+        if start is not None and end is not None and end <= start:
+            logger.warning("pricehistory start_ms >= end_ms — adjusting end_ms to start_ms+60000")
+            end = start + 60_000
+        if start is not None:
+            params["startDate"] = start
+        if end is not None:
+            params["endDate"] = end
         resp = self._request("GET", f"{self._md_base_url}/pricehistory", params=params)
         return resp.json()
 
@@ -138,5 +140,13 @@ class SchwabRestClient:
             except Exception as exc:  # noqa: BLE001
                 logger.error("Token refresh failed: %s", exc)
                 raise
+        if resp.status_code == 400:
+            try:
+                params = kwargs.get("params")
+                body = resp.text
+                snippet = body[:2000] if body else body
+                logger.error("Schwab 400 for %s %s params=%s body=%s", method, url, params, snippet)
+            except Exception:
+                logger.error("Schwab 400 for %s %s (failed to log body)", method, url)
         resp.raise_for_status()
         return resp
