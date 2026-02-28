@@ -92,10 +92,17 @@ class SchwabRestClient:
         """Retrieve historical candles used for AE inputs."""
         params: Dict[str, Any] = {"symbol": symbol}
         params.update(self._freq_params(freq))
-        if start_ms is not None:
-            params["startDate"] = start_ms
-        if end_ms is not None:
-            params["endDate"] = end_ms
+        if start_ms is not None and end_ms is not None:
+            if start_ms >= end_ms:
+                logger.warning("pricehistory start_ms >= end_ms — swapping start/end")
+                start_ms, end_ms = end_ms, start_ms
+            params["startDate"] = int(start_ms)
+            params["endDate"] = int(end_ms)
+            params.pop("periodType", None)
+            params.pop("period", None)
+        else:
+            params.pop("startDate", None)
+            params.pop("endDate", None)
         resp = self._request("GET", f"{self._md_base_url}/pricehistory", params=params)
         return resp.json()
 
