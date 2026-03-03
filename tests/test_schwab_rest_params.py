@@ -22,6 +22,7 @@ def test_pricehistory_range_omits_period_params():
     assert "startDate" in client.last_params and "endDate" in client.last_params
     assert client.last_params.get("periodType") == "day"
     assert client.last_params.get("period") == 1
+    assert client.last_params["startDate"] < client.last_params["endDate"]
 
 
 def test_pricehistory_period_omits_explicit_range():

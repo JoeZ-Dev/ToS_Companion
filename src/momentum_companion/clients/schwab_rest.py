@@ -91,20 +91,29 @@ class SchwabRestClient:
         self, symbol: str, start_ms: Optional[int], end_ms: Optional[int], freq: str
     ) -> Dict[str, Any]:
         """Retrieve historical candles used for AE inputs."""
+
+        def _window_ms(f: str) -> int:
+            if f == "1m":
+                return 60 * 60 * 1000  # 1h
+            if f == "5m":
+                return 6 * 60 * 60 * 1000  # 6h
+            if f == "1h":
+                return 7 * 24 * 60 * 60 * 1000  # 7d
+            return 60 * 60 * 1000
+
+        now_ms = int(time.time() * 1000)
+        clamp_target = now_ms - 2000
+        end = clamp_target if end_ms is None else min(int(end_ms), clamp_target)
+        start = end - _window_ms(freq) if start_ms is None else int(start_ms)
+        if start >= end:
+            start = end - _window_ms(freq)
+        start = min(start, end - 1000)
+        logger.info("pricehistory normalized freq=%s start_ms=%s end_ms=%s now_ms=%s", freq, start, end, now_ms)
+
         params: Dict[str, Any] = {"symbol": symbol}
         params.update(self._freq_params(freq))
-        start = int(start_ms) if start_ms is not None else None
-        end = int(end_ms) if end_ms is not None else None
-        if end is not None:
-            now_ms = int(time.time() * 1000)
-            end = min(end, now_ms - 2000)
-        if start is not None and end is not None and end <= start:
-            logger.warning("pricehistory start_ms >= end_ms — adjusting end_ms to start_ms+60000")
-            end = start + 60_000
-        if start is not None:
-            params["startDate"] = start
-        if end is not None:
-            params["endDate"] = end
+        params["startDate"] = start
+        params["endDate"] = end
         resp = self._request("GET", f"{self._md_base_url}/pricehistory", params=params)
         return resp.json()
 
