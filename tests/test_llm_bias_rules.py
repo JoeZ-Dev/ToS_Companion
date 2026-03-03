@@ -24,8 +24,10 @@ def test_stock_bias_actionable():
             }
         ],
     }
-    out = UIController._apply_pullback_guard(rec, current_price=4.0)
+    guard = UIController._apply_pullback_guard(rec, current_price=4.0)
+    out, ok, _ = UIController._validate_llm_output(guard, current_price=4.0)
     assert out["stock_bias"] == "HAS_POTENTIAL"
+    assert ok
 
 
 def test_stock_bias_no_edge_when_weak():
@@ -51,8 +53,11 @@ def test_stock_bias_no_edge_when_weak():
             }
         ],
     }
-    out = UIController._apply_pullback_guard(rec, current_price=4.4)
+    guard = UIController._apply_pullback_guard(rec, current_price=4.4)
+    out, ok, reasons = UIController._validate_llm_output(guard, current_price=4.4)
     assert out["stock_bias"] == "NO_EDGE"
+    assert not ok
+    assert any("rating too high" in r or "rr" in r for r in reasons)
 
 
 def test_near_price_requires_close_hold():
@@ -78,9 +83,11 @@ def test_near_price_requires_close_hold():
             }
         ],
     }
-    out = UIController._apply_pullback_guard(rec, current_price=4.49)
-    assert "close" in out["setups"][0]["trigger_condition"].lower()
-    assert "hold" in out["setups"][0]["trigger_condition"].lower() or "retest" in out["setups"][0]["trigger_condition"].lower()
+    guard = UIController._apply_pullback_guard(rec, current_price=4.49)
+    out, ok, _ = UIController._validate_llm_output(guard, current_price=4.49)
+    tc = out["setups"][0]["trigger_condition"].lower()
+    assert "close" in tc
+    assert "hold" in tc or "retest" in tc
 
 
 def test_currency_symbols_removed():
@@ -106,7 +113,8 @@ def test_currency_symbols_removed():
             }
         ],
     }
-    out = UIController._apply_pullback_guard(rec, current_price=4.49)
+    guard = UIController._apply_pullback_guard(rec, current_price=4.49)
+    out, _, _ = UIController._validate_llm_output(guard, current_price=4.49)
     assert "$" not in out["summary"]
     for k in ("name", "trigger_condition", "target1_label", "extension_trigger", "extension_notes"):
         assert "$" not in out["setups"][0][k]

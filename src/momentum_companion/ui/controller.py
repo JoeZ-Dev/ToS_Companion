@@ -1613,7 +1613,6 @@ class UIController:
             "- Maximum 2 setups returned.\n"
             "- If there are 3+ plausible setups, return only the best 1–2 and do NOT include any rated below B+.\n"
             "- If only 1–2 candidates exist, you may include a lone B- or C/C+ (rating rules still apply).\n"
-            "- Determine best_is_actionable: exists setup with setup_rating>=B- AND rr_to_target1>=1.2 AND move_pct_to_target1>=0.03. If best_is_actionable -> stock_bias=\"HAS_POTENTIAL\". Else -> stock_bias=\"NO_EDGE\". This is deterministic; do not override subjectively—use tape_warning/confirmation/rating caps for risk.\n"
             "- Rating must reflect rr_to_target1:\n"
             "    * rr_to_target1 < 1.0  -> setup_rating cannot be above C+\n"
             "    * 1.0 <= rr_to_target1 < 1.2 -> setup_rating cannot be above B-\n"
@@ -1662,7 +1661,6 @@ class UIController:
             "SETUP_DISCOVERY_REFRESH_V1\n"
             "Return EXACTLY ONE JSON object in the SAME schema as full mode (stock_bias, summary, setups[]...).\n"
             'stock_bias MUST be one of: "HAS_POTENTIAL" | "NO_EDGE".\n'
-            "- Determine best_is_actionable: exists setup with setup_rating>=B- AND rr_to_target1>=1.2 AND move_pct_to_target1>=0.03. If best_is_actionable -> stock_bias=\"HAS_POTENTIAL\". Else -> stock_bias=\"NO_EDGE\". This is deterministic; do not override subjectively—use tape_warning/confirmation/rating caps for risk.\n"
             "Every setup MUST include ALL required keys: name, trigger_condition, entry_trigger_price, stop_price, target_price, rr_to_target1, move_pct_to_target1, setup_rating, confirmation_requirements, target1_label, extension_trigger, extension_target, extension_notes, tape_warning.\n"
             "If you do not change a field, copy it from prior_best_setup. Do not omit fields.\n"
             "Use prior_best_setup plus latest prices/levels to update triggers/targets/stops/RR if needed.\n"
@@ -1986,6 +1984,7 @@ class UIController:
     ) -> None:
         current_price = self._current_price_from_quote(normalized_snapshot.get("quote") or {})
         parsed = self._apply_pullback_guard(parsed, current_price)
+        parsed, valid, reasons = self._validate_llm_output(parsed, current_price)
         payload = {
             "symbol": normalized_snapshot.get("symbol"),
             "as_of_ts_ms": normalized_snapshot.get("as_of_ts_ms"),
@@ -1993,14 +1992,14 @@ class UIController:
             "invocation_type": normalized_snapshot.get("invocation_type") or invocation,
             "parsed": parsed,
             "raw_text": raw_text,
-            "error": error,
+            "error": error or (None if valid else f"LLM output invalid: {'; '.join(reasons)}"),
         }
         self._last_llm_payload = payload
         self._logger.info(
             "LLM UI payload emitted symbol=%s parsed_ok=%s error=%s",
             payload.get("symbol"),
-            parsed is not None and error is None,
-            error,
+            parsed is not None and payload.get("error") is None,
+            payload.get("error"),
         )
         symbol = normalized_snapshot.get("symbol")
         if symbol and parsed and isinstance(parsed, dict):
@@ -2032,7 +2031,6 @@ class UIController:
             return parsed
         if current_price is None:
             return parsed
-        best_actionable = False
         summary = parsed.get("summary") if isinstance(parsed.get("summary"), str) else ""
         added_summary = False
         for setup in setups:
@@ -2047,12 +2045,6 @@ class UIController:
             cond_str = cond if isinstance(cond, str) else ""
             cond_lower = cond_str.lower()
             has_kw = any(k in cond_lower for k in ("pullback", "retest", "reclaim"))
-            rr = setup.get("rr_to_target1")
-            move_pct = setup.get("move_pct_to_target1")
-            rating = setup.get("setup_rating")
-            if isinstance(rr, (int, float)) and isinstance(move_pct, (int, float)) and isinstance(rating, str):
-                if rating in {"A+", "A", "A-", "B+", "B", "B-"} and rr >= 1.2 and move_pct >= 0.03:
-                    best_actionable = True
             # enforce pullback labeling when entry well below current
             if entry_f <= current_price * 0.99:
                 if not has_kw:
@@ -2081,13 +2073,75 @@ class UIController:
                     setup[key] = val.replace("$", "")
         if added_summary:
             parsed["summary"] = summary.replace("$", "") if isinstance(summary, str) else summary
-        if best_actionable:
-            parsed["stock_bias"] = "HAS_POTENTIAL"
-        else:
-            parsed["stock_bias"] = "NO_EDGE"
         if isinstance(parsed.get("summary"), str) and "$" in parsed["summary"]:
             parsed["summary"] = parsed["summary"].replace("$", "")
         return parsed
+
+    @staticmethod
+    def _validate_llm_output(parsed: dict | None, current_price: float | None) -> tuple[dict | None, bool, list[str]]:
+        reasons: list[str] = []
+        if not parsed or not isinstance(parsed, dict):
+            return parsed, False, ["parsed payload missing or invalid"]
+        setups = parsed.get("setups")
+        if not isinstance(setups, list):
+            return parsed, False, ["setups missing"]
+
+        def rating_rank(r: str) -> int:
+            order = ["D", "C-", "C", "C+", "B-", "B", "B+", "A-", "A", "A+"]
+            return order.index(r) if r in order else -1
+
+        best_actionable = False
+        for setup in setups:
+            if not isinstance(setup, dict):
+                reasons.append("non-dict setup")
+                continue
+            entry = setup.get("entry_trigger_price")
+            stop = setup.get("stop_price")
+            target = setup.get("target_price")
+            rr = setup.get("rr_to_target1")
+            move_pct = setup.get("move_pct_to_target1")
+            rating = setup.get("setup_rating")
+            trigger = setup.get("trigger_condition", "")
+            for key in ("trigger_condition", "confirmation_requirements", "name", "extension_notes", "extension_trigger", "target1_label"):
+                val = setup.get(key)
+                if isinstance(val, str) and "$" in val:
+                    reasons.append("currency_symbol_present")
+            try:
+                entry_f = float(entry)
+                stop_f = float(stop)
+                target_f = float(target)
+            except Exception:
+                reasons.append("numeric fields invalid")
+                continue
+            if current_price is not None and abs(entry_f - current_price) / current_price < 0.003:
+                low = trigger.lower() if isinstance(trigger, str) else ""
+                if "close" not in low or ("hold" not in low and "retest" not in low):
+                    reasons.append("near-price trigger missing close/hold")
+            reward = target_f - entry_f
+            risk = entry_f - stop_f
+            if risk <= 0 or reward <= 0:
+                reasons.append("nonpositive rr inputs")
+                continue
+            rr_calc = reward / risk
+            move_calc = reward / entry_f if entry_f != 0 else 0
+            if isinstance(rr, (int, float)) and abs(rr - rr_calc) > max(0.01, 0.02 * rr_calc):
+                reasons.append("rr_to_target1 mismatch")
+            if isinstance(move_pct, (int, float)) and abs(move_pct - move_calc) > max(0.001, 0.02 * move_calc):
+                reasons.append("move_pct_to_target1 mismatch")
+            rank = rating_rank(rating) if isinstance(rating, str) else -1
+            if rr_calc < 1.0 and rank > rating_rank("C+"):
+                reasons.append("rating too high for rr<1.0")
+            if 1.0 <= rr_calc < 1.2 and rank > rating_rank("B-"):
+                reasons.append("rating too high for rr<1.2")
+            if rank >= rating_rank("B-") and rr_calc >= 1.2 and move_calc >= 0.03:
+                best_actionable = True
+
+        parsed["stock_bias"] = "HAS_POTENTIAL" if best_actionable else "NO_EDGE"
+        if isinstance(parsed.get("summary"), str) and "$" in parsed["summary"]:
+            parsed["summary"] = parsed["summary"].replace("$", "")
+            reasons.append("currency_symbol_present")
+        valid = len(reasons) == 0
+        return parsed, valid, reasons
 
     @staticmethod
     def _parse_shares_outstanding(payload: Any, symbol: str) -> float | None:
