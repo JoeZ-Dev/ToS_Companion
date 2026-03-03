@@ -1984,7 +1984,9 @@ class UIController:
     ) -> None:
         current_price = self._current_price_from_quote(normalized_snapshot.get("quote") or {})
         parsed = self._apply_pullback_guard(parsed, current_price)
-        parsed, valid, reasons = self._validate_llm_output(parsed, current_price)
+        parsed, valid, reasons = self._validate_llm_output(parsed, current_price, normalized_snapshot)
+        if not valid and not error and reasons:
+            error = f"LLM output sanitized: {'; '.join(reasons)}"
         payload = {
             "symbol": normalized_snapshot.get("symbol"),
             "as_of_ts_ms": normalized_snapshot.get("as_of_ts_ms"),
@@ -1992,7 +1994,7 @@ class UIController:
             "invocation_type": normalized_snapshot.get("invocation_type") or invocation,
             "parsed": parsed,
             "raw_text": raw_text,
-            "error": error or (None if valid else f"LLM output invalid: {'; '.join(reasons)}"),
+            "error": error,
         }
         self._last_llm_payload = payload
         self._logger.info(
@@ -2078,7 +2080,7 @@ class UIController:
         return parsed
 
     @staticmethod
-    def _validate_llm_output(parsed: dict | None, current_price: float | None) -> tuple[dict | None, bool, list[str]]:
+    def _validate_llm_output(parsed: dict | None, current_price: float | None, snapshot: dict | None) -> tuple[dict | None, bool, list[str]]:
         reasons: list[str] = []
         if not parsed or not isinstance(parsed, dict):
             return parsed, False, ["parsed payload missing or invalid"]
@@ -2090,57 +2092,80 @@ class UIController:
             order = ["D", "C-", "C", "C+", "B-", "B", "B+", "A-", "A", "A+"]
             return order.index(r) if r in order else -1
 
+        def cap_rating(rating: str, cap: str) -> str:
+            return rating if rating_rank(rating) <= rating_rank(cap) else cap
+
+        levels = (snapshot or {}).get("levels") or {}
+        micro = (snapshot or {}).get("micro") or {}
+        session = (snapshot or {}).get("session") or {}
+        short_vol_pct = (snapshot or {}).get("short_vol_pct")
+
+        sanitized_setups = []
         best_actionable = False
         for setup in setups:
             if not isinstance(setup, dict):
                 reasons.append("non-dict setup")
                 continue
-            entry = setup.get("entry_trigger_price")
-            stop = setup.get("stop_price")
-            target = setup.get("target_price")
-            rr = setup.get("rr_to_target1")
-            move_pct = setup.get("move_pct_to_target1")
-            rating = setup.get("setup_rating")
             trigger = setup.get("trigger_condition", "")
             for key in ("trigger_condition", "confirmation_requirements", "name", "extension_notes", "extension_trigger", "target1_label"):
                 val = setup.get(key)
                 if isinstance(val, str) and "$" in val:
+                    setup[key] = val.replace("$", "")
                     reasons.append("currency_symbol_present")
             try:
-                entry_f = float(entry)
-                stop_f = float(stop)
-                target_f = float(target)
+                entry_f = float(setup.get("entry_trigger_price"))
+                stop_f = float(setup.get("stop_price"))
+                target_f = float(setup.get("target_price"))
             except Exception:
                 reasons.append("numeric fields invalid")
                 continue
             if current_price is not None and abs(entry_f - current_price) / current_price < 0.003:
-                low = trigger.lower() if isinstance(trigger, str) else ""
+                tc = setup.get("trigger_condition", "")
+                low = tc.lower() if isinstance(tc, str) else ""
                 if "close" not in low or ("hold" not in low and "retest" not in low):
-                    reasons.append("near-price trigger missing close/hold")
+                    setup["trigger_condition"] = f"1m close above {entry_f:.4f} AND hold/retest"
+                    reasons.append("near-price trigger adjusted")
             reward = target_f - entry_f
             risk = entry_f - stop_f
             if risk <= 0 or reward <= 0:
-                reasons.append("nonpositive rr inputs")
+                reasons.append("dropped setup nonpositive rr")
                 continue
             rr_calc = reward / risk
             move_calc = reward / entry_f if entry_f != 0 else 0
-            if isinstance(rr, (int, float)) and abs(rr - rr_calc) > max(0.01, 0.02 * rr_calc):
-                reasons.append("rr_to_target1 mismatch")
-            if isinstance(move_pct, (int, float)) and abs(move_pct - move_calc) > max(0.001, 0.02 * move_calc):
-                reasons.append("move_pct_to_target1 mismatch")
-            rank = rating_rank(rating) if isinstance(rating, str) else -1
-            if rr_calc < 1.0 and rank > rating_rank("C+"):
-                reasons.append("rating too high for rr<1.0")
-            if 1.0 <= rr_calc < 1.2 and rank > rating_rank("B-"):
-                reasons.append("rating too high for rr<1.2")
-            if rank >= rating_rank("B-") and rr_calc >= 1.2 and move_calc >= 0.03:
+            setup["rr_to_target1"] = rr_calc
+            setup["move_pct_to_target1"] = move_calc
+            rating = setup.get("setup_rating") or "C"
+            if rr_calc < 1.0:
+                rating = cap_rating(rating, "C+")
+            elif rr_calc < 1.2:
+                rating = cap_rating(rating, "B-")
+            if move_calc < 0.05:
+                rating = cap_rating(rating, "B-")
+            setup["setup_rating"] = rating
+            # tape_warning from short_vol_pct
+            if isinstance(short_vol_pct, (int, float)) and short_vol_pct >= 55:
+                setup["tape_warning"] = "SPIKEY_PULLBACKS"
+            # target1_label fix
+            nearest_res = (levels.get("nearest_resistance") or {}).get("price") if isinstance(levels, dict) else None
+            micro_res = micro.get("micro_resistance_15m") if isinstance(micro, dict) else None
+            pmh = session.get("premarket_high") if isinstance(session, dict) else None
+            if nearest_res is not None and abs(target_f - float(nearest_res)) < max(0.01, 0.002 * target_f):
+                setup["target1_label"] = "nearest_resistance"
+            elif micro_res is not None and abs(target_f - float(micro_res)) < max(0.01, 0.002 * target_f):
+                setup["target1_label"] = "micro_resistance_15m"
+            elif pmh is not None and abs(target_f - float(pmh)) < max(0.01, 0.002 * target_f):
+                setup["target1_label"] = "premarket_high"
+            sanitized_setups.append(setup)
+            if rating_rank(rating) >= rating_rank("B-") and rr_calc >= 1.2 and move_calc >= 0.03:
                 best_actionable = True
-
+        parsed["setups"] = sanitized_setups
         parsed["stock_bias"] = "HAS_POTENTIAL" if best_actionable else "NO_EDGE"
         if isinstance(parsed.get("summary"), str) and "$" in parsed["summary"]:
             parsed["summary"] = parsed["summary"].replace("$", "")
             reasons.append("currency_symbol_present")
-        valid = len(reasons) == 0
+        valid = True
+        if not sanitized_setups:
+            valid = False
         return parsed, valid, reasons
 
     @staticmethod
