@@ -1984,9 +1984,11 @@ class UIController:
     ) -> None:
         current_price = self._current_price_from_quote(normalized_snapshot.get("quote") or {})
         parsed = self._apply_pullback_guard(parsed, current_price)
-        parsed, valid, reasons = self._validate_llm_output(parsed, current_price, normalized_snapshot)
-        if not valid and not error and reasons:
-            error = f"LLM output sanitized: {'; '.join(reasons)}"
+        parsed, valid, warnings = self._validate_llm_output(parsed, current_price, normalized_snapshot)
+        if warnings:
+            self._logger.info("LLM sanitized with warnings: %s", "; ".join(warnings))
+        if not valid and not error:
+            error = "; ".join(warnings) if warnings else "LLM output invalid"
         payload = {
             "symbol": normalized_snapshot.get("symbol"),
             "as_of_ts_ms": normalized_snapshot.get("as_of_ts_ms"),
@@ -1995,6 +1997,7 @@ class UIController:
             "parsed": parsed,
             "raw_text": raw_text,
             "error": error,
+            "warnings": warnings,
         }
         self._last_llm_payload = payload
         self._logger.info(
@@ -2081,7 +2084,7 @@ class UIController:
 
     @staticmethod
     def _validate_llm_output(parsed: dict | None, current_price: float | None, snapshot: dict | None) -> tuple[dict | None, bool, list[str]]:
-        reasons: list[str] = []
+        warnings: list[str] = []
         if not parsed or not isinstance(parsed, dict):
             return parsed, False, ["parsed payload missing or invalid"]
         setups = parsed.get("setups")
@@ -2095,6 +2098,18 @@ class UIController:
         def cap_rating(rating: str, cap: str) -> str:
             return rating if rating_rank(rating) <= rating_rank(cap) else cap
 
+        def max_allowed_rating(rr_calc: float, move_calc: float, tape_warning: str | None) -> str:
+            cap = "A+"
+            if rr_calc < 1.0:
+                cap = "C+"
+            elif rr_calc < 1.2:
+                cap = "B-"
+            if move_calc < 0.05 and rating_rank(cap) > rating_rank("B-"):
+                cap = "B-"
+            if tape_warning == "SPIKEY_PULLBACKS" and rr_calc < 1.3 and rating_rank(cap) > rating_rank("B-"):
+                cap = "B-"
+            return cap
+
         levels = (snapshot or {}).get("levels") or {}
         micro = (snapshot or {}).get("micro") or {}
         session = (snapshot or {}).get("session") or {}
@@ -2104,43 +2119,41 @@ class UIController:
         best_actionable = False
         for setup in setups:
             if not isinstance(setup, dict):
-                reasons.append("non-dict setup")
+                warnings.append("non-dict setup")
                 continue
             trigger = setup.get("trigger_condition", "")
             for key in ("trigger_condition", "confirmation_requirements", "name", "extension_notes", "extension_trigger", "target1_label"):
                 val = setup.get(key)
                 if isinstance(val, str) and "$" in val:
                     setup[key] = val.replace("$", "")
-                    reasons.append("currency_symbol_present")
+                    warnings.append("currency_symbol_present")
             try:
                 entry_f = float(setup.get("entry_trigger_price"))
                 stop_f = float(setup.get("stop_price"))
                 target_f = float(setup.get("target_price"))
             except Exception:
-                reasons.append("numeric fields invalid")
+                warnings.append("numeric fields invalid")
                 continue
             if current_price is not None and abs(entry_f - current_price) / current_price < 0.003:
                 tc = setup.get("trigger_condition", "")
                 low = tc.lower() if isinstance(tc, str) else ""
                 if "close" not in low or ("hold" not in low and "retest" not in low):
                     setup["trigger_condition"] = f"1m close above {entry_f:.4f} AND hold/retest"
-                    reasons.append("near-price trigger adjusted")
+                    warnings.append("near-price trigger adjusted")
             reward = target_f - entry_f
             risk = entry_f - stop_f
             if risk <= 0 or reward <= 0:
-                reasons.append("dropped setup nonpositive rr")
+                warnings.append("dropped setup nonpositive rr")
                 continue
             rr_calc = reward / risk
             move_calc = reward / entry_f if entry_f != 0 else 0
             setup["rr_to_target1"] = rr_calc
             setup["move_pct_to_target1"] = move_calc
             rating = setup.get("setup_rating") or "C"
-            if rr_calc < 1.0:
-                rating = cap_rating(rating, "C+")
-            elif rr_calc < 1.2:
-                rating = cap_rating(rating, "B-")
-            if move_calc < 0.05:
-                rating = cap_rating(rating, "B-")
+            cap = max_allowed_rating(rr_calc, move_calc, setup.get("tape_warning"))
+            if rating_rank(rating) > rating_rank(cap):
+                warnings.append(f"rating_coerced: cap {cap} (was {rating})")
+                rating = cap
             setup["setup_rating"] = rating
             # tape_warning from short_vol_pct
             if isinstance(short_vol_pct, (int, float)) and short_vol_pct >= 55:
@@ -2162,11 +2175,9 @@ class UIController:
         parsed["stock_bias"] = "HAS_POTENTIAL" if best_actionable else "NO_EDGE"
         if isinstance(parsed.get("summary"), str) and "$" in parsed["summary"]:
             parsed["summary"] = parsed["summary"].replace("$", "")
-            reasons.append("currency_symbol_present")
-        valid = True
-        if not sanitized_setups:
-            valid = False
-        return parsed, valid, reasons
+            warnings.append("currency_symbol_present")
+        valid = bool(sanitized_setups)
+        return parsed, valid, warnings
 
     @staticmethod
     def _parse_shares_outstanding(payload: Any, symbol: str) -> float | None:
