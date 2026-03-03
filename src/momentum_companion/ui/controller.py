@@ -1613,7 +1613,7 @@ class UIController:
             "- Maximum 2 setups returned.\n"
             "- If there are 3+ plausible setups, return only the best 1–2 and do NOT include any rated below B+.\n"
             "- If only 1–2 candidates exist, you may include a lone B- or C/C+ (rating rules still apply).\n"
-            "- stock_bias must be HAS_POTENTIAL only if ALL are true: setup_rating>=B-, rr_to_target1>=1.2, move_pct_to_target1>=0.03. If rr_to_target1<1.2 or move_pct_to_target1<0.03, stock_bias must be NO_EDGE (setup may still be returned). If tape_warning=SPIKEY_PULLBACKS and rr_to_target1<1.3, force stock_bias=NO_EDGE.\n"
+            "- Determine best_is_actionable: exists setup with setup_rating>=B- AND rr_to_target1>=1.2 AND move_pct_to_target1>=0.03. If best_is_actionable -> stock_bias=\"HAS_POTENTIAL\". Else -> stock_bias=\"NO_EDGE\". This is deterministic; do not override subjectively—use tape_warning/confirmation/rating caps for risk.\n"
             "- Rating must reflect rr_to_target1:\n"
             "    * rr_to_target1 < 1.0  -> setup_rating cannot be above C+\n"
             "    * 1.0 <= rr_to_target1 < 1.2 -> setup_rating cannot be above B-\n"
@@ -1631,6 +1631,7 @@ class UIController:
             "- Detect tape_warning via bars_1m: set SPIKEY_PULLBACKS only if in last 20 1m bars there are 2+ failed breakouts (price trades above local high/resistance, closes back below within 1–3 bars, retraces >=50% of breakout bar) AND those fails occur on elevated volume vs neighboring bars; else NONE.\n"
             "- If tape_warning=SPIKEY_PULLBACKS, cap setup_rating at B- unless trigger is explicitly break+hold/retest, and confirmation_requirements must include hold/retest (not just volume).\n"
             "- Entry must be trigger-based (not vague).\n"
+            "- If abs(entry_trigger_price-current_price)/current_price < 0.003, trigger_condition MUST be a 2-step trigger like '1m close above X AND hold/retest' (not vague 'reclaim').\n"
             "- Use bars_5m for structure/regime context; use bars_1m for triggers/tape_warning/volume checks.\n"
             "- target1_label must strictly correspond to the structural source of target_price:\n"
             "    * If target_price equals levels.nearest_resistance.price -> target1_label=\"nearest_resistance\"\n"
@@ -1653,6 +1654,7 @@ class UIController:
             "- Add a context sentence in summary referencing float_shares/short_interest_shares/short_vol_pct when present (one sentence max). Use them only as modifiers, not entry reasons.\n"
             "- Crowded-tape caps: if float_shares!=null and float_shares>10_000_000 cap setup_rating at A- unless move_pct_to_target1>=0.12 AND rr_to_target1>=1.5; if short_vol_pct>=55 set tape_warning=SPIKEY_PULLBACKS unless already set; if short_interest_shares and float_shares exist and short_interest_shares/float_shares>=0.15 add phrase 'Squeeze-prone tape; expect sharper pullbacks.'\n"
             "- If target_price equals levels.nearest_resistance.price -> target1_label=\"nearest_resistance\"; if equals micro.micro_resistance_15m -> \"micro_resistance_15m\"; if equals session.premarket_high -> \"premarket_high\". Do not mismatch labels.\n"
+            "- Do not include '$' or currency symbols in any strings.\n"
         )
 
     def _default_developer_prompt_refresh(self) -> str:
@@ -1660,7 +1662,7 @@ class UIController:
             "SETUP_DISCOVERY_REFRESH_V1\n"
             "Return EXACTLY ONE JSON object in the SAME schema as full mode (stock_bias, summary, setups[]...).\n"
             'stock_bias MUST be one of: "HAS_POTENTIAL" | "NO_EDGE".\n'
-            "- stock_bias must be HAS_POTENTIAL only if ALL are true: setup_rating>=B-, rr_to_target1>=1.2, move_pct_to_target1>=0.03. If rr_to_target1<1.2 or move_pct_to_target1<0.03, stock_bias must be NO_EDGE (setup may still be returned). If tape_warning=SPIKEY_PULLBACKS and rr_to_target1<1.3, force stock_bias=NO_EDGE.\n"
+            "- Determine best_is_actionable: exists setup with setup_rating>=B- AND rr_to_target1>=1.2 AND move_pct_to_target1>=0.03. If best_is_actionable -> stock_bias=\"HAS_POTENTIAL\". Else -> stock_bias=\"NO_EDGE\". This is deterministic; do not override subjectively—use tape_warning/confirmation/rating caps for risk.\n"
             "Every setup MUST include ALL required keys: name, trigger_condition, entry_trigger_price, stop_price, target_price, rr_to_target1, move_pct_to_target1, setup_rating, confirmation_requirements, target1_label, extension_trigger, extension_target, extension_notes, tape_warning.\n"
             "If you do not change a field, copy it from prior_best_setup. Do not omit fields.\n"
             "Use prior_best_setup plus latest prices/levels to update triggers/targets/stops/RR if needed.\n"
@@ -1678,6 +1680,8 @@ class UIController:
             "Summary must be <=2 sentences.\n"
             "No markdown. No extra keys.\n"
             "Self-check: ensure every setup has all required keys; ensure stock_bias is one of the two enums.\n"
+            "- If abs(entry_trigger_price-current_price)/current_price < 0.003, trigger_condition MUST be a 2-step trigger like '1m close above X AND hold/retest' (not vague 'reclaim').\n"
+            "- Do not include '$' or currency symbols in any strings.\n"
             "Context/pullback rules carry over: define current_price as in full mode; if entry_trigger_price <= current_price*0.99 enforce pullback/retest wording and include the exact sentence \"This is a pullback/retest plan, not a buy-now entry.\" in summary; if current_price > entry_trigger_price*1.01 rewrite as pullback/retest unless trigger_condition already says pullback/retest/reclaim. Include float_shares/short_interest_shares/short_vol_pct modifiers in summary when present and apply the same crowded-tape rating/tape_warning caps as full mode.\n"
         )
 
@@ -2028,6 +2032,7 @@ class UIController:
             return parsed
         if current_price is None:
             return parsed
+        best_actionable = False
         summary = parsed.get("summary") if isinstance(parsed.get("summary"), str) else ""
         added_summary = False
         for setup in setups:
@@ -2042,6 +2047,12 @@ class UIController:
             cond_str = cond if isinstance(cond, str) else ""
             cond_lower = cond_str.lower()
             has_kw = any(k in cond_lower for k in ("pullback", "retest", "reclaim"))
+            rr = setup.get("rr_to_target1")
+            move_pct = setup.get("move_pct_to_target1")
+            rating = setup.get("setup_rating")
+            if isinstance(rr, (int, float)) and isinstance(move_pct, (int, float)) and isinstance(rating, str):
+                if rating in {"A+", "A", "A-", "B+", "B", "B-"} and rr >= 1.2 and move_pct >= 0.03:
+                    best_actionable = True
             # enforce pullback labeling when entry well below current
             if entry_f <= current_price * 0.99:
                 if not has_kw:
@@ -2058,8 +2069,24 @@ class UIController:
                     setup["trigger_condition"] = prefix + cond_str
                 else:
                     setup["trigger_condition"] = prefix + "pullback/retest setup"
+            if abs(entry_f - current_price) / current_price < 0.003:
+                tc = setup.get("trigger_condition", "")
+                if isinstance(tc, str):
+                    low = tc.lower()
+                    if "close" not in low or ("hold" not in low and "retest" not in low):
+                        setup["trigger_condition"] = f"1m close above {entry_f:.4f} AND hold/retest"
+            for key in ("trigger_condition", "confirmation_requirements", "name", "extension_notes", "extension_trigger", "target1_label"):
+                val = setup.get(key)
+                if isinstance(val, str) and "$" in val:
+                    setup[key] = val.replace("$", "")
         if added_summary:
-            parsed["summary"] = summary
+            parsed["summary"] = summary.replace("$", "") if isinstance(summary, str) else summary
+        if best_actionable:
+            parsed["stock_bias"] = "HAS_POTENTIAL"
+        else:
+            parsed["stock_bias"] = "NO_EDGE"
+        if isinstance(parsed.get("summary"), str) and "$" in parsed["summary"]:
+            parsed["summary"] = parsed["summary"].replace("$", "")
         return parsed
 
     @staticmethod
