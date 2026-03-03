@@ -1613,7 +1613,7 @@ class UIController:
             "- Maximum 2 setups returned.\n"
             "- If there are 3+ plausible setups, return only the best 1–2 and do NOT include any rated below B+.\n"
             "- If only 1–2 candidates exist, you may include a lone B- or C/C+ (rating rules still apply).\n"
-            "- stock_bias must be HAS_POTENTIAL only if at least one setup_rating >= B-. If best setup is C/C+, set stock_bias=NO_EDGE (you may still return the C/C+ setup in setups).\n"
+            "- stock_bias must be HAS_POTENTIAL only if ALL are true: setup_rating>=B-, rr_to_target1>=1.2, move_pct_to_target1>=0.03. If rr_to_target1<1.2 or move_pct_to_target1<0.03, stock_bias must be NO_EDGE (setup may still be returned). If tape_warning=SPIKEY_PULLBACKS and rr_to_target1<1.3, force stock_bias=NO_EDGE.\n"
             "- Rating must reflect rr_to_target1:\n"
             "    * rr_to_target1 < 1.0  -> setup_rating cannot be above C+\n"
             "    * 1.0 <= rr_to_target1 < 1.2 -> setup_rating cannot be above B-\n"
@@ -1660,6 +1660,7 @@ class UIController:
             "SETUP_DISCOVERY_REFRESH_V1\n"
             "Return EXACTLY ONE JSON object in the SAME schema as full mode (stock_bias, summary, setups[]...).\n"
             'stock_bias MUST be one of: "HAS_POTENTIAL" | "NO_EDGE".\n'
+            "- stock_bias must be HAS_POTENTIAL only if ALL are true: setup_rating>=B-, rr_to_target1>=1.2, move_pct_to_target1>=0.03. If rr_to_target1<1.2 or move_pct_to_target1<0.03, stock_bias must be NO_EDGE (setup may still be returned). If tape_warning=SPIKEY_PULLBACKS and rr_to_target1<1.3, force stock_bias=NO_EDGE.\n"
             "Every setup MUST include ALL required keys: name, trigger_condition, entry_trigger_price, stop_price, target_price, rr_to_target1, move_pct_to_target1, setup_rating, confirmation_requirements, target1_label, extension_trigger, extension_target, extension_notes, tape_warning.\n"
             "If you do not change a field, copy it from prior_best_setup. Do not omit fields.\n"
             "Use prior_best_setup plus latest prices/levels to update triggers/targets/stops/RR if needed.\n"
