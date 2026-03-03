@@ -71,6 +71,7 @@ class UIController:
         self._token_provider = token_provider
         self._aggregator = BarAggregator10s()
         self._bars: list[dict] = []
+        self._massive_values: dict[str, float | int | None] = {"float": None, "short_interest": None, "short_vol_pct": None}
         self._pending_symbol: str | None = None
         self._display_window_sec = 60 * 60  # 1 hour window
         self._bars_lock = threading.Lock()
@@ -377,6 +378,8 @@ class UIController:
             self._logger.debug("Massive UI update kind=%s status=%s value=%s as_of=%s", kind, status, value, as_of)
             val_str = "" if value is None else str(value)
             asof_str = as_of or ""
+            if status == "OK":
+                self._massive_values[kind] = value
             QtCore.QMetaObject.invokeMethod(
                 self._window,
                 "update_massive_fundamental",
@@ -1237,6 +1240,9 @@ class UIController:
             "session_mode": session_mode,
             "market_state": market_state,
             "quote": quote,
+            "float_shares": snapshot.get("float_shares", self._massive_values.get("float")),
+            "short_interest_shares": snapshot.get("short_interest_shares", self._massive_values.get("short_interest")),
+            "short_vol_pct": snapshot.get("short_vol_pct", self._massive_values.get("short_vol_pct")),
             "bars_window": bars_5m,
             "bars_5m": bars_5m,
             "bars_1m": bars_1m,
@@ -1640,6 +1646,13 @@ class UIController:
             "- Ratings are based on rr_to_target1, not extension potential.\n"
             "- If no high-quality setup exists, return stock_bias='NO_EDGE' and setups=[].\n"
             "- No trade validation logic. No risk gates. No null rules.\n"
+            "Context and pullback rules:\n"
+            "- Define current_price = quote.last; if missing use mid=(bid+ask)/2; else bid; else ask.\n"
+            "- If entry_trigger_price <= current_price*0.99 then: (a) trigger_condition MUST include one of: pullback, retest, reclaim; (b) confirmation_requirements must mention reclaim/hold behavior; (c) summary MUST start a sentence exactly: \"This is a pullback/retest plan, not a buy-now entry.\".\n"
+            "- If current_price > entry_trigger_price*1.01 and trigger_condition lacks pullback/retest/reclaim, treat as stale and rewrite as pullback/retest.\n"
+            "- Add a context sentence in summary referencing float_shares/short_interest_shares/short_vol_pct when present (one sentence max). Use them only as modifiers, not entry reasons.\n"
+            "- Crowded-tape caps: if float_shares!=null and float_shares>10_000_000 cap setup_rating at A- unless move_pct_to_target1>=0.12 AND rr_to_target1>=1.5; if short_vol_pct>=55 set tape_warning=SPIKEY_PULLBACKS unless already set; if short_interest_shares and float_shares exist and short_interest_shares/float_shares>=0.15 add phrase 'Squeeze-prone tape; expect sharper pullbacks.'\n"
+            "- If target_price equals levels.nearest_resistance.price -> target1_label=\"nearest_resistance\"; if equals micro.micro_resistance_15m -> \"micro_resistance_15m\"; if equals session.premarket_high -> \"premarket_high\". Do not mismatch labels.\n"
         )
 
     def _default_developer_prompt_refresh(self) -> str:
@@ -1664,6 +1677,7 @@ class UIController:
             "Summary must be <=2 sentences.\n"
             "No markdown. No extra keys.\n"
             "Self-check: ensure every setup has all required keys; ensure stock_bias is one of the two enums.\n"
+            "Context/pullback rules carry over: define current_price as in full mode; if entry_trigger_price <= current_price*0.99 enforce pullback/retest wording and include the exact sentence \"This is a pullback/retest plan, not a buy-now entry.\" in summary; if current_price > entry_trigger_price*1.01 rewrite as pullback/retest unless trigger_condition already says pullback/retest/reclaim. Include float_shares/short_interest_shares/short_vol_pct modifiers in summary when present and apply the same crowded-tape rating/tape_warning caps as full mode.\n"
         )
 
     def _build_llm_messages(self, snapshot: dict) -> list[dict[str, str]]:
@@ -1965,6 +1979,8 @@ class UIController:
         raw_text: str,
         error: str | None,
     ) -> None:
+        current_price = self._current_price_from_quote(normalized_snapshot.get("quote") or {})
+        parsed = self._apply_pullback_guard(parsed, current_price)
         payload = {
             "symbol": normalized_snapshot.get("symbol"),
             "as_of_ts_ms": normalized_snapshot.get("as_of_ts_ms"),
@@ -1988,6 +2004,62 @@ class UIController:
             self._llm_signals.llm_result_ready.emit(payload)
         except Exception:
             self._logger.warning("Failed to emit LLM UI payload", exc_info=True)
+
+    @staticmethod
+    def _current_price_from_quote(quote: dict) -> float | None:
+        if not isinstance(quote, dict):
+            return None
+        last = quote.get("last")
+        bid = quote.get("bid")
+        ask = quote.get("ask")
+        mid = (bid + ask) / 2 if isinstance(bid, (int, float)) and isinstance(ask, (int, float)) else None
+        for val in (last, mid, bid, ask):
+            if isinstance(val, (int, float)):
+                return float(val)
+        return None
+
+    @staticmethod
+    def _apply_pullback_guard(parsed: dict | None, current_price: float | None) -> dict | None:
+        if not parsed or not isinstance(parsed, dict):
+            return parsed
+        setups = parsed.get("setups")
+        if not isinstance(setups, list):
+            return parsed
+        if current_price is None:
+            return parsed
+        summary = parsed.get("summary") if isinstance(parsed.get("summary"), str) else ""
+        added_summary = False
+        for setup in setups:
+            if not isinstance(setup, dict):
+                continue
+            entry = setup.get("entry_trigger_price")
+            try:
+                entry_f = float(entry)
+            except Exception:
+                continue
+            cond = setup.get("trigger_condition") or ""
+            cond_str = cond if isinstance(cond, str) else ""
+            cond_lower = cond_str.lower()
+            has_kw = any(k in cond_lower for k in ("pullback", "retest", "reclaim"))
+            # enforce pullback labeling when entry well below current
+            if entry_f <= current_price * 0.99:
+                if not has_kw:
+                    setup["trigger_condition"] = f"pullback/retest: {cond_str}" if cond_str else "pullback/retest entry"
+                if isinstance(summary, str) and not summary.startswith("This is a pullback/retest plan, not a buy-now entry."):
+                    summary = "This is a pullback/retest plan, not a buy-now entry. " + summary
+                    added_summary = True
+            elif current_price > entry_f * 1.01 and not has_kw:
+                prefix = "⚠️ Entry is below current price — treat as pullback/retest only. "
+                if isinstance(summary, str) and not summary.startswith(prefix):
+                    summary = prefix + summary
+                    added_summary = True
+                if cond_str:
+                    setup["trigger_condition"] = prefix + cond_str
+                else:
+                    setup["trigger_condition"] = prefix + "pullback/retest setup"
+        if added_summary:
+            parsed["summary"] = summary
+        return parsed
 
     @staticmethod
     def _parse_shares_outstanding(payload: Any, symbol: str) -> float | None:
