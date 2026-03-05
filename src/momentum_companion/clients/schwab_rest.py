@@ -33,7 +33,8 @@ class SchwabRestClient:
         token = self._auth_token_provider()
         tok_str = str(token or "").strip() if token is not None else ""
         if not tok_str:
-            raise RuntimeError("Missing auth token for Schwab REST request")
+            logger.warning("Missing auth token for Schwab REST request")
+            return {}
         return {"Authorization": f"Bearer {tok_str}"}
 
     @with_backoff()
