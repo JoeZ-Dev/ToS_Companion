@@ -948,7 +948,7 @@ class UIController:
         bars_1m_len = len(bars_1m) if isinstance(bars_1m, list) else 0
         levels_info = normalized.get("levels") or {}
         self._logger.info(
-            "LLM normalized snapshot keys=%s bars_5m_len=%s bars_1m_len=%s levels_fields=%s bars_ts=%s..%s derived=%s structure_context=%s volume_structure=%s",
+            "LLM normalized snapshot keys=%s bars_5m_len=%s bars_1m_len=%s levels_fields=%s bars_ts=%s..%s derived=%s structure_context=%s volume_structure=%s candidate_setups=%s",
             sorted(normalized.keys()),
             bars_len,
             bars_1m_len,
@@ -958,6 +958,7 @@ class UIController:
             "derived" in normalized,
             "structure_context" in normalized,
             "volume_structure" in normalized,
+            "candidate_setups" in normalized,
         )
         prior_best_payload: dict | None = None
         if refresh_mode:
@@ -1212,6 +1213,7 @@ class UIController:
             "nearest_resistance": levels_src.get("nearest_resistance"),
             "nearest_support": levels_src.get("nearest_support"),
         }
+        candidate_setups = snapshot.get("candidate_setups")
         session_src = snapshot.get("session") if isinstance(snapshot, dict) else {}
         if not isinstance(session_src, dict):
             session_src = {}
@@ -1268,6 +1270,8 @@ class UIController:
             norm["structure_context"] = snapshot.get("structure_context")
         if "volume_structure" in snapshot:
             norm["volume_structure"] = snapshot.get("volume_structure")
+        if candidate_setups is not None:
+            norm["candidate_setups"] = candidate_setups
         return norm
 
     def _extract_bars_window(self, snapshot: dict) -> list[dict]:

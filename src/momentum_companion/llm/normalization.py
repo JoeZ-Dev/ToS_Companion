@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from momentum_companion.data.llm_contracts import LlmSnapshotPayload
+from momentum_companion.setup_engine.candidate_generator import generate_candidate_setups
 
 
 def normalize_snapshot(raw_snapshot: Dict[str, Any], session_mode: str, quote: Dict[str, Any]) -> LlmSnapshotPayload:
@@ -33,4 +34,8 @@ def normalize_snapshot(raw_snapshot: Dict[str, Any], session_mode: str, quote: D
         payload["volume_structure"] = raw_snapshot.get("volume_structure")
     if "structure_context" in raw_snapshot:
         payload["structure_context"] = raw_snapshot.get("structure_context")
+    try:
+        payload["candidate_setups"] = generate_candidate_setups(dict(payload))
+    except Exception:
+        payload["candidate_setups"] = []
     return payload  # type: ignore[return-value]
