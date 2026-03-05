@@ -27,4 +27,6 @@ def normalize_snapshot(raw_snapshot: Dict[str, Any], session_mode: str, quote: D
     payload["market_state"] = raw_snapshot.get("market_state")
     bars = raw_snapshot.get("bars_window_5m", [])
     payload["bars_window"] = bars
+    if "derived" in raw_snapshot:
+        payload["derived"] = raw_snapshot.get("derived")
     return payload  # type: ignore[return-value]

@@ -544,6 +544,46 @@ class AEEngine:
             },
             "bars_window_5m": bars_window_5m,
         }
+        derived = snapshot.get("derived", {}) or {}
+        # current price fallback: last -> mid -> bid -> ask
+        current_price = last_price
+        quote = getattr(self, "_last_quote", None) if hasattr(self, "_last_quote") else None
+        if current_price is None and isinstance(quote, dict):
+            bid = quote.get("bid")
+            ask = quote.get("ask")
+            last = quote.get("last")
+            if isinstance(last, (int, float)):
+                current_price = float(last)
+            else:
+                mid = (bid + ask) / 2 if isinstance(bid, (int, float)) and isinstance(ask, (int, float)) else None
+                if mid is not None:
+                    current_price = float(mid)
+                elif isinstance(bid, (int, float)):
+                    current_price = float(bid)
+                elif isinstance(ask, (int, float)):
+                    current_price = float(ask)
+
+        def _pct(numer: Optional[float], denom: Optional[float]) -> Optional[float]:
+            if numer is None or denom is None or denom == 0:
+                return None
+            return (numer - denom) / denom
+
+        derived.update(
+            {
+                "distance_to_vwap_pct": _pct(current_price, vwap_val),
+                "distance_to_premarket_high_pct": _pct(current_price, premarket_high_val),
+                "distance_to_opening_range_high_pct": _pct(current_price, or_high_val),
+                "distance_to_micro_resistance_15m_pct": _pct(current_price, micro.get("micro_resistance_15m") if isinstance(micro, dict) else None),
+                "impulse_move_pct_session": _pct(premarket_high_val, premarket_low_val),
+                "consolidation_range_pct": _pct(
+                    (micro.get("micro_resistance_15m") if isinstance(micro, dict) else None),
+                    (micro.get("micro_support_15m") if isinstance(micro, dict) else None),
+                )
+                if isinstance(micro, dict) and micro.get("micro_resistance_15m") and micro.get("micro_support_15m")
+                else None,
+            }
+        )
+        snapshot["derived"] = derived
         snapshot["levels_book"] = _build_levels_book(
             last_price=last_price,
             bars=agg_bars[-30:],

@@ -4,9 +4,10 @@ from typing import Any, Dict
 
 from momentum_companion.llm.coach import LLMCoach
 from momentum_companion.llm.normalization import normalize_snapshot
-from momentum_companion.llm.validator import validate_llm_output
+from momentum_companion.llm.validator import validate_llm_output, validate_trade_setups
 from momentum_companion.llm.client import LLMClient
 from momentum_companion.journal.writer import JournalWriter
+from momentum_companion.utils.logging import logging
 
 
 class LLMService:
@@ -36,38 +37,70 @@ class LLMService:
         messages_override: list[dict] | None = None,
     ) -> Dict[str, Any]:
         payload = normalize_snapshot(raw_snapshot, session_mode, quote)
-        if self._client:
-            messages = messages_override or [
-                {"role": "system", "content": "LLM Coach"},
-                {"role": "user", "content": str(payload)},
-            ]
-            resp = self._client.complete(messages, model_override=model_override)
-        else:
-            resp = self._coach.run(payload, {})
+        logger = logging.getLogger(__name__)
+
+        def _invoke(msgs: list[dict]) -> Dict[str, Any]:
+            if self._client:
+                return self._client.complete(msgs, model_override=model_override)
+            return self._coach.run(payload, {})
+
+        messages = messages_override or [
+            {"role": "system", "content": "LLM Coach"},
+            {"role": "user", "content": str(payload)},
+        ]
+
+        resp = _invoke(messages)
         if not self._coach.validate_response(resp):
             return {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["LLM_SCHEMA_INVALID"]}
         if not validate_llm_output(resp):
-            if self._journal:
-                self._journal.append_event(
-                    {
-                        "ts_utc": payload.get("as_of_ts_ms"),
-                        "symbol": payload.get("symbol"),
-                        "event_type": "LLM_INVALID_OUTPUT",
-                        "session_mode": session_mode,
-                        "connection_state": "CONNECTED",
-                        "notes_json": "LLM_INVALID_OUTPUT",
-                    }
-                )
-            if self._state_callback:
-                try:
-                    self._state_callback("LLM_INVALID_OUTPUT")
-                except Exception:
-                    pass
+            self._log_invalid(payload, session_mode)
             return {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["LLM_SCHEMA_INVALID"]}
+
+        valid, reasons, action = validate_trade_setups(payload, resp, retry_attempted=False)
+        if action == "RETRY":
+            logger.info("LLM trade validation failed; retrying with repair prompt reasons=%s", reasons)
+            repair_messages = list(messages) + [
+                {
+                    "role": "system",
+                    "content": (
+                        "Repair required: Your prior setup(s) had trivial targets. "
+                        "Choose the next farther structural target (prefer swing_high from bars, then premarket_high, then opening_range_high, then micro_resistance_15m). "
+                        "Do NOT output targets within 1.5% of entry unless you return NO_EDGE."
+                    ),
+                }
+            ]
+            resp = _invoke(repair_messages)
+            if not self._coach.validate_response(resp) or not validate_llm_output(resp):
+                self._log_invalid(payload, session_mode)
+                return {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["LLM_REPAIR_FAILED"], "stock_bias": "NO_EDGE", "setups": []}
+            valid, reasons, action = validate_trade_setups(payload, resp, retry_attempted=True)
+            if action != "OK":
+                return {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["LLM_REPAIR_FAILED"], "stock_bias": "NO_EDGE", "setups": []}
+
+        if reasons:
+            resp["validation_warnings"] = reasons
         symbol = payload.get("symbol")
         if symbol:
             self._maybe_flash(symbol, resp, payload)
         return resp
+
+    def _log_invalid(self, payload: Dict[str, Any], session_mode: str) -> None:
+        if self._journal:
+            self._journal.append_event(
+                {
+                    "ts_utc": payload.get("as_of_ts_ms"),
+                    "symbol": payload.get("symbol"),
+                    "event_type": "LLM_INVALID_OUTPUT",
+                    "session_mode": session_mode,
+                    "connection_state": "CONNECTED",
+                    "notes_json": "LLM_INVALID_OUTPUT",
+                }
+            )
+        if self._state_callback:
+            try:
+                self._state_callback("LLM_INVALID_OUTPUT")
+            except Exception:
+                pass
 
     def _maybe_flash(self, symbol: str, rec: Dict[str, Any], payload: Dict[str, Any]) -> None:
         """Apply flash rules per specs §11.4/§11.4.1."""
