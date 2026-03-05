@@ -591,6 +591,44 @@ class AEEngine:
             sup_clusters=sup_clusters,
             micro=micro,
         )
+        # Structural context distances
+        structure_context = {
+            "next_resistance_distance_pct": None,
+            "next_support_distance_pct": None,
+            "nearest_structural_level": None,
+        }
+        try:
+            nearest_res = levels.get("nearest_resistance") if isinstance(levels, dict) else None
+            nearest_sup = levels.get("nearest_support") if isinstance(levels, dict) else None
+            if current_price:
+                if nearest_res and isinstance(nearest_res, dict) and nearest_res.get("price") is not None:
+                    nr_price = float(nearest_res.get("price"))
+                    structure_context["next_resistance_distance_pct"] = (nr_price - current_price) / current_price * 100
+                if nearest_sup and isinstance(nearest_sup, dict) and nearest_sup.get("price") is not None:
+                    ns_price = float(nearest_sup.get("price"))
+                    structure_context["next_support_distance_pct"] = (current_price - ns_price) / current_price * 100
+                candidates = []
+                if structure_context["next_resistance_distance_pct"] is not None:
+                    candidates.append(
+                        {
+                            "price": nearest_res.get("price"),
+                            "source": nearest_res.get("source") or "nearest_resistance",
+                            "distance_pct": structure_context["next_resistance_distance_pct"],
+                        }
+                    )
+                if structure_context["next_support_distance_pct"] is not None:
+                    candidates.append(
+                        {
+                            "price": nearest_sup.get("price"),
+                            "source": nearest_sup.get("source") or "nearest_support",
+                            "distance_pct": structure_context["next_support_distance_pct"],
+                        }
+                    )
+                if candidates:
+                    structure_context["nearest_structural_level"] = min(candidates, key=lambda c: abs(c["distance_pct"]))
+        except Exception:
+            pass
+        snapshot["structure_context"] = structure_context
         # Volume structure metrics based on 1m bars
         volume_structure = {
             "impulse_volume_ratio": None,
