@@ -82,10 +82,7 @@ def validate_trade_setups(snapshot: Dict[str, Any], llm_obj: Dict[str, Any], ret
                 continue
         valid_found = True
 
-    if not valid_found:
-        action = "RETRY" if not retry_attempted else "NO_EDGE"
-        return False, reasons, action
-    if reasons:
-        action = "RETRY" if not retry_attempted else "NO_EDGE"
-        return False, reasons, action
-    return True, [], "OK"
+    if valid_found:
+        return True, reasons, "OK"
+    action = "RETRY" if not retry_attempted else "NO_EDGE"
+    return False, reasons, action
