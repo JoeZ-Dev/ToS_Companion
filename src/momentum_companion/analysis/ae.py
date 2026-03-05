@@ -499,52 +499,13 @@ class AEEngine:
         micro = _compute_micro_metrics(agg_bars, last_price)
         bars_window_5m = _build_bars_window_5m(agg_bars, limit=60)
 
-        def _first_valid_above(price: Optional[float], source: str) -> Optional[dict]:
-            if price is None or last_price is None:
-                return None
-            if price <= last_price:
-                return None
-            dist = (price - last_price) / last_price * 100
-            return {"price": float(price), "source": source, "distance_pct": dist}
-
-        # Fill nearest_res from structured sources if missing/not above price.
-        def _nearest_resistance_fallback() -> Optional[dict]:
-            # keep existing if valid above current price
-            if isinstance(nearest_res, dict) and nearest_res.get("price") is not None and last_price:
-                try:
-                    price = float(nearest_res.get("price"))
-                    if price > last_price:
-                        dist = (price - last_price) / last_price * 100
-                        return {"price": price, "source": nearest_res.get("source") or "nearest_resistance", "distance_pct": dist}
-                except Exception:
-                    pass
-            # priority order
-            candidates: list[Optional[dict]] = []
-            micro_res = micro.get("micro_resistance_15m") if isinstance(micro, dict) else None
-            candidates.append(_first_valid_above(micro_res, "micro_resistance_15m"))
-            or_high = or_high_val
-            candidates.append(_first_valid_above(or_high, "opening_range_high"))
-            pm_high = premarket_high_val
-            candidates.append(_first_valid_above(pm_high, "premarket_high"))
-            # swing highs from bars_window_5m
-            swing_high = None
-            if bars_window_5m:
-                try:
-                    highs = [float(b.get("h")) for b in bars_window_5m if isinstance(b, dict) and b.get("h") is not None]
-                    highs_above = [h for h in highs if last_price and h > last_price]
-                    if highs_above:
-                        swing_high = min(highs_above)
-                except Exception:
-                    swing_high = None
-            candidates.append(_first_valid_above(swing_high, "swing_high"))
-            for c in candidates:
-                if c:
-                    return c
-            return None
-
-        nearest_res_fallback = _nearest_resistance_fallback()
-        if nearest_res_fallback:
-            nearest_res = nearest_res_fallback
+        # Nearest resistance fallback using structured sources and swing highs
+        if current_price is None:
+            current_price = last_price
+        if current_price is not None:
+            candidate_res = pick_nearest_resistance(current_price, micro, snapshot.get("session"), bars_window_5m, nearest_res)
+            if candidate_res:
+                nearest_res = candidate_res
 
         snapshot_symbol = profile["symbol"] if profile else (resolved_symbol or "")
         snapshot = {
@@ -1078,3 +1039,71 @@ def _build_bars_window_5m(bars_1m: list[OneMinuteBar], limit: int = 60) -> list[
     if len(out) > limit:
         out = out[-limit:]
     return out
+
+
+def pick_nearest_resistance(
+    current_price: float,
+    micro: dict | None,
+    session: dict | None,
+    bars_window_5m: list[dict] | None,
+    existing: dict | None,
+) -> dict | None:
+    """Select nearest resistance above current_price by priority."""
+
+    def _candidate(price: Optional[float], source: str) -> dict | None:
+        if price is None:
+            return None
+        try:
+            price_f = float(price)
+        except Exception:
+            return None
+        if price_f <= current_price:
+            return None
+        dist = (price_f - current_price) / current_price * 100
+        return {"price": price_f, "source": source, "distance_pct": dist}
+
+    # keep existing if valid and above
+    if isinstance(existing, dict) and existing.get("price") is not None:
+        try:
+            p = float(existing.get("price"))
+            if p > current_price:
+                dist = (p - current_price) / current_price * 100
+                return {"price": p, "source": existing.get("source") or "nearest_resistance", "distance_pct": dist}
+        except Exception:
+            pass
+
+    candidates: list[dict] = []
+    micro_res = micro.get("micro_resistance_15m") if isinstance(micro, dict) else None
+    cand = _candidate(micro_res, "micro_resistance_15m")
+    if cand:
+        candidates.append(cand)
+    orh = session.get("opening_range_high") if isinstance(session, dict) else None
+    cand = _candidate(orh, "opening_range_high")
+    if cand:
+        candidates.append(cand)
+    pmh = session.get("premarket_high") if isinstance(session, dict) else None
+    cand = _candidate(pmh, "premarket_high")
+    if cand:
+        candidates.append(cand)
+    # swing high from bars_window_5m
+    if bars_window_5m:
+        highs_above: list[float] = []
+        for b in bars_window_5m:
+            if not isinstance(b, dict):
+                continue
+            h = b.get("h")
+            try:
+                h_f = float(h)
+            except Exception:
+                continue
+            if h_f > current_price:
+                highs_above.append(h_f)
+        if highs_above:
+            swing_high = min(highs_above)
+            cand = _candidate(swing_high, "swing_high")
+            if cand:
+                candidates.append(cand)
+
+    if candidates:
+        return candidates[0]  # priority order preserved
+    return None
