@@ -591,7 +591,7 @@ class AEEngine:
             sup_clusters=sup_clusters,
             micro=micro,
         )
-        # Volume structure metrics
+        # Volume structure metrics based on 1m bars
         volume_structure = {
             "impulse_volume_ratio": None,
             "pullback_volume_ratio": None,
@@ -599,23 +599,21 @@ class AEEngine:
             "volume_state": None,
         }
         try:
-            vols = [b.volume for b in agg_bars[-20:]] if agg_bars else []
-            median20 = float(pd.Series(vols).median()) if vols else None
-            impulse_volume = agg_bars[-1].volume if agg_bars else None
+            bars_1m_list = agg_bars  # these are 1m bars already
+            vols20 = [b.volume for b in bars_1m_list[-20:]] if bars_1m_list else []
+            median20 = float(pd.Series(vols20).median()) if vols20 else None
+            impulse_volume = max(vols20) if vols20 else None
             if impulse_volume and median20 and median20 > 0:
                 volume_structure["impulse_volume_ratio"] = impulse_volume / median20
-            # pullback: average of prior 3 bar volumes vs impulse
-            if impulse_volume and impulse_volume > 0 and len(agg_bars) >= 4:
-                pullback_vols = [b.volume for b in agg_bars[-4:-1]]
-                if pullback_vols:
-                    avg_pullback = sum(pullback_vols) / len(pullback_vols)
-                    volume_structure["pullback_volume_ratio"] = avg_pullback / impulse_volume
-            # breakout attempt: latest vs avg last 10
-            if agg_bars and len(agg_bars) >= 1:
-                latest_vol = agg_bars[-1].volume
-                last10 = [b.volume for b in agg_bars[-10:]]
-                avg10 = sum(last10) / len(last10) if last10 else None
-                if avg10 and avg10 > 0:
+            pullback_vols = [b.volume for b in bars_1m_list[-3:]] if bars_1m_list else []
+            if impulse_volume and impulse_volume > 0 and pullback_vols:
+                pullback_avg = sum(pullback_vols) / len(pullback_vols)
+                volume_structure["pullback_volume_ratio"] = pullback_avg / impulse_volume
+            vols10 = [b.volume for b in bars_1m_list[-10:]] if bars_1m_list else []
+            if vols10 and bars_1m_list:
+                avg10 = sum(vols10) / len(vols10)
+                latest_vol = bars_1m_list[-1].volume
+                if avg10 > 0:
                     volume_structure["breakout_attempt_volume_ratio"] = latest_vol / avg10
             ivr = volume_structure["impulse_volume_ratio"]
             pvr = volume_structure["pullback_volume_ratio"]
