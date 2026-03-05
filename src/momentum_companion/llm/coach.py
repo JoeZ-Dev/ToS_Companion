@@ -31,6 +31,10 @@ class LLMCoach:
             "3) Prefer continuation setups when volume_state is EXPANSION or HEALTHY_PULLBACK. Avoid setups when volume_state indicates DISTRIBUTION.\n"
             "4) Prefer setups when price is not heavily extended from VWAP. If derived.distance_to_vwap_pct > 4–5%, treat continuation entries cautiously.\n"
             "5) If no setup meets the above conditions, return NO_EDGE rather than forcing a trade.\n"
+            "Additional guardrails:\n"
+            "- If structure_context.next_resistance_distance_pct is not null and < 0.4, only propose breakout-through-resistance with hold/retest confirmation, otherwise return NO_EDGE. Do not propose targets within 0.4% of entry unless returning NO_EDGE.\n"
+            "- If volume_structure.volume_state == DISTRIBUTION, cap setup_rating at B- and require hold/retest confirmation. If volume_state in {EXPANSION, HEALTHY_PULLBACK}, allow normal rating logic.\n"
+            "- If derived.distance_to_vwap_pct is not null and > 0.05 (5%), entries must be pullback/retest based (no chase/buy-now).\n"
         )
 
     def run(self, snapshot_payload: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
