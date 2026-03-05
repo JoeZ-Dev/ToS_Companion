@@ -498,12 +498,19 @@ class AEEngine:
         nearest_sup = _nearest_level(last_price, sup_clusters_rel, agg_for_levels, kind="support")
         micro = _compute_micro_metrics(agg_bars, last_price)
         bars_window_5m = _build_bars_window_5m(agg_bars, limit=60)
+        session_dict = {
+            "premarket_high": premarket_high_val,
+            "premarket_low": premarket_low_val,
+            "opening_range_high": or_high_val,
+            "opening_range_low": or_low_val,
+            "open_price": session_open_val if session_open_val else None,
+            "gap_pct": ((session_open_val - prior_close) / prior_close * 100) if prior_close and session_open_val else None,
+        }
+        current_price = last_price
 
         # Nearest resistance fallback using structured sources and swing highs
-        if current_price is None:
-            current_price = last_price
         if current_price is not None:
-            candidate_res = pick_nearest_resistance(current_price, micro, snapshot.get("session"), bars_window_5m, nearest_res)
+            candidate_res = pick_nearest_resistance(current_price, micro, session_dict, bars_window_5m, nearest_res)
             if candidate_res:
                 nearest_res = candidate_res
 
@@ -543,19 +550,11 @@ class AEEngine:
             "last_price": last_price,
             "vwap": vwap_val,
             "micro": micro,
-            "session": {
-                "premarket_high": premarket_high_val,
-                "premarket_low": premarket_low_val,
-                "opening_range_high": or_high_val,
-                "opening_range_low": or_low_val,
-                "open_price": session_open_val if session_open_val else None,
-                "gap_pct": ((session_open_val - prior_close) / prior_close * 100) if prior_close and session_open_val else None,
-            },
+            "session": session_dict,
             "bars_window_5m": bars_window_5m,
         }
         derived = snapshot.get("derived", {}) or {}
         # current price fallback: last -> mid -> bid -> ask
-        current_price = last_price
         quote = getattr(self, "_last_quote", None) if hasattr(self, "_last_quote") else None
         if current_price is None and isinstance(quote, dict):
             bid = quote.get("bid")
