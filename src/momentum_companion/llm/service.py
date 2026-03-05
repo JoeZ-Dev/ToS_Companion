@@ -75,7 +75,9 @@ class LLMService:
                 return {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["LLM_REPAIR_FAILED"], "stock_bias": "NO_EDGE", "setups": []}
             valid, reasons, action = validate_trade_setups(payload, resp, retry_attempted=True)
             if action != "OK":
-                return {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["LLM_REPAIR_FAILED"], "stock_bias": "NO_EDGE", "setups": []}
+                return {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["LLM_REPAIR_TRADE_INVALID"], "stock_bias": "NO_EDGE", "setups": []}
+            if reasons:
+                resp["validation_warnings"] = reasons
 
         if reasons:
             resp["validation_warnings"] = reasons

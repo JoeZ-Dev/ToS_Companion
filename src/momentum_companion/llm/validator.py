@@ -49,7 +49,6 @@ def validate_trade_setups(snapshot: Dict[str, Any], llm_obj: Dict[str, Any], ret
     session = snapshot.get("session") or {}
     pm_high = session.get("premarket_high")
 
-    actionable = False
     valid_found = False
     for setup in setups:
         try:
@@ -81,14 +80,12 @@ def validate_trade_setups(snapshot: Dict[str, Any], llm_obj: Dict[str, Any], ret
             if ext is None or float(ext) < float(pm_high) * 0.998:
                 reasons.append("extension_target too low vs premarket_high")
                 continue
-        if setup.get("setup_rating") and rr >= 1.2 and move_pct >= 0.03:
-            actionable = True
         valid_found = True
 
     if not valid_found:
         action = "RETRY" if not retry_attempted else "NO_EDGE"
         return False, reasons, action
-    if reasons and not actionable:
+    if reasons:
         action = "RETRY" if not retry_attempted else "NO_EDGE"
         return False, reasons, action
     return True, [], "OK"

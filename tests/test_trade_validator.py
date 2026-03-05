@@ -31,3 +31,17 @@ def test_rejects_trivial_target():
     assert not ok
     assert action == "RETRY"
     assert any("move_pct" in r or "rr" in r for r in reasons)
+
+
+def test_mixed_setups_one_valid_one_invalid():
+    snap = _sample_snapshot()
+    llm = {
+        "stock_bias": "HAS_POTENTIAL",
+        "setups": [
+            {"entry_trigger_price": 2.22, "stop_price": 2.07, "target_price": 2.23, "setup_rating": "B-"},
+            {"entry_trigger_price": 2.0, "stop_price": 1.8, "target_price": 2.3, "setup_rating": "B"},
+        ],
+    }
+    ok, reasons, action = validate_trade_setups(snap, llm)
+    assert ok
+    assert action == "OK"
