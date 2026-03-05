@@ -71,6 +71,7 @@ class UIController:
         self._token_provider = token_provider
         self._aggregator = BarAggregator10s()
         self._bars: list[dict] = []
+        self._bars_1m: list[dict] = []
         self._massive_values: dict[str, float | int | None] = {"float": None, "short_interest": None, "short_vol_pct": None}
         self._pending_symbol: str | None = None
         self._display_window_sec = 60 * 60  # 1 hour window
@@ -116,6 +117,8 @@ class UIController:
         self._massive_api_key: str | None = None
         self._massive_client: MassiveFundamentalsClient | None = None
         self._massive_cache_dir = Path(db_path).parent if db_path else Path.home() / ".tos_companion"
+        self._last_snapshot_warn_ts: float = 0.0
+        self._last_snapshot_warn_symbol: str | None = None
         self._model_signals = _ModelSignals()
         self._llm_signals = _LLMSignals()
         self._last_llm_payload: dict | None = None
@@ -285,6 +288,7 @@ class UIController:
                 bars = bars[-60:]
             self._bars_1m = bars
             self._logger.debug("Loaded 1m bars for %s count=%s", symbol, len(bars))
+            self._ensure_snapshot(symbol)
         except Exception:
             self._logger.debug("Failed to load 1m bars for %s", symbol, exc_info=True)
 
@@ -503,6 +507,8 @@ class UIController:
             QtCore.Q_ARG(float, float(ask_ui) if ask_ui is not None else 0.0),
             QtCore.Q_ARG(float, float(last_ui) if last_ui is not None else 0.0),
         )
+        # Attempt to build/capture a snapshot once quote + bars exist.
+        self._ensure_snapshot(self._active_symbol)
 
     def _handle_chart_bar(self, bar: dict) -> None:
         """Ingest CHART_EQUITY 10s bars directly."""
@@ -531,6 +537,39 @@ class UIController:
                 self._request_render()
         except Exception:
             self._logger.debug("Failed to handle chart bar", exc_info=True)
+
+    def _ensure_snapshot(self, symbol: str | None = None) -> dict | None:
+        """Build and cache an AE snapshot if possible."""
+        sym = symbol or self._active_symbol
+        if not sym:
+            return None
+        if self._last_ae_snapshot and self._last_ae_snapshot.get("symbol") == sym:
+            return self._last_ae_snapshot
+        snap = None
+        if self._ae_engine:
+            try:
+                snap = self._ae_engine._build_snapshot(sym)  # type: ignore[attr-defined]
+            except Exception:
+                self._logger.debug("Snapshot build failed for %s", sym, exc_info=True)
+        if snap:
+            self._last_ae_snapshot = snap
+            if hasattr(self._window, "update_ae_panel"):
+                QtCore.QTimer.singleShot(
+                    0, lambda s=snap: self._window.update_ae_panel(s)  # type: ignore[arg-type]
+                )
+            return snap
+        self._log_snapshot_unavailable(sym)
+        return None
+
+    def _log_snapshot_unavailable(self, symbol: str | None) -> None:
+        sym = symbol or ""
+        now = time.time()
+        if self._last_snapshot_warn_symbol == sym and (now - self._last_snapshot_warn_ts) < 5:
+            return
+        status = snapshot_status_summary(sym, self._last_quote, self._bars_1m, self._bars, self._ae_engine, self._last_ae_snapshot)
+        self._logger.warning("LLM run skipped: snapshot unavailable %s", status)
+        self._last_snapshot_warn_symbol = sym
+        self._last_snapshot_warn_ts = now
 
     def _maybe_invoke_llm(self, snapshot: dict, quote_event: QuoteEvent) -> None:
         """Gate and invoke LLM coach off the UI thread."""
@@ -922,8 +961,9 @@ class UIController:
         if not self._llm_enabled:
             return
         if not self._last_ae_snapshot:
-            self._logger.warning("LLM run skipped: no snapshot")
-            return
+            snap = self._ensure_snapshot(self._active_symbol)
+            if not snap:
+                return
         ready, missing = self._is_snapshot_ready_for_llm(self._last_ae_snapshot)
         if not ready:
             msg = f"LLM skipped — snapshot not ready (missing {', '.join(missing)}; bars_len={len(self._last_ae_snapshot.get('bars_window') or []) if isinstance(self._last_ae_snapshot, dict) else 0})"
@@ -2221,3 +2261,38 @@ class UIController:
                 except (TypeError, ValueError):
                     return None
         return None
+
+
+def snapshot_status_summary(
+    symbol: str | None,
+    last_quote: dict | None,
+    bars_1m: list | None,
+    bars_5m: list | None,
+    ae_engine: AEEngine | None,
+    last_snapshot: dict | None,
+) -> str:
+    """Return a concise status string for snapshot prerequisites."""
+    b1_len = len(bars_1m) if isinstance(bars_1m, list) else 0
+    b5_len = len(bars_5m) if isinstance(bars_5m, list) else 0
+    has_quote = False
+    if isinstance(last_quote, dict):
+        has_quote = any(last_quote.get(k) is not None for k in ("last", "bid", "ask"))
+    has_session = False
+    if ae_engine:
+        agg = getattr(ae_engine, "_minute_agg", None)
+        if agg:
+            has_session = any(
+                getattr(agg, attr, None) is not None
+                for attr in ("session_high", "session_low", "session_open", "premarket_high", "premarket_low", "or_high", "or_low")
+            )
+    has_levels = False
+    if isinstance(last_snapshot, dict):
+        levels = last_snapshot.get("levels") or {}
+        if isinstance(levels, dict):
+            has_levels = bool(levels.get("nearest_resistance") or levels.get("nearest_support"))
+    return (
+        f"(symbol={symbol or ''} has_quote={has_quote} "
+        f"has_1m={b1_len > 0} bars_1m={b1_len} "
+        f"has_5m={b5_len > 0} bars_5m={b5_len} "
+        f"has_session={has_session} has_levels={has_levels})"
+    )
