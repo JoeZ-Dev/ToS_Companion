@@ -34,8 +34,11 @@ def normalize_snapshot(raw_snapshot: Dict[str, Any], session_mode: str, quote: D
         payload["volume_structure"] = raw_snapshot.get("volume_structure")
     if "structure_context" in raw_snapshot:
         payload["structure_context"] = raw_snapshot.get("structure_context")
-    try:
-        payload["candidate_setups"] = generate_candidate_setups(dict(payload))
-    except Exception:
-        payload["candidate_setups"] = []
+    if raw_snapshot.get("candidate_setups") is not None:
+        payload["candidate_setups"] = raw_snapshot.get("candidate_setups")
+    else:
+        try:
+            payload["candidate_setups"] = generate_candidate_setups(dict(payload))
+        except Exception:
+            payload["candidate_setups"] = []
     return payload  # type: ignore[return-value]

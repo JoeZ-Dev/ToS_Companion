@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 from PySide6 import QtCore
 
 from momentum_companion.llm.service import LLMService
+from momentum_companion.setup_engine.candidate_generator import generate_candidate_setups
 from momentum_companion.ui.main_window import MainWindow
 from momentum_companion.ui.chart_adapter import ChartAdapter
 from momentum_companion.clients.massive_fundamentals_client import MassiveFundamentalsClient
@@ -552,6 +553,12 @@ class UIController:
             except Exception:
                 self._logger.debug("Snapshot build failed for %s", sym, exc_info=True)
         if snap:
+            try:
+                normalized = self._normalize_snapshot_for_llm(snap)
+                cand = generate_candidate_setups(dict(normalized))
+                snap["candidate_setups"] = cand
+            except Exception:
+                self._logger.debug("Failed to generate candidate_setups for %s", sym, exc_info=True)
             self._last_ae_snapshot = snap
             if hasattr(self._window, "update_ae_panel"):
                 QtCore.QTimer.singleShot(
@@ -1312,6 +1319,11 @@ class UIController:
             norm["volume_structure"] = snapshot.get("volume_structure")
         if candidate_setups is not None:
             norm["candidate_setups"] = candidate_setups
+        else:
+            try:
+                norm["candidate_setups"] = generate_candidate_setups(dict(norm))
+            except Exception:
+                norm["candidate_setups"] = []
         return norm
 
     def _extract_bars_window(self, snapshot: dict) -> list[dict]:

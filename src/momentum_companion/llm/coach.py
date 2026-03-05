@@ -35,7 +35,7 @@ class LLMCoach:
             "- If structure_context.next_resistance_distance_pct is not null and < 0.4, only propose breakout-through-resistance with hold/retest confirmation, otherwise return NO_EDGE. Do not propose targets within 0.4% of entry unless returning NO_EDGE.\n"
             "- If volume_structure.volume_state == DISTRIBUTION, cap setup_rating at B- and require hold/retest confirmation. If volume_state in {EXPANSION, HEALTHY_PULLBACK}, allow normal rating logic.\n"
             "- If derived.distance_to_vwap_pct is not null and > 0.05 (5%), entries must be pullback/retest based (no chase/buy-now).\n"
-            "- You MUST select setups only from candidate_setups provided in the payload. Copy entry/stop/target/target1_label exactly from the chosen candidate. Include candidate_index in each setup referencing its candidate. If none are acceptable, return stock_bias=NO_EDGE and setups=[]. You may only adjust narrative fields and rating.\n"
+            "- You MUST select setups only from candidate_setups provided in the payload. Copy entry/stop/target/target1_label exactly from the chosen candidate. Include candidate_index (integer) in each setup referencing its candidate. If none are acceptable, return stock_bias=NO_EDGE and setups=[]. You may only adjust narrative fields and rating.\n"
         )
 
     def run(self, snapshot_payload: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:

@@ -104,9 +104,7 @@ class LLMService:
             valid, reasons, action = validate_trade_setups(payload, resp, retry_attempted=True)
             if action != "OK":
                 return {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["LLM_REPAIR_TRADE_INVALID"], "stock_bias": "NO_EDGE", "setups": []}
-            warnings.extend(reasons)
-        else:
-            warnings.extend(reasons)
+        warnings.extend(reasons)
         if warnings:
             resp["validation_warnings"] = warnings
         symbol = payload.get("symbol")
