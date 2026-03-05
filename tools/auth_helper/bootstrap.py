@@ -83,9 +83,14 @@ def exchange_code(code: str) -> dict:
 def main() -> None:
     if not os.environ.get("SCHWAB_CLIENT_ID") or not os.environ.get("SCHWAB_CLIENT_SECRET"):
         raise SystemExit("Set SCHWAB_CLIENT_ID and SCHWAB_CLIENT_SECRET in env on homelab.")
-    host = "0.0.0.0"
-    port = 8765
-    httpd = HTTPServer((host, port), CallbackHandler)
+    host = os.environ.get("AUTH_HELPER_BIND", "0.0.0.0")
+    port = int(os.environ.get("AUTH_HELPER_PORT", "8765"))
+    try:
+        httpd = HTTPServer((host, port), CallbackHandler)
+    except PermissionError:
+        # Fallback to localhost binding if broad bind is blocked.
+        host = "127.0.0.1"
+        httpd = HTTPServer((host, port), CallbackHandler)
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()
     state = "AUTH_HELPER_STATE"
