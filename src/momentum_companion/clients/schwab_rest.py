@@ -31,7 +31,10 @@ class SchwabRestClient:
 
     def _headers(self) -> Dict[str, str]:
         token = self._auth_token_provider()
-        return {"Authorization": f"Bearer {token}"}
+        tok_str = str(token or "").strip() if token is not None else ""
+        if not tok_str:
+            raise RuntimeError("Missing auth token for Schwab REST request")
+        return {"Authorization": f"Bearer {tok_str}"}
 
     @with_backoff()
     def get_accounts(self) -> Dict[str, Any]:
