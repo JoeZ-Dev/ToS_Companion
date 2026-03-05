@@ -31,4 +31,6 @@ def normalize_snapshot(raw_snapshot: Dict[str, Any], session_mode: str, quote: D
         payload["derived"] = raw_snapshot.get("derived")
     if "volume_structure" in raw_snapshot:
         payload["volume_structure"] = raw_snapshot.get("volume_structure")
+    if "structure_context" in raw_snapshot:
+        payload["structure_context"] = raw_snapshot.get("structure_context")
     return payload  # type: ignore[return-value]
