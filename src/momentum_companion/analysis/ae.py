@@ -499,6 +499,53 @@ class AEEngine:
         micro = _compute_micro_metrics(agg_bars, last_price)
         bars_window_5m = _build_bars_window_5m(agg_bars, limit=60)
 
+        def _first_valid_above(price: Optional[float], source: str) -> Optional[dict]:
+            if price is None or last_price is None:
+                return None
+            if price <= last_price:
+                return None
+            dist = (price - last_price) / last_price * 100
+            return {"price": float(price), "source": source, "distance_pct": dist}
+
+        # Fill nearest_res from structured sources if missing/not above price.
+        def _nearest_resistance_fallback() -> Optional[dict]:
+            # keep existing if valid above current price
+            if isinstance(nearest_res, dict) and nearest_res.get("price") is not None and last_price:
+                try:
+                    price = float(nearest_res.get("price"))
+                    if price > last_price:
+                        dist = (price - last_price) / last_price * 100
+                        return {"price": price, "source": nearest_res.get("source") or "nearest_resistance", "distance_pct": dist}
+                except Exception:
+                    pass
+            # priority order
+            candidates: list[Optional[dict]] = []
+            micro_res = micro.get("micro_resistance_15m") if isinstance(micro, dict) else None
+            candidates.append(_first_valid_above(micro_res, "micro_resistance_15m"))
+            or_high = or_high_val
+            candidates.append(_first_valid_above(or_high, "opening_range_high"))
+            pm_high = premarket_high_val
+            candidates.append(_first_valid_above(pm_high, "premarket_high"))
+            # swing highs from bars_window_5m
+            swing_high = None
+            if bars_window_5m:
+                try:
+                    highs = [float(b.get("h")) for b in bars_window_5m if isinstance(b, dict) and b.get("h") is not None]
+                    highs_above = [h for h in highs if last_price and h > last_price]
+                    if highs_above:
+                        swing_high = min(highs_above)
+                except Exception:
+                    swing_high = None
+            candidates.append(_first_valid_above(swing_high, "swing_high"))
+            for c in candidates:
+                if c:
+                    return c
+            return None
+
+        nearest_res_fallback = _nearest_resistance_fallback()
+        if nearest_res_fallback:
+            nearest_res = nearest_res_fallback
+
         snapshot_symbol = profile["symbol"] if profile else (resolved_symbol or "")
         snapshot = {
             "symbol": snapshot_symbol,
