@@ -10,6 +10,7 @@ from typing import Optional, List, Dict, Any
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+import statistics
 
 from momentum_companion.clients.schwab_rest import SchwabRestClient
 from momentum_companion.data.bar_aggregator import TenSecondBar
@@ -639,7 +640,8 @@ class AEEngine:
         try:
             bars_1m_list = agg_bars  # these are 1m bars already
             vols20 = [b.volume for b in bars_1m_list[-20:]] if bars_1m_list else []
-            median20 = float(pd.Series(vols20).median()) if vols20 else None
+            import statistics
+            median20 = float(statistics.median(vols20)) if vols20 else None
             impulse_volume = max(vols20) if vols20 else None
             if impulse_volume and median20 and median20 > 0:
                 volume_structure["impulse_volume_ratio"] = impulse_volume / median20

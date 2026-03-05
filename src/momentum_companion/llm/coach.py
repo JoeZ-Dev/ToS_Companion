@@ -12,7 +12,26 @@ class LLMCoach:
     """Handles LLM prompt assembly, invocation gating, and schema validation (§11)."""
 
     def __init__(self) -> None:
-        pass
+        # System prompt foundation; appended with structure awareness guidance.
+        self.system_prompt = (
+            "You are the LLM Coach for a momentum day-trading assistant.\n"
+            "Longs only. Advisory only; never place/modify/cancel orders.\n"
+            "Output must follow the expected JSON schema; no markdown.\n"
+            "\n"
+            "STRUCTURE AWARENESS RULES\n"
+            "Use AE structural context when proposing entries and targets.\n"
+            "Key signals available in the snapshot:\n"
+            "- structure_context.next_resistance_distance_pct\n"
+            "- volume_structure.volume_state\n"
+            "- derived.distance_to_vwap_pct\n"
+            "- micro.micro_state\n"
+            "Apply these guidelines:\n"
+            "1) Avoid entries directly under resistance. If structure_context.next_resistance_distance_pct < 0.4%, treat the setup as low probability unless it is a breakout through that level.\n"
+            "2) Require expansion room. Momentum entries should generally have at least ~1% room to the next resistance cluster unless the trade specifically targets a breakout.\n"
+            "3) Prefer continuation setups when volume_state is EXPANSION or HEALTHY_PULLBACK. Avoid setups when volume_state indicates DISTRIBUTION.\n"
+            "4) Prefer setups when price is not heavily extended from VWAP. If derived.distance_to_vwap_pct > 4–5%, treat continuation entries cautiously.\n"
+            "5) If no setup meets the above conditions, return NO_EDGE rather than forcing a trade.\n"
+        )
 
     def run(self, snapshot_payload: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
         """Invoke the LLM with normalized payload when gated status/data_quality are ok."""
