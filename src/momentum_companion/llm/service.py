@@ -4,7 +4,11 @@ from typing import Any, Dict
 
 from momentum_companion.llm.coach import LLMCoach
 from momentum_companion.llm.normalization import normalize_snapshot
-from momentum_companion.llm.validator import validate_llm_output, validate_trade_setups
+from momentum_companion.llm.validator import (
+    validate_llm_output,
+    validate_llm_selected_candidates,
+    validate_trade_setups,
+)
 from momentum_companion.llm.client import LLMClient
 from momentum_companion.journal.writer import JournalWriter
 from momentum_companion.utils.logging import logging
@@ -56,6 +60,25 @@ class LLMService:
             self._log_invalid(payload, session_mode)
             return {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["LLM_SCHEMA_INVALID"]}
 
+        resp, cand_valid, cand_reasons, cand_action = validate_llm_selected_candidates(payload, resp, retry_attempted=False)
+        warnings: list[str] = list(cand_reasons)
+        if cand_action == "RETRY":
+            logger.info("LLM candidate selection invalid; retrying with repair prompt reasons=%s", cand_reasons)
+            repair_messages = list(messages) + [
+                {
+                    "role": "system",
+                    "content": "You must select from candidate_setups. Do not change numeric fields. If none fit, return NO_EDGE.",
+                }
+            ]
+            resp = _invoke(repair_messages)
+            if not self._coach.validate_response(resp) or not validate_llm_output(resp):
+                self._log_invalid(payload, session_mode)
+                return {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["LLM_REPAIR_FAILED"], "stock_bias": "NO_EDGE", "setups": []}
+            resp, cand_valid, cand_reasons, cand_action = validate_llm_selected_candidates(payload, resp, retry_attempted=True)
+            warnings.extend(cand_reasons)
+            if cand_action != "OK":
+                return {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["LLM_CANDIDATE_MISMATCH"], "stock_bias": "NO_EDGE", "setups": []}
+
         valid, reasons, action = validate_trade_setups(payload, resp, retry_attempted=False)
         if action == "RETRY":
             logger.info("LLM trade validation failed; retrying with repair prompt reasons=%s", reasons)
@@ -73,14 +96,19 @@ class LLMService:
             if not self._coach.validate_response(resp) or not validate_llm_output(resp):
                 self._log_invalid(payload, session_mode)
                 return {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["LLM_REPAIR_FAILED"], "stock_bias": "NO_EDGE", "setups": []}
+            # ensure repair response still honors candidate selection
+            resp, cand_valid2, cand_reasons2, cand_action2 = validate_llm_selected_candidates(payload, resp, retry_attempted=True)
+            warnings.extend(cand_reasons2)
+            if cand_action2 != "OK":
+                return {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["LLM_CANDIDATE_MISMATCH"], "stock_bias": "NO_EDGE", "setups": []}
             valid, reasons, action = validate_trade_setups(payload, resp, retry_attempted=True)
             if action != "OK":
                 return {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["LLM_REPAIR_TRADE_INVALID"], "stock_bias": "NO_EDGE", "setups": []}
-            if reasons:
-                resp["validation_warnings"] = reasons
-
-        if reasons:
-            resp["validation_warnings"] = reasons
+            warnings.extend(reasons)
+        else:
+            warnings.extend(reasons)
+        if warnings:
+            resp["validation_warnings"] = warnings
         symbol = payload.get("symbol")
         if symbol:
             self._maybe_flash(symbol, resp, payload)
