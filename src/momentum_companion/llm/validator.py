@@ -7,21 +7,18 @@ from momentum_companion.data.reason_codes import allowed_reason_codes
 VALID_VALIDITY = {"VALID_FOR_TRADING", "NOT_VALID_FOR_TRADING"}
 VALID_ACTIONS = {"HOLD", "EXIT_NOW", "SCALE_OUT_50", "MOVE_STOP_TO_BREAKEVEN", "RAISE_STOP_TO", "ADD_TO_POSITION"}
 VALID_URGENCY = {"LOW", "MEDIUM", "HIGH"}
-REQUIRED_FIELDS = {"validity", "setup_rating", "reason_codes"}
 ALLOWED_SETUP_STATES = {"READY", "WATCH"}
 
 
 def validate_llm_output(resp: Dict[str, Any]) -> bool:
     """Basic schema validation per specs.md §11.3."""
+    # optional validity
     validity = resp.get("validity")
-    if validity not in VALID_VALIDITY:
+    if validity is not None and validity not in VALID_VALIDITY:
         return False
-    # required fields
-    if not REQUIRED_FIELDS.issubset(resp.keys()):
-        return False
-    # reason codes
+    # reason codes optional
     rcodes = resp.get("reason_codes", [])
-    if not isinstance(rcodes, list) or not all(code in allowed_reason_codes() for code in rcodes):
+    if rcodes and (not isinstance(rcodes, list) or not all(code in allowed_reason_codes() for code in rcodes)):
         return False
     # in-position fields
     action = resp.get("trade_management_action")

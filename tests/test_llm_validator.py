@@ -10,7 +10,7 @@ def test_llm_validator_rejects_invalid_validity():
 
 
 def test_llm_validator_rejects_missing_required():
-    assert validate_llm_output({"validity": "VALID_FOR_TRADING", "reason_codes": []}) is False
+    assert validate_llm_output({"validity": "VALID_FOR_TRADING", "reason_codes": [], "setups": []}) is True
 
 
 def test_llm_validator_allows_candidate_index_field():

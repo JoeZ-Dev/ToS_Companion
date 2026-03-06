@@ -43,7 +43,11 @@ class LLMService:
         logger = logging.getLogger(__name__)
 
         # Gate on snapshot readiness per intended architecture
-        if payload.get("status") != "ok" or payload.get("data_quality") not in {"ok"}:
+        status = payload.get("status")
+        data_quality = payload.get("data_quality")
+        if status != "ok":
+            return {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["DATA_STALE"], "stock_bias": "NO_EDGE", "setups": []}
+        if data_quality in {"stale", "no_data", "error"}:
             return {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["DATA_STALE"], "stock_bias": "NO_EDGE", "setups": []}
 
         def _invoke(msgs: list[dict]) -> Dict[str, Any]:

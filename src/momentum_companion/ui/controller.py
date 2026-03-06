@@ -1741,35 +1741,27 @@ class UIController:
         )
 
     def _build_llm_messages(self, snapshot: dict) -> list[dict[str, str]]:
-        system_text = (
-            "You are the LLM Coach for a momentum day-trading assistant.\n"
-            "You are advisory-only: never place/modify/cancel orders and never arm triggers.\n"
-            "Longs only.\n"
-            "Do not compute indicators or fabricate missing data.\n"
-            "Stateless: evaluate only the provided snapshot.\n"
-            "Output MUST be a single JSON object only (no markdown, no extra text).\n"
-            "Summary fields must be <=3 sentences."
-        )
-        developer_text = self._llm_prompt or self._default_developer_prompt()
+        from momentum_companion.llm.coach import LLMCoach
+
+        system_text = LLMCoach().system_prompt
+        developer_text = ""
         normalized = self._normalize_snapshot_for_llm(snapshot)
         user_text = json.dumps(normalized, separators=(",", ":"), sort_keys=True)
         return [
             {"role": "system", "content": system_text},
-            {"role": "developer", "content": developer_text},
+            *(([{"role": "developer", "content": developer_text}] if developer_text else [])),
             {"role": "user", "content": user_text},
         ]
 
     def _build_llm_refresh_messages(self, payload: dict) -> list[dict[str, str]]:
-        system_text = (
-            "You are the LLM Coach. Update the prior best setup using the latest prices/levels and small bar sample.\n"
-            "Keep the SAME JSON schema as full mode (stock_bias, summary, setups[]...).\n"
-            "Summary <=2 sentences. No markdown. JSON only."
-        )
-        developer_text = self._llm_prompt_refresh or self._default_developer_prompt_refresh()
+        from momentum_companion.llm.coach import LLMCoach
+
+        system_text = LLMCoach().system_prompt
+        developer_text = ""
         user_text = json.dumps(payload, separators=(",", ":"), sort_keys=True)
         return [
             {"role": "system", "content": system_text},
-            {"role": "developer", "content": developer_text},
+            *(([{"role": "developer", "content": developer_text}] if developer_text else [])),
             {"role": "user", "content": user_text},
         ]
 
