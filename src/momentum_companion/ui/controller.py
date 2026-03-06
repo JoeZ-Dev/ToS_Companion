@@ -2216,14 +2216,6 @@ def _compute_breakout_targets(snapshot: dict) -> dict:
         trigger = None
     if trigger is None:
         return out
-    current_price = None
-    quote = snapshot.get("quote") or {}
-    try:
-        current_price = float(quote.get("last"))
-    except Exception:
-        current_price = None
-    if current_price is not None and trigger <= current_price * 1.002:
-        return out
     candidates: list[float] = []
     session = snapshot.get("session") or {}
     micro = snapshot.get("micro") or {}
@@ -2245,7 +2237,7 @@ def _compute_breakout_targets(snapshot: dict) -> dict:
             candidates.append(h)
         except Exception:
             continue
-    higher = sorted({c for c in candidates if c > trigger * 1.002})
+    higher = sorted({c for c in candidates if c > trigger})
     out["nearest_breakout_trigger"] = trigger
     if higher:
         out["next_structural_target_above_trigger"] = higher[0]
