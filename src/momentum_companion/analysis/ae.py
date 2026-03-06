@@ -1049,7 +1049,10 @@ def pick_nearest_resistance(
     bars_window_5m: list[dict] | None,
     existing: dict | None,
 ) -> dict | None:
-    """Select nearest resistance above current_price by priority."""
+    """
+    Select nearest meaningful resistance above current_price by priority.
+    Filters out trivial levels very close to/through price to avoid noisy triggers.
+    """
 
     def _candidate(price: Optional[float], source: str) -> dict | None:
         if price is None:
@@ -1058,7 +1061,8 @@ def pick_nearest_resistance(
             price_f = float(price)
         except Exception:
             return None
-        if price_f <= current_price:
+        # require at least 0.2% above current price to avoid micro-noise
+        if price_f <= current_price * 1.002:
             return None
         dist = (price_f - current_price) / current_price * 100
         return {"price": price_f, "source": source, "distance_pct": dist}
@@ -1067,7 +1071,7 @@ def pick_nearest_resistance(
     if isinstance(existing, dict) and existing.get("price") is not None:
         try:
             p = float(existing.get("price"))
-            if p > current_price:
+            if p > current_price * 1.002:
                 dist = (p - current_price) / current_price * 100
                 return {"price": p, "source": existing.get("source") or "nearest_resistance", "distance_pct": dist}
         except Exception:

@@ -104,8 +104,8 @@ def normalize_snapshot(raw_snapshot: Dict[str, Any], session_mode: str, quote: D
 def _compute_breakout_targets(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     """
     Compute deterministic breakout trigger/targets for LLM context:
-    - nearest_breakout_trigger: nearest_resistance.price
-    - next_structural_target_above_trigger: next higher structural high above trigger
+    - nearest_breakout_trigger: nearest_resistance.price (only if meaningfully above price)
+    - next_structural_target_above_trigger: next higher structural high above trigger (skip trivial <=0.2% gaps)
     - second_structural_target_above_trigger: second higher structural high above trigger
     """
     out: Dict[str, Any] = {}
@@ -118,6 +118,15 @@ def _compute_breakout_targets(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     except Exception:
         trigger = None
     if trigger is None:
+        return out
+    current_price = None
+    quote = snapshot.get("quote") or {}
+    try:
+        current_price = float(quote.get("last"))
+    except Exception:
+        current_price = None
+    # require trigger meaningfully above current price
+    if current_price is not None and trigger <= current_price * 1.002:
         return out
     candidates: list[float] = []
     session = snapshot.get("session") or {}
@@ -141,7 +150,7 @@ def _compute_breakout_targets(snapshot: Dict[str, Any]) -> Dict[str, Any]:
             candidates.append(h)
         except Exception:
             continue
-    higher = sorted({c for c in candidates if c > trigger})
+    higher = sorted({c for c in candidates if c > trigger * 1.002})
     out["nearest_breakout_trigger"] = trigger
     if higher:
         out["next_structural_target_above_trigger"] = higher[0]
