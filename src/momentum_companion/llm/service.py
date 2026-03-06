@@ -62,6 +62,9 @@ class LLMService:
 
         resp = _invoke(messages)
         logger.debug("LLM raw response: %s", resp)
+        if isinstance(resp, dict) and "setups" not in resp:
+            logger.warning("LLM sanitize repaired missing setups -> []")
+            resp["setups"] = []
         if not self._coach.validate_response(resp):
             return {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["LLM_SCHEMA_INVALID"]}
         if not validate_llm_output(resp):

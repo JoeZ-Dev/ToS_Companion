@@ -1744,12 +1744,19 @@ class UIController:
         from momentum_companion.llm.coach import LLMCoach
 
         system_text = LLMCoach().system_prompt
-        developer_text = ""
+        developer_text = (
+            "STRICT SCHEMA CONTRACT (DO NOT DEVIATE):\n"
+            "- Return EXACTLY ONE JSON object.\n"
+            "- Top-level keys MUST include: stock_bias, summary, setups.\n"
+            "- setups must always be present (use [] if no viable setup). If no setup, set stock_bias=\"NO_EDGE\" and setups=[].\n"
+            "- Each setup MUST include all required fields: name, setup_state, trigger_condition, entry_trigger_price, stop_price, target_price, rr_to_target1, move_pct_to_target1, setup_rating, confirmation_requirements, target1_label, extension_trigger, extension_target, extension_notes, tape_warning.\n"
+            "- No markdown. No extra text."
+        )
         normalized = self._normalize_snapshot_for_llm(snapshot)
         user_text = json.dumps(normalized, separators=(",", ":"), sort_keys=True)
         return [
             {"role": "system", "content": system_text},
-            *(([{"role": "developer", "content": developer_text}] if developer_text else [])),
+            {"role": "developer", "content": developer_text},
             {"role": "user", "content": user_text},
         ]
 
@@ -1757,11 +1764,18 @@ class UIController:
         from momentum_companion.llm.coach import LLMCoach
 
         system_text = LLMCoach().system_prompt
-        developer_text = ""
+        developer_text = (
+            "STRICT SCHEMA CONTRACT (DO NOT DEVIATE):\n"
+            "- Return EXACTLY ONE JSON object.\n"
+            "- Top-level keys MUST include: stock_bias, summary, setups.\n"
+            "- setups must always be present (use [] if no viable setup). If no setup, set stock_bias=\"NO_EDGE\" and setups=[].\n"
+            "- Each setup MUST include all required fields: name, setup_state, trigger_condition, entry_trigger_price, stop_price, target_price, rr_to_target1, move_pct_to_target1, setup_rating, confirmation_requirements, target1_label, extension_trigger, extension_target, extension_notes, tape_warning.\n"
+            "- No markdown. No extra text."
+        )
         user_text = json.dumps(payload, separators=(",", ":"), sort_keys=True)
         return [
             {"role": "system", "content": system_text},
-            *(([{"role": "developer", "content": developer_text}] if developer_text else [])),
+            {"role": "developer", "content": developer_text},
             {"role": "user", "content": user_text},
         ]
 
