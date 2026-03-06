@@ -608,6 +608,8 @@ class AEEngine:
         try:
             nearest_res = levels.get("nearest_resistance") if isinstance(levels, dict) else None
             nearest_sup = levels.get("nearest_support") if isinstance(levels, dict) else None
+            if current_price is None:
+                current_price = last_price
             if current_price:
                 if nearest_res and isinstance(nearest_res, dict) and nearest_res.get("price") is not None:
                     nr_price = float(nearest_res.get("price"))

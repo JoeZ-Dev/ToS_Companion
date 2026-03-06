@@ -40,6 +40,35 @@ def _swing_high_above(bars_window: list[dict] | None, current_price: float) -> f
     return min(highs_above) if highs_above else None
 
 
+def _structural_targets_above(entry: float, entry_label: str, payload: Dict[str, Any]) -> tuple[float | None, str | None]:
+    """Return first structural level above entry with matching label."""
+    levels = payload.get("levels") or {}
+    micro = payload.get("micro") or {}
+    session = payload.get("session") or {}
+    bars_window = payload.get("bars_window") or []
+    targets: list[tuple[float, str]] = []
+    nr = levels.get("nearest_resistance") if isinstance(levels, dict) else None
+    if isinstance(nr, dict) and nr.get("price") is not None:
+        targets.append((float(nr.get("price")), "nearest_resistance"))
+    micro_res = micro.get("micro_resistance_15m") if isinstance(micro, dict) else None
+    if micro_res is not None:
+        targets.append((float(micro_res), "micro_resistance_15m"))
+    orh = session.get("opening_range_high") if isinstance(session, dict) else None
+    if orh is not None:
+        targets.append((float(orh), "opening_range_high"))
+    pmh = session.get("premarket_high") if isinstance(session, dict) else None
+    if pmh is not None:
+        targets.append((float(pmh), "premarket_high"))
+    swing = _swing_high_above(bars_window, entry)
+    if swing is not None:
+        targets.append((float(swing), "swing_high"))
+
+    for price, label in targets:
+        if price > entry and label != entry_label:
+            return price, label
+    return None, None
+
+
 def generate_candidate_setups(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Deterministic candidate setups using normalized snapshot fields."""
     quote = payload.get("quote") or {}
@@ -75,15 +104,15 @@ def generate_candidate_setups(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     if nr_price_f and nr_price_f > current_price:
         entry = nr_price_f
         stop = max(current_price * 0.985, entry * 0.985)
-        target = entry * 1.03
-        if _risk_reward_valid(entry, stop, target):
+        target, label = _structural_targets_above(entry, "nearest_resistance", payload)
+        if target is not None and label is not None and _risk_reward_valid(entry, stop, target):
             _append_candidate(
                 {
                     "name": "NEAREST_RES_BREAK_HOLD",
                     "entry_trigger_price": entry,
                     "stop_price": stop,
                     "target_price": target,
-                    "target1_label": "nearest_resistance",
+                    "target1_label": label,
                     "notes": f"break+hold {nr.get('source') or 'nearest_resistance'}",
                 }
             )
@@ -94,25 +123,8 @@ def generate_candidate_setups(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     if mr_price and mr_price > current_price:
         entry = mr_price
         stop = float(micro_sup) if micro_sup is not None else entry * 0.97
-        # target selection
-        pmh = session.get("premarket_high") if isinstance(session, dict) else None
-        orh = session.get("opening_range_high") if isinstance(session, dict) else None
-        swing = _swing_high_above(bars_window, entry)
-        target = None
-        label = None
-        for price, lbl in ((pmh, "premarket_high"), (orh, "opening_range_high"), (swing, "swing_high")):
-            try:
-                p = float(price)
-            except Exception:
-                continue
-            if p > entry:
-                target = p
-                label = lbl
-                break
-        if target is None:
-            target = entry * 1.03
-            label = "micro_resistance_15m"
-        if _risk_reward_valid(entry, stop, target):
+        target, label = _structural_targets_above(entry, "micro_resistance_15m", payload)
+        if target is not None and label is not None and _risk_reward_valid(entry, stop, target):
             _append_candidate(
                 {
                     "name": "MICRO_BREAK_HOLD",
@@ -130,20 +142,8 @@ def generate_candidate_setups(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     if isinstance(dist_vwap, (int, float)) and dist_vwap > 0.05 and isinstance(vwap, (int, float)) and current_price > vwap:
         entry = vwap
         stop = entry * 0.98
-        nr_price = nr_price_f if nr_price_f and nr_price_f > entry else None
-        target = nr_price or current_price
-        label = "nearest_resistance" if nr_price else None
-        if label is None:
-            swing_match = _swing_high_above(bars_window, entry)
-            if swing_match and abs(swing_match - target) / target <= 0.002:
-                label = "swing_high"
-        if label is None and nr_price_f and nr_price_f > entry:
-            target = nr_price_f
-            label = "nearest_resistance"
-        if label is None:
-            label = "micro_resistance_15m"
-            target = entry * 1.03
-        if _risk_reward_valid(entry, stop, target):
+        target, label = _structural_targets_above(entry, "vwap", payload)
+        if target is not None and label is not None and _risk_reward_valid(entry, stop, target):
             _append_candidate(
                 {
                     "name": "VWAP_PULLBACK_RETEST",

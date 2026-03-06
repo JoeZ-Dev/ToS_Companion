@@ -139,9 +139,50 @@ def validate_trade_setups(snapshot: Dict[str, Any], llm_obj: Dict[str, Any], ret
             if ext is None or float(ext) < float(pm_high) * 0.998:
                 reasons.append("extension_target too low vs premarket_high")
                 continue
+        # structural target match
+        label = setup.get("target1_label")
+        if not _matches_structural_target(snapshot, label, target):
+            reasons.append("target_label_mismatch")
+            continue
         valid_found = True
 
     if valid_found:
         return True, reasons, "OK"
     action = "RETRY" if not retry_attempted else "NO_EDGE"
     return False, reasons, action
+
+
+def _matches_structural_target(snapshot: Dict[str, Any], label: Any, target_price: float) -> bool:
+    """Ensure target matches structural price per label."""
+    tol = max(1e-4, 0.002 * target_price)
+    levels = snapshot.get("levels") or {}
+    micro = snapshot.get("micro") or {}
+    session = snapshot.get("session") or {}
+    bars = snapshot.get("bars_window") or []
+    def _close(a: float | None, b: float | None) -> bool:
+        return a is not None and b is not None and abs(float(a) - float(b)) <= tol
+    if label == "nearest_resistance":
+        expected = levels.get("nearest_resistance", {}).get("price") if isinstance(levels, dict) else None
+        return _close(expected, target_price)
+    if label == "micro_resistance_15m":
+        expected = micro.get("micro_resistance_15m") if isinstance(micro, dict) else None
+        return _close(expected, target_price)
+    if label == "opening_range_high":
+        expected = session.get("opening_range_high") if isinstance(session, dict) else None
+        return _close(expected, target_price)
+    if label == "premarket_high":
+        expected = session.get("premarket_high") if isinstance(session, dict) else None
+        return _close(expected, target_price)
+    if label == "swing_high":
+        for b in bars:
+            if not isinstance(b, dict):
+                continue
+            h = b.get("h")
+            try:
+                h_f = float(h)
+            except Exception:
+                continue
+            if _close(h_f, target_price):
+                return True
+        return False
+    return True
