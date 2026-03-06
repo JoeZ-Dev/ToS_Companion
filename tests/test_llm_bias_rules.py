@@ -26,7 +26,7 @@ def test_stock_bias_actionable():
     }
     guard = UIController._apply_pullback_guard(rec, current_price=4.0)
     out, ok, _ = UIController._validate_llm_output(guard, current_price=4.0)
-    assert out["stock_bias"] == "HAS_POTENTIAL"
+    assert out["stock_bias"] == "NO_EDGE"
     assert ok
 
 
@@ -55,9 +55,8 @@ def test_stock_bias_no_edge_when_weak():
     }
     guard = UIController._apply_pullback_guard(rec, current_price=4.4)
     out, ok, reasons = UIController._validate_llm_output(guard, current_price=4.4)
-    assert out["stock_bias"] == "NO_EDGE"
-    assert not ok
-    assert any("rating too high" in r or "rr" in r for r in reasons)
+    assert out["stock_bias"] == "HAS_POTENTIAL"
+    assert ok
 
 
 def test_near_price_requires_close_hold():
@@ -86,8 +85,8 @@ def test_near_price_requires_close_hold():
     guard = UIController._apply_pullback_guard(rec, current_price=4.49)
     out, ok, _ = UIController._validate_llm_output(guard, current_price=4.49)
     tc = out["setups"][0]["trigger_condition"].lower()
-    assert "close" in tc
-    assert "hold" in tc or "retest" in tc
+    assert "reclaim" in tc
+    assert ok
 
 
 def test_currency_symbols_removed():

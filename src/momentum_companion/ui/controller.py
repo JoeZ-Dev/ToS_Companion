@@ -13,7 +13,6 @@ from zoneinfo import ZoneInfo
 from PySide6 import QtCore
 
 from momentum_companion.llm.service import LLMService
-from momentum_companion.setup_engine.candidate_generator import generate_candidate_setups
 from momentum_companion.ui.main_window import MainWindow
 from momentum_companion.ui.chart_adapter import ChartAdapter
 from momentum_companion.clients.massive_fundamentals_client import MassiveFundamentalsClient
@@ -30,7 +29,6 @@ import pandas as pd
 from momentum_companion.analysis.ae import AEEngine
 from momentum_companion.utils.logging import logging
 from momentum_companion.data.bar_aggregator import TenSecondBar
-from momentum_companion.setup_engine.candidate_generator import generate_candidate_setups
 
 
 class _ModelSignals(QtCore.QObject):
@@ -557,7 +555,7 @@ class UIController:
             try:
                 normalized = self._normalize_snapshot_for_llm(snap)
                 cand = generate_candidate_setups(dict(normalized))
-                snap["candidate_setups"] = cand
+                snap["candidate_hints"] = cand
             except Exception:
                 self._logger.debug("Failed to generate candidate_setups for %s", sym, exc_info=True)
             self._last_ae_snapshot = snap
@@ -1015,7 +1013,7 @@ class UIController:
             "derived" in normalized,
             "structure_context" in normalized,
             "volume_structure" in normalized,
-            "candidate_setups" in normalized,
+            "candidate_hints" in normalized or "candidate_setups" in normalized,
         )
         prior_best_payload: dict | None = None
         if refresh_mode:
@@ -1028,31 +1026,6 @@ class UIController:
 
         def task() -> None:
             try:
-                candidate_count = len(normalized.get("candidate_setups") or [])
-                if candidate_count == 0:
-                    nearest_res = None
-                    try:
-                        nr = (normalized.get("levels") or {}).get("nearest_resistance") if isinstance(normalized, dict) else None
-                        nearest_res = nr.get("price") if isinstance(nr, dict) else None
-                    except Exception:
-                        nearest_res = None
-                    self._logger.info(
-                        "LLM skipped — no candidate_setups available (symbol=%s candidate_count=0 bars_len=%s nearest_resistance=%s)",
-                        symbol,
-                        bars_len,
-                        nearest_res,
-                    )
-                    rec = self._build_no_candidate_result(normalized)
-                    self._emit_llm_result(
-                        normalized,
-                        model,
-                        invocation="MANUAL" if not refresh_mode else "REFRESH",
-                        parsed=rec,
-                        raw_text=json.dumps(rec),
-                        error=None,
-                    )
-                    QtCore.QTimer.singleShot(0, lambda: self._refresh_llm_status())
-                    return
                 self._logger.info(
                     "LLM invoking model=%s for symbol=%s prompt_version=%s invocation=%s bars_len=%s",
                     model,
@@ -1275,6 +1248,7 @@ class UIController:
             "nearest_support": levels_src.get("nearest_support"),
         }
         candidate_setups = snapshot.get("candidate_setups")
+        candidate_hints = snapshot.get("candidate_hints")
         session_src = snapshot.get("session") if isinstance(snapshot, dict) else {}
         if not isinstance(session_src, dict):
             session_src = {}
@@ -1338,11 +1312,10 @@ class UIController:
             norm["volume_structure"] = snapshot.get("volume_structure")
         if candidate_setups is not None:
             norm["candidate_setups"] = candidate_setups
-        else:
-            try:
-                norm["candidate_setups"] = generate_candidate_setups(dict(norm))
-            except Exception:
-                norm["candidate_setups"] = []
+        try:
+            norm["candidate_hints"] = candidate_hints if candidate_hints is not None else generate_candidate_setups(dict(norm))
+        except Exception:
+            norm["candidate_hints"] = []
         return norm
 
     def _extract_bars_window(self, snapshot: dict) -> list[dict]:
@@ -1680,7 +1653,6 @@ class UIController:
             "    {\n"
             '      "name": string,\n'
             '      "trigger_condition": string,\n'
-            '      "candidate_index": integer,\n'
             '      "entry_trigger_price": number,\n'
             '      "stop_price": number,\n'
             '      "target_price": number,\n'
@@ -2127,50 +2099,13 @@ class UIController:
         setups = parsed.get("setups")
         if not isinstance(setups, list):
             return parsed
-        if current_price is None:
-            return parsed
-        summary = parsed.get("summary") if isinstance(parsed.get("summary"), str) else ""
-        added_summary = False
         for setup in setups:
             if not isinstance(setup, dict):
                 continue
-            entry = setup.get("entry_trigger_price")
-            try:
-                entry_f = float(entry)
-            except Exception:
-                continue
-            cond = setup.get("trigger_condition") or ""
-            cond_str = cond if isinstance(cond, str) else ""
-            cond_lower = cond_str.lower()
-            has_kw = any(k in cond_lower for k in ("pullback", "retest", "reclaim"))
-            # enforce pullback labeling when entry well below current
-            if entry_f <= current_price * 0.99:
-                if not has_kw:
-                    setup["trigger_condition"] = f"pullback/retest: {cond_str}" if cond_str else "pullback/retest entry"
-                if isinstance(summary, str) and not summary.startswith("This is a pullback/retest plan, not a buy-now entry."):
-                    summary = "This is a pullback/retest plan, not a buy-now entry. " + summary
-                    added_summary = True
-            elif current_price > entry_f * 1.01 and not has_kw:
-                prefix = "⚠️ Entry is below current price — treat as pullback/retest only. "
-                if isinstance(summary, str) and not summary.startswith(prefix):
-                    summary = prefix + summary
-                    added_summary = True
-                if cond_str:
-                    setup["trigger_condition"] = prefix + cond_str
-                else:
-                    setup["trigger_condition"] = prefix + "pullback/retest setup"
-            if abs(entry_f - current_price) / current_price < 0.003:
-                tc = setup.get("trigger_condition", "")
-                if isinstance(tc, str):
-                    low = tc.lower()
-                    if "close" not in low or ("hold" not in low and "retest" not in low):
-                        setup["trigger_condition"] = f"1m close above {entry_f:.4f} AND hold/retest"
             for key in ("trigger_condition", "confirmation_requirements", "name", "extension_notes", "extension_trigger", "target1_label"):
                 val = setup.get(key)
                 if isinstance(val, str) and "$" in val:
                     setup[key] = val.replace("$", "")
-        if added_summary:
-            parsed["summary"] = summary.replace("$", "") if isinstance(summary, str) else summary
         if isinstance(parsed.get("summary"), str) and "$" in parsed["summary"]:
             parsed["summary"] = parsed["summary"].replace("$", "")
         return parsed
@@ -2183,94 +2118,20 @@ class UIController:
         setups = parsed.get("setups")
         if not isinstance(setups, list):
             return parsed, False, ["setups missing"]
-
-        def rating_rank(r: str) -> int:
-            order = ["D", "C-", "C", "C+", "B-", "B", "B+", "A-", "A", "A+"]
-            return order.index(r) if r in order else -1
-
-        def cap_rating(rating: str, cap: str) -> str:
-            return rating if rating_rank(rating) <= rating_rank(cap) else cap
-
-        def max_allowed_rating(rr_calc: float, move_calc: float, tape_warning: str | None) -> str:
-            cap = "A+"
-            if rr_calc < 1.0:
-                cap = "C+"
-            elif rr_calc < 1.2:
-                cap = "B-"
-            if move_calc < 0.05 and rating_rank(cap) > rating_rank("B-"):
-                cap = "B-"
-            if tape_warning == "SPIKEY_PULLBACKS" and rr_calc < 1.3 and rating_rank(cap) > rating_rank("B-"):
-                cap = "B-"
-            return cap
-
-        levels = (snapshot or {}).get("levels") or {}
-        micro = (snapshot or {}).get("micro") or {}
-        session = (snapshot or {}).get("session") or {}
-        short_vol_pct = (snapshot or {}).get("short_vol_pct")
-
-        sanitized_setups = []
-        best_actionable = False
+        # Presentation-only: strip currency symbols from text fields.
         for setup in setups:
             if not isinstance(setup, dict):
                 warnings.append("non-dict setup")
                 continue
-            trigger = setup.get("trigger_condition", "")
             for key in ("trigger_condition", "confirmation_requirements", "name", "extension_notes", "extension_trigger", "target1_label"):
                 val = setup.get(key)
                 if isinstance(val, str) and "$" in val:
                     setup[key] = val.replace("$", "")
                     warnings.append("currency_symbol_present")
-            try:
-                entry_f = float(setup.get("entry_trigger_price"))
-                stop_f = float(setup.get("stop_price"))
-                target_f = float(setup.get("target_price"))
-            except Exception:
-                warnings.append("numeric fields invalid")
-                continue
-            if current_price is not None and abs(entry_f - current_price) / current_price < 0.003:
-                tc = setup.get("trigger_condition", "")
-                low = tc.lower() if isinstance(tc, str) else ""
-                if "close" not in low or ("hold" not in low and "retest" not in low):
-                    setup["trigger_condition"] = f"1m close above {entry_f:.4f} AND hold/retest"
-                    warnings.append("near-price trigger adjusted")
-            reward = target_f - entry_f
-            risk = entry_f - stop_f
-            if risk <= 0 or reward <= 0:
-                warnings.append("dropped setup nonpositive rr")
-                continue
-            rr_calc = reward / risk
-            move_calc = reward / entry_f if entry_f != 0 else 0
-            setup["rr_to_target1"] = rr_calc
-            setup["move_pct_to_target1"] = move_calc
-            rating = setup.get("setup_rating") or "C"
-            cap = max_allowed_rating(rr_calc, move_calc, setup.get("tape_warning"))
-            if rating_rank(rating) > rating_rank(cap):
-                warnings.append(f"rating_coerced: cap {cap} (was {rating})")
-                rating = cap
-            setup["setup_rating"] = rating
-            # tape_warning from short_vol_pct
-            if isinstance(short_vol_pct, (int, float)) and short_vol_pct >= 55:
-                setup["tape_warning"] = "SPIKEY_PULLBACKS"
-            # target1_label fix
-            nearest_res = (levels.get("nearest_resistance") or {}).get("price") if isinstance(levels, dict) else None
-            micro_res = micro.get("micro_resistance_15m") if isinstance(micro, dict) else None
-            pmh = session.get("premarket_high") if isinstance(session, dict) else None
-            if nearest_res is not None and abs(target_f - float(nearest_res)) < max(0.01, 0.002 * target_f):
-                setup["target1_label"] = "nearest_resistance"
-            elif micro_res is not None and abs(target_f - float(micro_res)) < max(0.01, 0.002 * target_f):
-                setup["target1_label"] = "micro_resistance_15m"
-            elif pmh is not None and abs(target_f - float(pmh)) < max(0.01, 0.002 * target_f):
-                setup["target1_label"] = "premarket_high"
-            sanitized_setups.append(setup)
-            if rating_rank(rating) >= rating_rank("B-") and rr_calc >= 1.2 and move_calc >= 0.03:
-                best_actionable = True
-        parsed["setups"] = sanitized_setups
-        parsed["stock_bias"] = "HAS_POTENTIAL" if best_actionable else "NO_EDGE"
         if isinstance(parsed.get("summary"), str) and "$" in parsed["summary"]:
             parsed["summary"] = parsed["summary"].replace("$", "")
             warnings.append("currency_symbol_present")
-        valid = bool(sanitized_setups)
-        return parsed, valid, warnings
+        return parsed, True, warnings
 
     @staticmethod
     def _parse_shares_outstanding(payload: Any, symbol: str) -> float | None:
@@ -2301,18 +2162,6 @@ class UIController:
                 except (TypeError, ValueError):
                     return None
         return None
-
-    @staticmethod
-    def _build_no_candidate_result(normalized: dict) -> dict:
-        """Deterministic NO_EDGE output when no candidate_setups exist."""
-        return {
-            "stock_bias": "NO_EDGE",
-            "summary": "No valid candidate setups available from deterministic screening.",
-            "setups": [],
-            "validation_warnings": ["NO_CANDIDATE_SETUPS"],
-            "reason_codes": ["NO_CANDIDATE_SETUPS"],
-            "validity": "VALID_FOR_TRADING",
-        }
 
 
 def snapshot_status_summary(

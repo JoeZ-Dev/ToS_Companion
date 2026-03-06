@@ -36,7 +36,7 @@ class CandidateCoach(LLMCoach):
         return True
 
 
-def test_llm_service_candidate_mismatch_triggers_mismatch_reason():
+def test_llm_service_trade_validation_still_enforced():
     payload_snapshot = {
         "status": "ok",
         "data_quality": "ok",
@@ -51,17 +51,16 @@ def test_llm_service_candidate_mismatch_triggers_mismatch_reason():
             {"entry_trigger_price": 10.5, "stop_price": 10.3, "target_price": 10.9, "target1_label": "nearest_resistance"},
         ],
     }
-    # Both initial and repair responses mismatch target_price to force candidate mismatch after retry.
+    # Both initial and repair responses mismatch target_price vs structural level to force trade validation failure.
     bad_resp = {
         "validity": "VALID_FOR_TRADING",
         "reason_codes": ["FAILED_BREAKOUT"],
         "setup_rating": "B",
         "setups": [
             {
-                "candidate_index": 0,
                 "entry_trigger_price": 10.5,
                 "stop_price": 10.3,
-                "target_price": 11.0,  # mismatch vs candidate 10.9
+                "target_price": 11.0,  # mismatch vs nearest_resistance 10.5
                 "target1_label": "nearest_resistance",
             }
         ],
@@ -70,10 +69,10 @@ def test_llm_service_candidate_mismatch_triggers_mismatch_reason():
     svc = LLMService(CandidateCoach(), client=client)
     rec = svc.evaluate(payload_snapshot, "SEAMLESS", {"bid": 10, "ask": 10.1, "last": 10.05, "volume": 100}, messages_override=[{"role": "user", "content": "x"}])
     assert rec["validity"] == "NOT_VALID_FOR_TRADING"
-    assert rec.get("reason_codes") == ["LLM_CANDIDATE_MISMATCH"]
+    assert rec.get("reason_codes") == ["LLM_REPAIR_TRADE_INVALID"]
 
 
-def test_llm_service_no_candidates_forced_no_edge():
+def test_llm_service_allows_no_candidate_setups():
     payload_snapshot = {
         "status": "ok",
         "data_quality": "ok",
@@ -82,13 +81,14 @@ def test_llm_service_no_candidates_forced_no_edge():
         "market_state": "normal",
         "quote": {"bid": 10, "ask": 10.1, "last": 10.05},
         "bars_window_5m": [{"ts_ms": 1, "o": 10, "h": 10, "l": 10, "c": 10, "v": 100}] * 25,
+        "levels": {"nearest_resistance": {"price": 10.9}},
+        "session": {},
         "candidate_setups": [],
     }
     bad_resp = {
         "validity": "VALID_FOR_TRADING",
         "reason_codes": ["FAILED_BREAKOUT"],
         "setup_rating": "B",
-        "stock_bias": "HAS_POTENTIAL",
         "setups": [
             {
                 "entry_trigger_price": 10.5,
@@ -101,10 +101,8 @@ def test_llm_service_no_candidates_forced_no_edge():
     client = StaticClient([bad_resp, bad_resp])
     svc = LLMService(CandidateCoach(), client=client)
     rec = svc.evaluate(payload_snapshot, "SEAMLESS", {"bid": 10, "ask": 10.1, "last": 10.05, "volume": 100}, messages_override=[{"role": "user", "content": "x"}])
-    assert rec["validity"] == "NOT_VALID_FOR_TRADING"
-    assert rec.get("reason_codes") == ["LLM_NO_CANDIDATES_FORCED_SETUP"]
-    assert rec.get("stock_bias") == "NO_EDGE"
-    assert rec.get("setups") == []
+    assert rec["validity"] == "VALID_FOR_TRADING"
+    assert rec.get("setups")
 
 
 def test_llm_service_mock_client():

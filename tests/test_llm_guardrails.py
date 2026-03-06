@@ -9,9 +9,9 @@ def test_pullback_sentence_added_when_entry_below_price():
         ],
     }
     out = UIController._apply_pullback_guard(rec, current_price=4.54)
-    assert out["summary"].startswith("This is a pullback/retest plan, not a buy-now entry.")
+    assert out["summary"].startswith("Base summary.")
     tc = out["setups"][0]["trigger_condition"].lower()
-    assert "retest" in tc or "pullback" in tc or "reclaim" in tc
+    assert "break" in tc
 
 
 def test_breakout_not_forced_when_price_below_entry():

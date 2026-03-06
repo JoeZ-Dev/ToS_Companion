@@ -81,15 +81,22 @@ def normalize_snapshot(raw_snapshot: Dict[str, Any], session_mode: str, quote: D
         payload["bars_5m_built_from_1m"] = True
     if "derived" in raw_snapshot:
         payload["derived"] = raw_snapshot.get("derived")
+    if "levels" in raw_snapshot:
+        payload["levels"] = raw_snapshot.get("levels")
+    if "micro" in raw_snapshot:
+        payload["micro"] = raw_snapshot.get("micro")
+    if "session" in raw_snapshot:
+        payload["session"] = raw_snapshot.get("session")
+    if "vwap" in raw_snapshot:
+        payload["vwap"] = raw_snapshot.get("vwap")
     if "volume_structure" in raw_snapshot:
         payload["volume_structure"] = raw_snapshot.get("volume_structure")
     if "structure_context" in raw_snapshot:
         payload["structure_context"] = raw_snapshot.get("structure_context")
     if raw_snapshot.get("candidate_setups") is not None:
         payload["candidate_setups"] = raw_snapshot.get("candidate_setups")
-    else:
-        try:
-            payload["candidate_setups"] = generate_candidate_setups(dict(payload))
-        except Exception:
-            payload["candidate_setups"] = []
+    try:
+        payload["candidate_hints"] = generate_candidate_setups(dict(payload))
+    except Exception:
+        payload["candidate_hints"] = []
     return payload  # type: ignore[return-value]
