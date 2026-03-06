@@ -27,7 +27,14 @@ def normalize_snapshot(raw_snapshot: Dict[str, Any], session_mode: str, quote: D
     }
     payload["market_state"] = raw_snapshot.get("market_state")
     bars = raw_snapshot.get("bars_window_5m", [])
+    bars_1m = raw_snapshot.get("bars_1m") or []
+    if (not bars or len(bars) == 0) and isinstance(bars_1m, list) and len(bars_1m) >= 5:
+        from momentum_companion.ui.controller import aggregate_1m_to_5m  # avoid circular import issues
+
+        bars = aggregate_1m_to_5m(bars_1m)
     payload["bars_window"] = bars
+    if bars_1m:
+        payload["bars_1m"] = bars_1m
     if "derived" in raw_snapshot:
         payload["derived"] = raw_snapshot.get("derived")
     if "volume_structure" in raw_snapshot:

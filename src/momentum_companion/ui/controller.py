@@ -30,6 +30,7 @@ import pandas as pd
 from momentum_companion.analysis.ae import AEEngine
 from momentum_companion.utils.logging import logging
 from momentum_companion.data.bar_aggregator import TenSecondBar
+from momentum_companion.setup_engine.candidate_generator import generate_candidate_setups
 
 
 class _ModelSignals(QtCore.QObject):
@@ -973,7 +974,8 @@ class UIController:
                 return
         ready, missing = self._is_snapshot_ready_for_llm(self._last_ae_snapshot)
         if not ready:
-            msg = f"LLM skipped — snapshot not ready (missing {', '.join(missing)}; bars_len={len(self._last_ae_snapshot.get('bars_window') or []) if isinstance(self._last_ae_snapshot, dict) else 0})"
+            bars_len = len(self._last_ae_snapshot.get("bars_window") or []) if isinstance(self._last_ae_snapshot, dict) else 0
+            msg = f"LLM skipped — snapshot not ready (missing {', '.join(missing)}; bars_len={bars_len} built_from_1m={self._last_ae_snapshot.get('bars_5m_built_from_1m') if isinstance(self._last_ae_snapshot, dict) else False})"
             self._logger.warning(msg)
             QtCore.QTimer.singleShot(
                 0,
@@ -1283,6 +1285,10 @@ class UIController:
         bars_5m = bars_window
         bars_1m = self._bars_1m
         bars_1m_quality = "ok" if isinstance(bars_1m, list) and len(bars_1m) >= 60 else "partial"
+        built_from_1m = False
+        if (not bars_5m or len(bars_5m) == 0) and isinstance(bars_1m, list) and len(bars_1m) >= 5:
+            bars_5m = aggregate_1m_to_5m(bars_1m)
+            built_from_1m = True
         norm = {
             "schema_version": snapshot.get("schema_version", "AE-1.1"),
             "status": snapshot.get("status", "ok"),
@@ -1299,6 +1305,7 @@ class UIController:
             "bars_5m": bars_5m,
             "bars_1m": bars_1m,
             "bars_1m_quality": bars_1m_quality,
+            "bars_5m_built_from_1m": built_from_1m,
             "invocation_type": snapshot.get("invocation_type", "MANUAL_RECALC"),
             "in_position": snapshot.get("in_position", False),
             "side": "LONG" if snapshot.get("in_position") else None,
@@ -1470,7 +1477,11 @@ class UIController:
             missing.append("quote.bid/ask")
         bars = normalized.get("bars_5m") if isinstance(normalized, dict) else normalized.get("bars_window")
         bars_len = len(bars) if isinstance(bars, list) else 0
-        if not isinstance(bars, list) or bars_len < self._BARS_WINDOW_MIN_READY:
+        if isinstance(normalized, dict) and normalized.get("bars_5m_built_from_1m"):
+            built_from_1m = True
+        else:
+            built_from_1m = False
+        if (not isinstance(bars, list) or bars_len < self._BARS_WINDOW_MIN_READY) and not (built_from_1m and bars_len >= self._BARS_WINDOW_MIN_READY):
             missing.append("bars_5m")
         return (len(missing) == 0, missing)
 
@@ -2308,3 +2319,45 @@ def snapshot_status_summary(
         f"has_5m={b5_len > 0} bars_5m={b5_len} "
         f"has_session={has_session} has_levels={has_levels})"
     )
+
+
+def aggregate_1m_to_5m(bars_1m: list[dict]) -> list[dict]:
+    """Aggregate 1m bars into compact 5m bars."""
+    if not isinstance(bars_1m, list):
+        return []
+    # Ensure sorted by ts_ms
+    cleaned = []
+    for b in bars_1m:
+        if not isinstance(b, dict):
+            continue
+        ts = b.get("ts_ms") or b.get("ts") or b.get("t")
+        o = b.get("o") if "o" in b else b.get("open")
+        h = b.get("h") if "h" in b else b.get("high")
+        l = b.get("l") if "l" in b else b.get("low")
+        c = b.get("c") if "c" in b else b.get("close")
+        v = b.get("v") if "v" in b else b.get("volume")
+        if ts is None or o is None or h is None or l is None or c is None or v is None:
+            continue
+        cleaned.append({"ts_ms": int(ts), "o": float(o), "h": float(h), "l": float(l), "c": float(c), "v": float(v)})
+    cleaned = sorted(cleaned, key=lambda x: x["ts_ms"])
+    if not cleaned:
+        return []
+    buckets: dict[int, dict] = {}
+    for b in cleaned:
+        bucket_start = (int(b["ts_ms"]) // 300_000) * 300_000
+        bucket = buckets.get(bucket_start)
+        if bucket is None:
+            buckets[bucket_start] = {
+                "ts_ms": bucket_start,
+                "o": b["o"],
+                "h": b["h"],
+                "l": b["l"],
+                "c": b["c"],
+                "v": b["v"],
+            }
+        else:
+            bucket["h"] = max(bucket["h"], b["h"])
+            bucket["l"] = min(bucket["l"], b["l"])
+            bucket["c"] = b["c"]
+            bucket["v"] += b["v"]
+    return [buckets[k] for k in sorted(buckets.keys())]
