@@ -64,3 +64,13 @@ def test_candidate_uses_structural_target_above_entry():
     assert setups
     assert setups[0]["target_price"] == 1.12
     assert setups[0]["target1_label"] == "premarket_high"
+
+
+def test_vwap_pullback_skips_stale():
+    p = _base_payload()
+    p["derived"] = {"distance_to_vwap_pct": 0.09}  # too extended
+    p["vwap"] = 1.0
+    p["quote"]["last"] = 1.1
+    p["levels"] = {"nearest_resistance": {"price": 1.2, "source": "nearest_resistance"}}
+    setups = generate_candidate_setups(p)
+    assert all(c["name"] != "VWAP_PULLBACK_RETEST" for c in setups)

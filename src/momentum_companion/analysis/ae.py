@@ -599,38 +599,38 @@ class AEEngine:
             sup_clusters=sup_clusters,
             micro=micro,
         )
-        # Structural context distances
+        # Structural context distances (computed from final levels)
         structure_context = {
             "next_resistance_distance_pct": None,
             "next_support_distance_pct": None,
             "nearest_structural_level": None,
         }
         try:
-            nearest_res = levels.get("nearest_resistance") if isinstance(levels, dict) else None
-            nearest_sup = levels.get("nearest_support") if isinstance(levels, dict) else None
-            if current_price is None:
-                current_price = last_price
-            if current_price:
-                if nearest_res and isinstance(nearest_res, dict) and nearest_res.get("price") is not None:
-                    nr_price = float(nearest_res.get("price"))
-                    structure_context["next_resistance_distance_pct"] = (nr_price - current_price) / current_price * 100
-                if nearest_sup and isinstance(nearest_sup, dict) and nearest_sup.get("price") is not None:
-                    ns_price = float(nearest_sup.get("price"))
-                    structure_context["next_support_distance_pct"] = (current_price - ns_price) / current_price * 100
+            levels_final = snapshot.get("levels") or {}
+            nearest_res_final = levels_final.get("nearest_resistance") if isinstance(levels_final, dict) else None
+            nearest_sup_final = levels_final.get("nearest_support") if isinstance(levels_final, dict) else None
+            current_px = current_price if current_price is not None else last_price
+            if current_px is not None:
+                if isinstance(nearest_res_final, dict) and nearest_res_final.get("price") is not None:
+                    nr_price = float(nearest_res_final.get("price"))
+                    structure_context["next_resistance_distance_pct"] = (nr_price - current_px) / current_px * 100
+                if isinstance(nearest_sup_final, dict) and nearest_sup_final.get("price") is not None:
+                    ns_price = float(nearest_sup_final.get("price"))
+                    structure_context["next_support_distance_pct"] = (current_px - ns_price) / current_px * 100
                 candidates = []
                 if structure_context["next_resistance_distance_pct"] is not None:
                     candidates.append(
                         {
-                            "price": nearest_res.get("price"),
-                            "source": nearest_res.get("source") or "nearest_resistance",
+                            "price": nearest_res_final.get("price"),
+                            "source": nearest_res_final.get("source") or "nearest_resistance",
                             "distance_pct": structure_context["next_resistance_distance_pct"],
                         }
                     )
                 if structure_context["next_support_distance_pct"] is not None:
                     candidates.append(
                         {
-                            "price": nearest_sup.get("price"),
-                            "source": nearest_sup.get("source") or "nearest_support",
+                            "price": nearest_sup_final.get("price"),
+                            "source": nearest_sup_final.get("source") or "nearest_support",
                             "distance_pct": structure_context["next_support_distance_pct"],
                         }
                     )

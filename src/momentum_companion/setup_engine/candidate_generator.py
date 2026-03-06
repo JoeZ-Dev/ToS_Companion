@@ -139,21 +139,35 @@ def generate_candidate_setups(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     # C) VWAP pullback when extended
     dist_vwap = payload.get("derived", {}).get("distance_to_vwap_pct") if isinstance(payload.get("derived"), dict) else None
     vwap = payload.get("vwap")
-    if isinstance(dist_vwap, (int, float)) and dist_vwap > 0.05 and isinstance(vwap, (int, float)) and current_price > vwap:
+    if (
+        isinstance(dist_vwap, (int, float))
+        and dist_vwap > 0.0
+        and dist_vwap <= 0.08
+        and isinstance(vwap, (int, float))
+        and current_price > vwap
+        and volume_structure.get("volume_state") != "DISTRIBUTION"
+    ):
         entry = vwap
         stop = entry * 0.98
         target, label = _structural_targets_above(entry, "vwap", payload)
-        if target is not None and label is not None and _risk_reward_valid(entry, stop, target):
-            _append_candidate(
-                {
-                    "name": "VWAP_PULLBACK_RETEST",
-                    "entry_trigger_price": entry,
-                    "stop_price": stop,
-                    "target_price": target,
-                    "target1_label": label,
-                    "notes": "pullback to vwap then reclaim",
-                }
-            )
+        if target is not None and label is not None:
+            remaining_reward = target - current_price
+            initial_reward = target - entry
+            if initial_reward > 0 and remaining_reward / initial_reward >= 0.5 and current_price <= entry * 1.08:
+                if _risk_reward_valid(entry, stop, target):
+                    notes = "pullback to vwap then reclaim"
+                    if dist_vwap > 0.05:
+                        notes += " stale_pullback"
+                    _append_candidate(
+                        {
+                            "name": "VWAP_PULLBACK_RETEST",
+                            "entry_trigger_price": entry,
+                            "stop_price": stop,
+                            "target_price": target,
+                            "target1_label": label,
+                            "notes": notes,
+                        }
+                    )
 
     # tight resistance gate: if too tight and no breakout candidate, drop non-breakout setups
     if tight_res_block:
