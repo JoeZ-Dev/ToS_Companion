@@ -100,6 +100,8 @@ def _matches_structural_target(snapshot: Dict[str, Any], label: Any, target_pric
     micro = snapshot.get("micro") or {}
     session = snapshot.get("session") or {}
     bars = snapshot.get("bars_window") or []
+    breakout_next = snapshot.get("next_structural_target_above_trigger")
+    breakout_second = snapshot.get("second_structural_target_above_trigger")
     def _close(a: float | None, b: float | None) -> bool:
         return a is not None and b is not None and abs(float(a) - float(b)) <= tol
     if label == "nearest_resistance":
@@ -117,6 +119,12 @@ def _matches_structural_target(snapshot: Dict[str, Any], label: Any, target_pric
                     continue
                 if h_f > float(expected) and _close(h_f, target_price):
                     return True
+            for cand in (breakout_next, breakout_second):
+                try:
+                    if float(cand) > float(expected) and _close(float(cand), target_price):
+                        return True
+                except Exception:
+                    continue
         return False
     if label == "micro_resistance_15m":
         expected = micro.get("micro_resistance_15m") if isinstance(micro, dict) else None

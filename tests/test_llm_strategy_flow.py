@@ -26,9 +26,10 @@ def _base_snapshot():
         "symbol": "ABC",
         "market_state": "normal",
         "quote": {"bid": 10, "ask": 10.1, "last": 10.05},
-        "bars_window_5m": [{"ts_ms": i, "o": 10, "h": 10.5, "l": 9.8, "c": 10.1, "v": 100} for i in range(25)],
-        "levels": {"nearest_resistance": {"price": 11.0, "source": "nearest_resistance"}},
-        "session": {"premarket_high": 10.9},
+        "bars_window_5m": [{"ts_ms": i, "o": 6.8, "h": 6.96 if i == 0 else 7.4, "l": 6.7, "c": 6.9, "v": 100} for i in range(25)],
+        "levels": {"nearest_resistance": {"price": 6.96, "source": "nearest_resistance"}},
+        "session": {"premarket_high": 7.4},
+        "volume_structure": {"volume_state": "EXPANSION"},
     }
 
 
@@ -42,11 +43,11 @@ def _resp(trigger: str, target: float):
             {
                 "name": "BREAKOUT_PLAN",
                 "trigger_condition": trigger,
-                "entry_trigger_price": 10.5,
-                "stop_price": 10.0,
+                "entry_trigger_price": 6.96,
+                "stop_price": 6.7,
                 "target_price": target,
-                "rr_to_target1": (target - 10.5) / (10.5 - 10.0),
-                "move_pct_to_target1": (target - 10.5) / 10.5,
+                "rr_to_target1": (target - 6.96) / (6.96 - 6.7),
+                "move_pct_to_target1": (target - 6.96) / 6.96,
                 "setup_rating": "B",
                 "confirmation_requirements": "hold/retest",
                 "target1_label": "nearest_resistance",
@@ -67,7 +68,7 @@ def test_empty_candidates_do_not_block_llm():
 
 
 def test_conditional_breakout_setup_allowed():
-    svc = LLMService(DummyCoach(_resp("watch for break above 10.5 with volume", 11.0)))
+    svc = LLMService(DummyCoach(_resp("watch for break above 6.96 with volume", 7.4)))
     rec = svc.evaluate(_base_snapshot(), "SEAMLESS", {"bid": 10, "ask": 10.1, "last": 10.05, "volume": 100})
     assert rec["validity"] == "VALID_FOR_TRADING"
     assert "break above" in rec["setups"][0]["trigger_condition"]

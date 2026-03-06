@@ -95,4 +95,56 @@ def normalize_snapshot(raw_snapshot: Dict[str, Any], session_mode: str, quote: D
         payload["candidate_setups"] = raw_snapshot.get("candidate_setups")
     if raw_snapshot.get("candidate_hints") is not None:
         payload["candidate_hints"] = raw_snapshot.get("candidate_hints")
+    breakout = _compute_breakout_targets(payload)
+    if breakout:
+        payload.update(breakout)
     return payload  # type: ignore[return-value]
+
+
+def _compute_breakout_targets(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Compute deterministic breakout trigger/targets for LLM context:
+    - nearest_breakout_trigger: nearest_resistance.price
+    - next_structural_target_above_trigger: next higher structural high above trigger
+    - second_structural_target_above_trigger: second higher structural high above trigger
+    """
+    out: Dict[str, Any] = {}
+    levels = snapshot.get("levels") or {}
+    trigger = None
+    try:
+        nr = levels.get("nearest_resistance") if isinstance(levels, dict) else None
+        if isinstance(nr, dict) and nr.get("price") is not None:
+            trigger = float(nr.get("price"))
+    except Exception:
+        trigger = None
+    if trigger is None:
+        return out
+    candidates: list[float] = []
+    session = snapshot.get("session") or {}
+    micro = snapshot.get("micro") or {}
+    for val in [
+        session.get("opening_range_high") if isinstance(session, dict) else None,
+        session.get("premarket_high") if isinstance(session, dict) else None,
+        micro.get("micro_resistance_15m") if isinstance(micro, dict) else None,
+    ]:
+        try:
+            f = float(val)
+            candidates.append(f)
+        except Exception:
+            continue
+    bars = snapshot.get("bars_window") or []
+    for b in bars:
+        if not isinstance(b, dict):
+            continue
+        try:
+            h = float(b.get("h"))
+            candidates.append(h)
+        except Exception:
+            continue
+    higher = sorted({c for c in candidates if c > trigger})
+    out["nearest_breakout_trigger"] = trigger
+    if higher:
+        out["next_structural_target_above_trigger"] = higher[0]
+    if len(higher) > 1:
+        out["second_structural_target_above_trigger"] = higher[1]
+    return out

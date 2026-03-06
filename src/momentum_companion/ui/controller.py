@@ -1308,6 +1308,9 @@ class UIController:
             norm["candidate_setups"] = candidate_setups
         if candidate_hints is not None:
             norm["candidate_hints"] = candidate_hints
+        breakout = _compute_breakout_targets(norm)
+        if breakout:
+            norm.update(breakout)
         return norm
 
     def _extract_bars_window(self, snapshot: dict) -> list[dict]:
@@ -2196,6 +2199,49 @@ def aggregate_1m_to_5m(bars_1m: list[dict]) -> list[dict]:
     """Aggregate 1m bars into compact 5m bars."""
     if not isinstance(bars_1m, list):
         return []
+
+
+def _compute_breakout_targets(snapshot: dict) -> dict:
+    """Compute breakout trigger/targets for prompt context."""
+    out: dict = {}
+    levels = snapshot.get("levels") or {}
+    trigger = None
+    try:
+        nr = levels.get("nearest_resistance") if isinstance(levels, dict) else None
+        if isinstance(nr, dict) and nr.get("price") is not None:
+            trigger = float(nr.get("price"))
+    except Exception:
+        trigger = None
+    if trigger is None:
+        return out
+    candidates: list[float] = []
+    session = snapshot.get("session") or {}
+    micro = snapshot.get("micro") or {}
+    for val in [
+        session.get("opening_range_high") if isinstance(session, dict) else None,
+        session.get("premarket_high") if isinstance(session, dict) else None,
+        micro.get("micro_resistance_15m") if isinstance(micro, dict) else None,
+    ]:
+        try:
+            candidates.append(float(val))
+        except Exception:
+            continue
+    bars = snapshot.get("bars_window") or []
+    for b in bars:
+        if not isinstance(b, dict):
+            continue
+        try:
+            h = float(b.get("h"))
+            candidates.append(h)
+        except Exception:
+            continue
+    higher = sorted({c for c in candidates if c > trigger})
+    out["nearest_breakout_trigger"] = trigger
+    if higher:
+        out["next_structural_target_above_trigger"] = higher[0]
+    if len(higher) > 1:
+        out["second_structural_target_above_trigger"] = higher[1]
+    return out
     # Ensure sorted by ts_ms
     cleaned = []
     for b in bars_1m:
