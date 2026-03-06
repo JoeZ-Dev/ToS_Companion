@@ -1024,6 +1024,7 @@ class UIController:
             messages = self._build_llm_refresh_messages(compact_payload)
         else:
             messages = self._build_llm_messages(normalized)
+        session_mode = "RTH" if self._is_intraday_window() else "PRE"
 
         def task() -> None:
             try:
