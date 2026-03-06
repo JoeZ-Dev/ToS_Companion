@@ -64,6 +64,7 @@ class LLMService:
         warnings: list[str] = list(cand_reasons)
         # If no candidates but setups came back, force repair once
         if not payload.get("candidate_setups") and resp.get("setups"):
+            logger.info("LLM response contained setups with candidate_count=0; forcing NO_EDGE repair")
             repair_messages = list(messages) + [
                 {
                     "role": "system",
@@ -76,6 +77,7 @@ class LLMService:
             resp, cand_valid, cand_reasons, cand_action = validate_llm_selected_candidates(payload, resp, retry_attempted=True)
             warnings.extend(cand_reasons)
             if resp.get("setups"):
+                logger.info("LLM still returned setups with candidate_count=0 after repair; forcing NO_EDGE")
                 return {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["LLM_NO_CANDIDATES_FORCED_SETUP"], "stock_bias": "NO_EDGE", "setups": []}
             if resp.get("stock_bias") != "NO_EDGE":
                 resp["stock_bias"] = "NO_EDGE"

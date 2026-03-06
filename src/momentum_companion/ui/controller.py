@@ -1059,42 +1059,20 @@ class UIController:
                         self._logger.info("LLM payload messages: %s", json.dumps(messages, indent=2))
                 except Exception:
                     self._logger.info("LLM payload messages (unformatted): %s", messages)
-                resp = client.complete(messages=messages, model_override=model)
-                content = ""
-                # Log full raw response for debugging/inspection
-                try:
-                    self._logger.info("LLM raw response: %s", json.dumps(resp, indent=2))
-                except Exception:
-                    self._logger.info("LLM raw response (unformatted): %s", resp)
-                try:
-                    choices = resp.get("choices") if isinstance(resp, dict) else None
-                    if choices and isinstance(choices, list):
-                        msg = choices[0].get("message") if isinstance(choices[0], dict) else None
-                        if msg and msg.get("content"):
-                            content = msg.get("content")
-                except Exception:
-                    content = ""
-                if not content:
-                    content = json.dumps(resp)
-                parse_error = None
-                try:
-                    rec = json.loads(content)
-                except Exception:
-                    parse_error = "LLM response not JSON"
-                    rec = {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["DATA_STALE"], "summary": content}
-                # no structural enforcement in strategist mode
-                if refresh_mode:
-                    prior_full_rec = self._last_llm_rec_by_symbol.get(symbol)
-                    rec = self._patch_refresh_output(rec, prior_best_payload, prior_full_rec, refresh_mode=True)
-                if not self._validate_setup_schema(rec):
-                    self._logger.warning("Invalid LLM setup schema")
+                rec = self._llm_service.evaluate(
+                    normalized,
+                    session_mode,
+                    self._last_quote,
+                    model_override=model,
+                    messages_override=messages,
+                )
                 self._emit_llm_result(
                     normalized,
                     model,
                     invocation="MANUAL",
                     parsed=rec,
-                    raw_text=content,
-                    error=parse_error,
+                    raw_text=json.dumps(rec),
+                    error=None,
                 )
                 self._last_llm_ts[self._pending_symbol or ""] = time.time()
                 QtCore.QTimer.singleShot(0, lambda: self._refresh_llm_status())
@@ -1676,6 +1654,7 @@ class UIController:
             "    {\n"
             '      "name": string,\n'
             '      "trigger_condition": string,\n'
+            '      "candidate_index": integer,\n'
             '      "entry_trigger_price": number,\n'
             '      "stop_price": number,\n'
             '      "target_price": number,\n'
