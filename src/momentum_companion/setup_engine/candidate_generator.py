@@ -69,6 +69,27 @@ def _structural_targets_above(entry: float, entry_label: str, payload: Dict[str,
     return None, None
 
 
+def _quality_ok(entry: float, stop: float, target: float, kind: str, current_price: float) -> bool:
+    """Apply stricter move/rr gates per candidate kind."""
+    risk = entry - stop
+    reward = target - entry
+    if risk <= 0 or reward <= 0:
+        return False
+    rr = reward / risk
+    move_pct = reward / entry if entry else 0.0
+    if rr < 1.0:
+        return False
+    if kind == "VWAP_PULLBACK_RETEST":
+        if move_pct < 0.025:
+            return False
+        if current_price > entry * 1.05:
+            return False
+    else:
+        if move_pct < 0.03:
+            return False
+    return True
+
+
 def generate_candidate_setups(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Deterministic candidate setups using normalized snapshot fields."""
     quote = payload.get("quote") or {}
@@ -87,11 +108,13 @@ def generate_candidate_setups(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     tight_res = structure_context.get("next_resistance_distance_pct")
     tight_res_block = tight_res is not None and isinstance(tight_res, (int, float)) and tight_res < 0.4
 
-    def _append_candidate(c: dict) -> None:
+    def _append_candidate(c: dict, kind: str) -> None:
         if volume_structure.get("volume_state") == "DISTRIBUTION":
             note = c.get("notes", "")
             if "distribution" not in note.lower():
                 c["notes"] = (note + " distribution; require hold/retest").strip()
+            if kind == "VWAP_PULLBACK_RETEST":
+                return  # skip messy continuation when distribution
         candidates.append(c)
 
     # A) nearest_resistance breakout
@@ -105,7 +128,7 @@ def generate_candidate_setups(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         entry = nr_price_f
         stop = max(current_price * 0.985, entry * 0.985)
         target, label = _structural_targets_above(entry, "nearest_resistance", payload)
-        if target is not None and label is not None and _risk_reward_valid(entry, stop, target):
+        if target is not None and label is not None and _quality_ok(entry, stop, target, "NEAREST_RES_BREAK_HOLD", current_price):
             _append_candidate(
                 {
                     "name": "NEAREST_RES_BREAK_HOLD",
@@ -114,27 +137,32 @@ def generate_candidate_setups(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
                     "target_price": target,
                     "target1_label": label,
                     "notes": f"break+hold {nr.get('source') or 'nearest_resistance'}",
-                }
+                },
+                "NEAREST_RES_BREAK_HOLD",
             )
     # B) micro breakout
     micro_res = micro.get("micro_resistance_15m") if isinstance(micro, dict) else None
     micro_sup = micro.get("micro_support_15m") if isinstance(micro, dict) else None
     mr_price = float(micro_res) if micro_res is not None else None
     if mr_price and mr_price > current_price:
-        entry = mr_price
-        stop = float(micro_sup) if micro_sup is not None else entry * 0.97
-        target, label = _structural_targets_above(entry, "micro_resistance_15m", payload)
-        if target is not None and label is not None and _risk_reward_valid(entry, stop, target):
-            _append_candidate(
-                {
-                    "name": "MICRO_BREAK_HOLD",
-                    "entry_trigger_price": entry,
-                    "stop_price": stop,
-                    "target_price": target,
-                    "target1_label": label,
-                    "notes": "micro break+hold",
-                }
-            )
+        if mr_price > current_price * 1.08:
+            pass  # stale reclaim, skip
+        else:
+            entry = mr_price
+            stop = float(micro_sup) if micro_sup is not None else entry * 0.97
+            target, label = _structural_targets_above(entry, "micro_resistance_15m", payload)
+            if target is not None and label is not None and _quality_ok(entry, stop, target, "MICRO_BREAK_HOLD", current_price):
+                _append_candidate(
+                    {
+                        "name": "MICRO_BREAK_HOLD",
+                        "entry_trigger_price": entry,
+                        "stop_price": stop,
+                        "target_price": target,
+                        "target1_label": label,
+                        "notes": "micro break+hold",
+                    },
+                    "MICRO_BREAK_HOLD",
+                )
 
     # C) VWAP pullback when extended
     dist_vwap = payload.get("derived", {}).get("distance_to_vwap_pct") if isinstance(payload.get("derived"), dict) else None
@@ -154,7 +182,7 @@ def generate_candidate_setups(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
             remaining_reward = target - current_price
             initial_reward = target - entry
             if initial_reward > 0 and remaining_reward / initial_reward >= 0.5 and current_price <= entry * 1.08:
-                if _risk_reward_valid(entry, stop, target):
+                if _quality_ok(entry, stop, target, "VWAP_PULLBACK_RETEST", current_price):
                     notes = "pullback to vwap then reclaim"
                     if dist_vwap > 0.05:
                         notes += " stale_pullback"
@@ -166,7 +194,8 @@ def generate_candidate_setups(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
                             "target_price": target,
                             "target1_label": label,
                             "notes": notes,
-                        }
+                        },
+                        "VWAP_PULLBACK_RETEST",
                     )
 
     # tight resistance gate: if too tight and no breakout candidate, drop non-breakout setups
