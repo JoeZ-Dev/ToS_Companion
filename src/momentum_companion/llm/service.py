@@ -61,10 +61,25 @@ class LLMService:
         ]
 
         resp = _invoke(messages)
-        logger.debug("LLM raw response: %s", resp)
-        if isinstance(resp, dict) and "setups" not in resp:
-            logger.warning("LLM sanitize repaired missing setups -> []")
-            resp["setups"] = []
+        logger.info("LLM raw response: %s", resp)
+
+        # Schema pre-check
+        ok_shape, shape_reason = _has_complete_setup_shape(resp)
+        retried = False
+        if not ok_shape:
+            logger.warning("LLM schema issue detected: %s", shape_reason or "unknown")
+            resp = self._repair_schema(messages, payload, resp, shape_reason)
+            retried = True
+            ok_shape, shape_reason = _has_complete_setup_shape(resp)
+            if not ok_shape:
+                logger.warning("LLM schema repair failed: %s; sanitizing to setups=[]", shape_reason or "unknown")
+                if isinstance(resp, dict):
+                    resp.setdefault("stock_bias", "NO_EDGE")
+                    resp["setups"] = []
+                else:
+                    resp = {"stock_bias": "NO_EDGE", "setups": []}
+        if retried and ok_shape:
+            logger.info("LLM schema repair succeeded")
         if not self._coach.validate_response(resp):
             return {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["LLM_SCHEMA_INVALID"]}
         if not validate_llm_output(resp):
@@ -100,6 +115,23 @@ class LLMService:
         if symbol:
             self._maybe_flash(symbol, resp, payload)
         return resp
+
+    def _repair_schema(self, messages: list[dict], payload: dict, resp: Any, reason: str | None) -> dict:
+        repair_prompt = {
+            "role": "system",
+            "content": (
+                "SCHEMA REPAIR ONLY. Return the SAME analysis as a single JSON object with required top-level keys stock_bias, summary, setups. "
+                "If stock_bias=HAS_POTENTIAL, setups must contain at least one fully populated setup. "
+                "If no valid setup exists, return stock_bias=NO_EDGE and setups=[]. No markdown. No prose outside JSON."
+            ),
+        }
+        try:
+            msgs = list(messages) + [repair_prompt]
+            new_resp = self._client.complete(msgs, model_override=None) if self._client else self._coach.run(payload, {})
+            self._repair_reason = reason
+            return new_resp
+        except Exception:
+            return resp
 
     def _log_invalid(self, payload: Dict[str, Any], session_mode: str) -> None:
         if self._journal:
@@ -168,3 +200,41 @@ class LLMService:
             return abs((float(new) - float(old)) / float(old)) * 100
         except Exception:
             return 0.0
+
+
+def _has_complete_setup_shape(resp: Dict[str, Any] | Any) -> tuple[bool, str | None]:
+    """Check for canonical schema presence."""
+    if not isinstance(resp, dict):
+        return False, "response_not_dict"
+    if "stock_bias" not in resp or "summary" not in resp:
+        return False, "missing_top_level_keys"
+    setups = resp.get("setups")
+    if setups is None:
+        return False, "setups_missing"
+    if not isinstance(setups, list):
+        return False, "setups_not_list"
+    if resp.get("stock_bias") == "HAS_POTENTIAL" and setups == []:
+        return False, "has_potential_empty_setups"
+    required_fields = {
+        "name",
+        "setup_state",
+        "trigger_condition",
+        "entry_trigger_price",
+        "stop_price",
+        "target_price",
+        "rr_to_target1",
+        "move_pct_to_target1",
+        "setup_rating",
+        "confirmation_requirements",
+        "target1_label",
+        "extension_trigger",
+        "extension_target",
+        "extension_notes",
+        "tape_warning",
+    }
+    for s in setups:
+        if not isinstance(s, dict):
+            return False, "setup_not_dict"
+        if not required_fields.issubset(s.keys()):
+            return False, "setup_missing_required_fields"
+    return True, None
