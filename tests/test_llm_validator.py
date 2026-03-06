@@ -1,7 +1,3 @@
-import pytest
-
-pytest.importorskip("pandas")
-
 from momentum_companion.llm.validator import validate_llm_output, validate_trade_setups
 
 
@@ -52,7 +48,58 @@ def test_validate_trade_setups_rejects_structural_mismatch():
     assert "target_label_mismatch" in reasons
 
 
+def test_validate_trade_setups_allows_breakout_to_higher_swing_high():
+    snapshot = {
+        "levels": {"nearest_resistance": {"price": 6.96}},
+        "micro": {},
+        "session": {},
+        "bars_window": [{"h": 6.96}, {"h": 7.4}],
+    }
+    llm_obj = {
+        "stock_bias": "HAS_POTENTIAL",
+        "setups": [
+            {
+                "entry_trigger_price": 6.96,
+                "stop_price": 6.7,
+                "target_price": 7.4,  # higher swing high above breakout trigger
+                "target1_label": "nearest_resistance",  # breakout through NR to next high
+            }
+        ],
+    }
+    valid, reasons, action = validate_trade_setups(snapshot, llm_obj, retry_attempted=False)
+    assert valid is True
+    assert action == "OK"
+    assert "target_label_mismatch" not in reasons
+
+
+def test_validate_trade_setups_rejects_fabricated_target_above_breakout():
+    snapshot = {
+        "levels": {"nearest_resistance": {"price": 6.96}},
+        "micro": {},
+        "session": {},
+        "bars_window": [{"h": 6.96}, {"h": 7.4}],
+    }
+    llm_obj = {
+        "stock_bias": "HAS_POTENTIAL",
+        "setups": [
+            {
+                "entry_trigger_price": 6.96,
+                "stop_price": 6.7,
+                "target_price": 7.9,  # no structural high here
+                "target1_label": "nearest_resistance",
+            }
+        ],
+    }
+    valid, reasons, action = validate_trade_setups(snapshot, llm_obj, retry_attempted=False)
+    assert valid is False
+    assert action == "RETRY"
+    assert "target_label_mismatch" in reasons
+
+
 def test_structure_context_populated_from_final_levels():
+    import pytest
+
+    pytest.importorskip("pandas")
     from momentum_companion.analysis.ae import AEEngine
     eng = AEEngine(None, None)
     eng._minute_agg._bars = []  # ensure no crash

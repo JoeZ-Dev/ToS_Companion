@@ -44,7 +44,7 @@ class LLMCoach:
             "  * trigger_condition: \"1m close above [level] AND hold/retest\".\n"
             "  * entry_trigger_price: the structural resistance level.\n"
             "  * stop_price: below the breakout level (recent pullback or nearest support).\n"
-            "  * target_price: the next structural level if available; otherwise a measured move above the breakout.\n"
+            "  * target_price: the next structural level ABOVE the breakout trigger (e.g., next swing high / premarket_high / opening_range_high). If no higher level exists, use a measured move above the breakout. Do NOT use the breakout trigger itself as the target.\n"
             "  * confirmation_requirements must reference volume expansion and/or hold/retest behavior.\n"
             "- If structure_context.next_resistance_distance_pct < 0.4% with no feasible breakout trigger, then NO_EDGE is acceptable. Otherwise prefer the conditional breakout setup.\n"
         )

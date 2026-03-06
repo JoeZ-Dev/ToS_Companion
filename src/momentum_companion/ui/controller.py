@@ -1685,7 +1685,7 @@ class UIController:
             "\n"
             "CONDITIONAL BREAKOUT RULE\n"
             "- If price is consolidating below a known resistance (micro_resistance_15m, nearest_resistance, opening_range_high, premarket_high, or recent swing high) within ~5–8%, do NOT return NO_EDGE solely because the trigger has not fired yet.\n"
-            "- Propose a conditional breakout setup instead: trigger_condition = \"1m close above [level] AND hold/retest\"; entry_trigger_price = that resistance; stop_price below the breakout level (recent pullback/support); target_price = next structural level if available, else measured move above breakout; confirmation_requirements must reference volume expansion and/or hold/retest behavior.\n"
+            "- Propose a conditional breakout setup instead: trigger_condition = \"1m close above [level] AND hold/retest\"; entry_trigger_price = that resistance; stop_price below the breakout level (recent pullback/support); target_price = the NEXT structural level ABOVE the trigger (swing_high/premarket_high/opening_range_high/next visible high) or a measured move above breakout if none exists; confirmation_requirements must reference volume expansion and/or hold/retest behavior.\n"
             "- Only return NO_EDGE if no nearby structural levels exist, price is extremely extended with no pullback opportunity, or structure_context.next_resistance_distance_pct < 0.4% with no feasible breakout trigger.\n"
             "- Use bars_5m for structure/regime context; use bars_1m for triggers/tape_warning/volume checks.\n"
             "- target1_label must strictly correspond to the structural source of target_price:\n"

@@ -104,7 +104,20 @@ def _matches_structural_target(snapshot: Dict[str, Any], label: Any, target_pric
         return a is not None and b is not None and abs(float(a) - float(b)) <= tol
     if label == "nearest_resistance":
         expected = levels.get("nearest_resistance", {}).get("price") if isinstance(levels, dict) else None
-        return _close(expected, target_price)
+        if _close(expected, target_price):
+            return True
+        # Allow breakout-through-resistance targets to the next higher swing high
+        if expected is not None:
+            for b in bars:
+                if not isinstance(b, dict):
+                    continue
+                try:
+                    h_f = float(b.get("h"))
+                except Exception:
+                    continue
+                if h_f > float(expected) and _close(h_f, target_price):
+                    return True
+        return False
     if label == "micro_resistance_15m":
         expected = micro.get("micro_resistance_15m") if isinstance(micro, dict) else None
         return _close(expected, target_price)
