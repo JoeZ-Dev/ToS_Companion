@@ -135,39 +135,6 @@ class LLMService:
         except Exception:
             return resp
 
-
-def _normalize_llm_response(resp_raw: Any) -> Dict[str, Any]:
-    """
-    Normalize LLM client responses to strategist dict.
-    - If already dict with stock_bias/setups, return as-is.
-    - If chat completion envelope, extract choices[0].message.content, strip fences, parse JSON.
-    - If parsing fails, return empty NO_EDGE/setups=[].
-    """
-    import json
-    if isinstance(resp_raw, dict) and ("stock_bias" in resp_raw or "setups" in resp_raw):
-        return resp_raw
-    content = None
-    if isinstance(resp_raw, dict):
-        choices = resp_raw.get("choices")
-        if isinstance(choices, list) and choices:
-            msg = choices[0].get("message") if isinstance(choices[0], dict) else None
-            if isinstance(msg, dict):
-                content = msg.get("content")
-    if isinstance(content, str):
-        text = content.strip()
-        if text.startswith("```"):
-            # strip code fences
-            text = text.strip("`")
-            if "\n" in text:
-                text = text.split("\n", 1)[1]
-        try:
-            parsed = json.loads(text)
-            if isinstance(parsed, dict):
-                return parsed
-        except Exception:
-            pass
-    return {"stock_bias": "NO_EDGE", "setups": []}
-
     def _log_invalid(self, payload: Dict[str, Any], session_mode: str) -> None:
         if self._journal:
             self._journal.append_event(
@@ -235,6 +202,39 @@ def _normalize_llm_response(resp_raw: Any) -> Dict[str, Any]:
             return abs((float(new) - float(old)) / float(old)) * 100
         except Exception:
             return 0.0
+
+
+def _normalize_llm_response(resp_raw: Any) -> Dict[str, Any]:
+    """
+    Normalize LLM client responses to strategist dict.
+    - If already dict with stock_bias/setups, return as-is.
+    - If chat completion envelope, extract choices[0].message.content, strip fences, parse JSON.
+    - If parsing fails, return empty NO_EDGE/setups=[].
+    """
+    import json
+    if isinstance(resp_raw, dict) and ("stock_bias" in resp_raw or "setups" in resp_raw):
+        return resp_raw
+    content = None
+    if isinstance(resp_raw, dict):
+        choices = resp_raw.get("choices")
+        if isinstance(choices, list) and choices:
+            msg = choices[0].get("message") if isinstance(choices[0], dict) else None
+            if isinstance(msg, dict):
+                content = msg.get("content")
+    if isinstance(content, str):
+        text = content.strip()
+        if text.startswith("```"):
+            # strip code fences
+            text = text.strip("`")
+            if "\n" in text:
+                text = text.split("\n", 1)[1]
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+    return {"stock_bias": "NO_EDGE", "setups": []}
 
 
 def _has_complete_setup_shape(resp: Dict[str, Any] | Any) -> tuple[bool, str | None]:

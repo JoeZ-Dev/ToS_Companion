@@ -25,12 +25,27 @@ class LLMClient:
         if self._mode == "mock":
             return {
                 "validity": "VALID_FOR_TRADING",
-                "setup_rating": "B",
-                "entry_price": 10.0,
-                "stop_loss": 9.5,
-                "target_price": 12.0,
-                "risk_reward": 4.0,
+                "stock_bias": "HAS_POTENTIAL",
                 "summary": "Mock response",
+                "setups": [
+                    {
+                        "name": "Breakout",
+                        "setup_state": "READY",
+                        "trigger_condition": "break 10.5",
+                        "entry_trigger_price": 10.5,
+                        "stop_price": 10.0,
+                        "target_price": 11.5,
+                        "rr_to_target1": 2.0,
+                        "move_pct_to_target1": 9.52,
+                        "setup_rating": "B",
+                        "confirmation_requirements": "volume expansion",
+                        "target1_label": "nearest_resistance",
+                        "extension_trigger": "",
+                        "extension_target": "",
+                        "extension_notes": "",
+                        "tape_warning": "",
+                    }
+                ],
                 "reason_codes": ["FAILED_BREAKOUT"],
             }
         resp = self._http.post(

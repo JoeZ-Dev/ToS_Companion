@@ -5,7 +5,30 @@ from momentum_companion.llm.client import LLMClient
 
 class DummyCoach(LLMCoach):
     def run(self, snapshot_payload, context):
-        return {"validity": "VALID_FOR_TRADING", "reason_codes": ["FAILED_BREAKOUT"], "setup_rating": "B"}
+        return {
+            "validity": "VALID_FOR_TRADING",
+            "stock_bias": "HAS_POTENTIAL",
+            "summary": "Mock summary",
+            "setups": [
+                {
+                    "name": "Breakout",
+                    "setup_state": "READY",
+                    "trigger_condition": "break 1.60",
+                    "entry_trigger_price": 1.6,
+                    "stop_price": 1.5,
+                    "target_price": 1.8,
+                    "rr_to_target1": 2.0,
+                    "move_pct_to_target1": 12.5,
+                    "setup_rating": "B",
+                    "confirmation_requirements": "volume expansion",
+                    "target1_label": "nearest_resistance",
+                    "extension_trigger": "",
+                    "extension_target": "",
+                    "extension_notes": "",
+                    "tape_warning": "",
+                }
+            ],
+        }
 
     def validate_response(self, resp):
         return True
@@ -14,7 +37,15 @@ class DummyCoach(LLMCoach):
 def test_llm_service_validate_passes_allowed_reason_codes():
     svc = LLMService(DummyCoach())
     resp = svc.evaluate(
-        {"status": "ok", "data_quality": "ok", "as_of_ts_ms": 1, "symbol": "AAPL", "market_state": "normal"},
+        {
+            "status": "ok",
+            "data_quality": "ok",
+            "as_of_ts_ms": 1,
+            "symbol": "AAPL",
+            "market_state": "normal",
+            "levels": {"nearest_resistance": {"price": 1.8}},
+            "bars_window_5m": [{"ts_ms": 1, "o": 1.5, "h": 1.8, "l": 1.4, "c": 1.6, "v": 100}] * 25,
+        },
         "SEAMLESS",
         {"bid": 1, "ask": 2, "last": 1.5, "volume": 100},
     )
@@ -54,14 +85,25 @@ def test_llm_service_trade_validation_still_enforced():
     # Both initial and repair responses mismatch target_price vs structural level to force trade validation failure.
     bad_resp = {
         "validity": "VALID_FOR_TRADING",
-        "reason_codes": ["FAILED_BREAKOUT"],
-        "setup_rating": "B",
+        "stock_bias": "HAS_POTENTIAL",
+        "summary": "Bad target",
         "setups": [
             {
+                "name": "Breakout",
+                "setup_state": "READY",
+                "trigger_condition": "break 10.5",
                 "entry_trigger_price": 10.5,
                 "stop_price": 10.3,
                 "target_price": 11.0,  # mismatch vs nearest_resistance 10.5
+                "rr_to_target1": 2.0,
+                "move_pct_to_target1": 4.76,
+                "setup_rating": "B",
+                "confirmation_requirements": "volume expansion",
                 "target1_label": "nearest_resistance",
+                "extension_trigger": "",
+                "extension_target": "",
+                "extension_notes": "",
+                "tape_warning": "",
             }
         ],
     }
@@ -87,14 +129,25 @@ def test_llm_service_allows_no_candidate_setups():
     }
     bad_resp = {
         "validity": "VALID_FOR_TRADING",
-        "reason_codes": ["FAILED_BREAKOUT"],
-        "setup_rating": "B",
+        "stock_bias": "HAS_POTENTIAL",
+        "summary": "Valid target",
         "setups": [
             {
+                "name": "Breakout",
+                "setup_state": "READY",
+                "trigger_condition": "break 10.5",
                 "entry_trigger_price": 10.5,
                 "stop_price": 10.3,
                 "target_price": 10.9,
+                "rr_to_target1": 2.0,
+                "move_pct_to_target1": 3.81,
+                "setup_rating": "B",
+                "confirmation_requirements": "volume expansion",
                 "target1_label": "nearest_resistance",
+                "extension_trigger": "",
+                "extension_target": "",
+                "extension_notes": "",
+                "tape_warning": "",
             }
         ],
     }
@@ -109,7 +162,15 @@ def test_llm_service_mock_client():
     client = LLMClient(api_key="x", model="gpt-mock", mode="mock")
     svc = LLMService(DummyCoach(), client=client)
     resp = svc.evaluate(
-        {"status": "ok", "data_quality": "ok", "as_of_ts_ms": 1, "symbol": "AAPL", "market_state": "normal"},
+        {
+            "status": "ok",
+            "data_quality": "ok",
+            "as_of_ts_ms": 1,
+            "symbol": "AAPL",
+            "market_state": "normal",
+            "levels": {"nearest_resistance": {"price": 11.5}},
+            "bars_window_5m": [{"ts_ms": 1, "o": 10.5, "h": 11.5, "l": 10.0, "c": 10.8, "v": 100}] * 25,
+        },
         "SEAMLESS",
         {"bid": 1, "ask": 2, "last": 1.5, "volume": 100},
     )
