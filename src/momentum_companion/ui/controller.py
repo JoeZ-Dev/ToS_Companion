@@ -1028,6 +1028,31 @@ class UIController:
 
         def task() -> None:
             try:
+                candidate_count = len(normalized.get("candidate_setups") or [])
+                if candidate_count == 0:
+                    nearest_res = None
+                    try:
+                        nr = (normalized.get("levels") or {}).get("nearest_resistance") if isinstance(normalized, dict) else None
+                        nearest_res = nr.get("price") if isinstance(nr, dict) else None
+                    except Exception:
+                        nearest_res = None
+                    self._logger.info(
+                        "LLM skipped — no candidate_setups available (symbol=%s candidate_count=0 bars_len=%s nearest_resistance=%s)",
+                        symbol,
+                        bars_len,
+                        nearest_res,
+                    )
+                    rec = self._build_no_candidate_result(normalized)
+                    self._emit_llm_result(
+                        normalized,
+                        model,
+                        invocation="MANUAL" if not refresh_mode else "REFRESH",
+                        parsed=rec,
+                        raw_text=json.dumps(rec),
+                        error=None,
+                    )
+                    QtCore.QTimer.singleShot(0, lambda: self._refresh_llm_status())
+                    return
                 self._logger.info(
                     "LLM invoking model=%s for symbol=%s prompt_version=%s invocation=%s bars_len=%s",
                     model,
@@ -2270,6 +2295,17 @@ class UIController:
                 except (TypeError, ValueError):
                     return None
         return None
+
+    @staticmethod
+    def _build_no_candidate_result(normalized: dict) -> dict:
+        """Deterministic NO_EDGE output when no candidate_setups exist."""
+        return {
+            "stock_bias": "NO_EDGE",
+            "summary": "No valid candidate setups available from deterministic screening.",
+            "setups": [],
+            "validity": "NOT_VALID_FOR_TRADING",
+            "reason_codes": ["NO_CANDIDATE_SETUPS"],
+        }
 
 
 def snapshot_status_summary(
