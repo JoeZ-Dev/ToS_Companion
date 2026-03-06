@@ -8,6 +8,7 @@ VALID_VALIDITY = {"VALID_FOR_TRADING", "NOT_VALID_FOR_TRADING"}
 VALID_ACTIONS = {"HOLD", "EXIT_NOW", "SCALE_OUT_50", "MOVE_STOP_TO_BREAKEVEN", "RAISE_STOP_TO", "ADD_TO_POSITION"}
 VALID_URGENCY = {"LOW", "MEDIUM", "HIGH"}
 REQUIRED_FIELDS = {"validity", "setup_rating", "reason_codes"}
+ALLOWED_SETUP_STATES = {"READY", "WATCH"}
 
 
 def validate_llm_output(resp: Dict[str, Any]) -> bool:
@@ -29,6 +30,13 @@ def validate_llm_output(resp: Dict[str, Any]) -> bool:
     urgency = resp.get("action_urgency")
     if urgency is not None and urgency not in VALID_URGENCY:
         return False
+    # setup_state optional but if provided must be valid
+    for setup in resp.get("setups", []) or []:
+        if not isinstance(setup, dict):
+            continue
+        ss = setup.get("setup_state")
+        if ss is not None and ss not in ALLOWED_SETUP_STATES:
+            return False
     return True
 
 
@@ -65,15 +73,29 @@ def validate_trade_setups(snapshot: Dict[str, Any], llm_obj: Dict[str, Any], ret
             continue
         rr = reward / risk
         move_pct = reward / entry if entry else 0.0
-        if move_pct < 0.015:
-            reasons.append("move_pct < 1.5%")
-            continue
-        if rr < 1.0:
-            reasons.append("rr < 1.0")
-            continue
-        if entry < 5.0 and reward < 0.03:
-            reasons.append("reward floor fail for sub-$5")
-            continue
+        setup_state = setup.get("setup_state") or "READY"
+        # READY: existing stricter rules
+        if setup_state == "READY":
+            if move_pct < 0.015:
+                reasons.append("move_pct < 1.5%")
+                continue
+            if rr < 1.0:
+                reasons.append("rr < 1.0")
+                continue
+            if entry < 5.0 and reward < 0.03:
+                reasons.append("reward floor fail for sub-$5")
+                continue
+        else:  # WATCH
+            # lighter floors but still must be sane
+            if move_pct < 0.005:
+                reasons.append("watch move_pct < 0.5%")
+                continue
+            if rr < 0.5:
+                reasons.append("watch rr < 0.5")
+                continue
+            if entry < 5.0 and reward < 0.015:
+                reasons.append("watch reward floor fail for sub-$5")
+                continue
         # extension rule
         ext = setup.get("extension_target")
         if pm_high and target < pm_high and pm_high <= target * 1.25:

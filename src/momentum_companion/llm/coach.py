@@ -36,6 +36,13 @@ class LLMCoach:
             "- If volume_structure.volume_state == DISTRIBUTION, cap setup_rating at B- and require hold/retest confirmation. If volume_state in {EXPANSION, HEALTHY_PULLBACK}, allow normal rating logic.\n"
             "- If derived.distance_to_vwap_pct is not null and > 0.05 (5%), entries must be pullback/retest based (no chase/buy-now).\n"
             "\n"
+            "STATE CONTRACT\n"
+            "- You may return 0–2 setups. Each setup must include setup_state:\n"
+            "  * READY: actionable now/near-now; applies full RR/move quality caps.\n"
+            "  * WATCH: conditional plan (break/reclaim/pullback) that is strategically useful but not triggered yet.\n"
+            "- Prefer WATCH over NO_EDGE when a clear structural trigger exists nearby with a valid target/invalidation.\n"
+            "- NO_EDGE only when structure is genuinely poor (no nearby levels, extreme extension with no pullback plan, tape sloppy/distribution with no clear reclaim/break).\n"
+            "\n"
             "CONDITIONAL BREAKOUT RULE\n"
             "If price is consolidating below a known resistance (micro_resistance_15m, nearest_resistance, opening_range_high, premarket_high, or a recent swing high) and the level is within ~5–8%:\n"
             "- Do NOT return NO_EDGE solely because the trigger has not fired yet.\n"
@@ -47,6 +54,7 @@ class LLMCoach:
             "  * target_price: the next structural level ABOVE the breakout trigger (e.g., next swing high / premarket_high / opening_range_high). If no higher level exists, use a measured move above the breakout. Do NOT use the breakout trigger itself as the target.\n"
             "  * confirmation_requirements must reference volume expansion and/or hold/retest behavior.\n"
             "- If structure_context.next_resistance_distance_pct < 0.4% with no feasible breakout trigger, then NO_EDGE is acceptable. Otherwise prefer the conditional breakout setup.\n"
+            "- When price is 0.4%–3% below resistance AND volume_structure in {EXPANSION, HEALTHY_PULLBACK} AND a higher structural target exists above that resistance, you MUST return a WATCH breakout setup instead of NO_EDGE (unless tape is clearly distribution/failure).\n"
         )
 
     def run(self, snapshot_payload: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:

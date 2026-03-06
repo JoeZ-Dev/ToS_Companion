@@ -96,6 +96,45 @@ def test_validate_trade_setups_rejects_fabricated_target_above_breakout():
     assert "target_label_mismatch" in reasons
 
 
+def test_ready_requires_stricter_rr():
+    snapshot = {"levels": {"nearest_resistance": {"price": 10.5}}, "micro": {}, "session": {}, "bars_window": [{"h": 10.5}]}
+    llm_obj = {
+        "stock_bias": "HAS_POTENTIAL",
+        "setups": [
+            {
+                "setup_state": "READY",
+                "entry_trigger_price": 10.0,
+                "stop_price": 9.8,
+                "target_price": 10.1,  # move_pct = 1%
+                "target1_label": "nearest_resistance",
+            }
+        ],
+    }
+    valid, reasons, action = validate_trade_setups(snapshot, llm_obj, retry_attempted=False)
+    assert valid is False
+    assert "move_pct < 1.5%" in reasons or "rr < 1.0" in reasons
+
+
+def test_watch_allows_conditional_plan():
+    snapshot = {"levels": {"nearest_resistance": {"price": 6.96}}, "micro": {}, "session": {}, "bars_window": [{"h": 6.96}, {"h": 7.4}]}
+    llm_obj = {
+        "stock_bias": "HAS_POTENTIAL",
+        "setups": [
+            {
+                "setup_state": "WATCH",
+                "entry_trigger_price": 6.96,
+                "stop_price": 6.8,
+                "target_price": 7.4,  # aligns with higher swing high above trigger
+                "target1_label": "nearest_resistance",
+            }
+        ],
+    }
+    valid, reasons, action = validate_trade_setups(snapshot, llm_obj, retry_attempted=False)
+    assert valid is True
+    assert action == "OK"
+    assert "target_label_mismatch" not in reasons
+
+
 def test_structure_context_populated_from_final_levels():
     import pytest
 
