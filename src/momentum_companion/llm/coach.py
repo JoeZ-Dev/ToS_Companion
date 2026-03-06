@@ -35,6 +35,18 @@ class LLMCoach:
             "- If structure_context.next_resistance_distance_pct is not null and < 0.4, only propose breakout-through-resistance with hold/retest confirmation, otherwise return NO_EDGE. Do not propose targets within 0.4% of entry unless returning NO_EDGE.\n"
             "- If volume_structure.volume_state == DISTRIBUTION, cap setup_rating at B- and require hold/retest confirmation. If volume_state in {EXPANSION, HEALTHY_PULLBACK}, allow normal rating logic.\n"
             "- If derived.distance_to_vwap_pct is not null and > 0.05 (5%), entries must be pullback/retest based (no chase/buy-now).\n"
+            "\n"
+            "CONDITIONAL BREAKOUT RULE\n"
+            "If price is consolidating below a known resistance (micro_resistance_15m, nearest_resistance, opening_range_high, premarket_high, or a recent swing high) and the level is within ~5–8%:\n"
+            "- Do NOT return NO_EDGE solely because the trigger has not fired yet.\n"
+            "- Propose a conditional breakout-through-resistance setup instead of NO_EDGE.\n"
+            "- Required fields:\n"
+            "  * trigger_condition: \"1m close above [level] AND hold/retest\".\n"
+            "  * entry_trigger_price: the structural resistance level.\n"
+            "  * stop_price: below the breakout level (recent pullback or nearest support).\n"
+            "  * target_price: the next structural level if available; otherwise a measured move above the breakout.\n"
+            "  * confirmation_requirements must reference volume expansion and/or hold/retest behavior.\n"
+            "- If structure_context.next_resistance_distance_pct < 0.4% with no feasible breakout trigger, then NO_EDGE is acceptable. Otherwise prefer the conditional breakout setup.\n"
         )
 
     def run(self, snapshot_payload: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
