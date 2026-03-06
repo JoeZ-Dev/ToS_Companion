@@ -586,9 +586,14 @@ class UIController:
             return
         if not self._llm_enabled:
             return
-        ready, missing = self._is_snapshot_ready_for_llm(snapshot)
+        ready, missing, info = self._is_snapshot_ready_for_llm(snapshot)
         if not ready:
-            self._logger.debug("LLM auto skipped — snapshot not ready (missing %s)", ", ".join(missing))
+            self._logger.debug(
+                "LLM auto skipped — snapshot not ready (missing %s; bars_len=%s built_from_1m=%s)",
+                ", ".join(missing),
+                info.get("bars_len"),
+                info.get("built_from_1m"),
+            )
             return
         # Time gate
         now_sec = time.time()
@@ -972,10 +977,13 @@ class UIController:
             snap = self._ensure_snapshot(self._active_symbol)
             if not snap:
                 return
-        ready, missing = self._is_snapshot_ready_for_llm(self._last_ae_snapshot)
+        ready, missing, info = self._is_snapshot_ready_for_llm(self._last_ae_snapshot)
         if not ready:
-            bars_len = len(self._last_ae_snapshot.get("bars_window") or []) if isinstance(self._last_ae_snapshot, dict) else 0
-            msg = f"LLM skipped — snapshot not ready (missing {', '.join(missing)}; bars_len={bars_len} built_from_1m={self._last_ae_snapshot.get('bars_5m_built_from_1m') if isinstance(self._last_ae_snapshot, dict) else False})"
+            bars_len = info.get("bars_len")
+            msg = (
+                f"LLM skipped — snapshot not ready (missing {', '.join(missing)}; "
+                f"bars_len={bars_len} built_from_1m={info.get('built_from_1m')})"
+            )
             self._logger.warning(msg)
             QtCore.QTimer.singleShot(
                 0,
@@ -1458,7 +1466,7 @@ class UIController:
                 continue
         return out
 
-    def _is_snapshot_ready_for_llm(self, snapshot: dict) -> tuple[bool, list[str]]:
+    def _is_snapshot_ready_for_llm(self, snapshot: dict) -> tuple[bool, list[str], dict]:
         normalized = self._normalize_snapshot_for_llm(snapshot)
         missing: list[str] = []
         session_mode = normalized.get("session_mode")
@@ -1477,13 +1485,11 @@ class UIController:
             missing.append("quote.bid/ask")
         bars = normalized.get("bars_5m") if isinstance(normalized, dict) else normalized.get("bars_window")
         bars_len = len(bars) if isinstance(bars, list) else 0
-        if isinstance(normalized, dict) and normalized.get("bars_5m_built_from_1m"):
-            built_from_1m = True
-        else:
-            built_from_1m = False
+        built_from_1m = bool(normalized.get("bars_5m_built_from_1m")) if isinstance(normalized, dict) else False
         if (not isinstance(bars, list) or bars_len < self._BARS_WINDOW_MIN_READY) and not (built_from_1m and bars_len >= self._BARS_WINDOW_MIN_READY):
             missing.append("bars_5m")
-        return (len(missing) == 0, missing)
+        info = {"bars_len": bars_len, "built_from_1m": built_from_1m}
+        return (len(missing) == 0, missing, info)
 
     def _build_structural_plan(self, payload: dict) -> dict:
         """Derive deterministic structural plan from normalized payload with conservative limits."""

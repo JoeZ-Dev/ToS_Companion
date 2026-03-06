@@ -6,6 +6,48 @@ from momentum_companion.data.llm_contracts import LlmSnapshotPayload
 from momentum_companion.setup_engine.candidate_generator import generate_candidate_setups
 
 
+def _aggregate_1m_to_5m(bars_1m: list[dict]) -> list[dict]:
+    """Aggregate 1m bars into compact 5m bars without UI dependency."""
+    if not isinstance(bars_1m, list):
+        return []
+    cleaned = []
+    for b in bars_1m:
+        if not isinstance(b, dict):
+            continue
+        ts = b.get("ts_ms") or b.get("ts") or b.get("t")
+        o = b.get("o") if "o" in b else b.get("open")
+        h = b.get("h") if "h" in b else b.get("high")
+        l = b.get("l") if "l" in b else b.get("low")
+        c = b.get("c") if "c" in b else b.get("close")
+        v = b.get("v") if "v" in b else b.get("volume")
+        if ts is None or o is None or h is None or l is None or c is None or v is None:
+            continue
+        try:
+            cleaned.append({"ts_ms": int(ts), "o": float(o), "h": float(h), "l": float(l), "c": float(c), "v": float(v)})
+        except Exception:
+            continue
+    cleaned = sorted(cleaned, key=lambda x: x["ts_ms"])
+    buckets: dict[int, dict] = {}
+    for b in cleaned:
+        bucket_start = (int(b["ts_ms"]) // 300_000) * 300_000
+        bucket = buckets.get(bucket_start)
+        if bucket is None:
+            buckets[bucket_start] = {
+                "ts_ms": bucket_start,
+                "o": b["o"],
+                "h": b["h"],
+                "l": b["l"],
+                "c": b["c"],
+                "v": b["v"],
+            }
+        else:
+            bucket["h"] = max(bucket["h"], b["h"])
+            bucket["l"] = min(bucket["l"], b["l"])
+            bucket["c"] = b["c"]
+            bucket["v"] += b["v"]
+    return [buckets[k] for k in sorted(buckets.keys())]
+
+
 def normalize_snapshot(raw_snapshot: Dict[str, Any], session_mode: str, quote: Dict[str, Any]) -> LlmSnapshotPayload:
     """
     Normalize AE-1.1 snapshot into the LLM payload per specs.md §11.2.5.
@@ -28,13 +70,15 @@ def normalize_snapshot(raw_snapshot: Dict[str, Any], session_mode: str, quote: D
     payload["market_state"] = raw_snapshot.get("market_state")
     bars = raw_snapshot.get("bars_window_5m", [])
     bars_1m = raw_snapshot.get("bars_1m") or []
+    built_from_1m = False
     if (not bars or len(bars) == 0) and isinstance(bars_1m, list) and len(bars_1m) >= 5:
-        from momentum_companion.ui.controller import aggregate_1m_to_5m  # avoid circular import issues
-
-        bars = aggregate_1m_to_5m(bars_1m)
+        bars = _aggregate_1m_to_5m(bars_1m)
+        built_from_1m = True
     payload["bars_window"] = bars
     if bars_1m:
         payload["bars_1m"] = bars_1m
+    if built_from_1m:
+        payload["bars_5m_built_from_1m"] = True
     if "derived" in raw_snapshot:
         payload["derived"] = raw_snapshot.get("derived")
     if "volume_structure" in raw_snapshot:
