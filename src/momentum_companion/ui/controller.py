@@ -552,12 +552,6 @@ class UIController:
             except Exception:
                 self._logger.debug("Snapshot build failed for %s", sym, exc_info=True)
         if snap:
-            try:
-                normalized = self._normalize_snapshot_for_llm(snap)
-                cand = generate_candidate_setups(dict(normalized))
-                snap["candidate_hints"] = cand
-            except Exception:
-                self._logger.debug("Failed to generate candidate_setups for %s", sym, exc_info=True)
             self._last_ae_snapshot = snap
             if hasattr(self._window, "update_ae_panel"):
                 QtCore.QTimer.singleShot(
