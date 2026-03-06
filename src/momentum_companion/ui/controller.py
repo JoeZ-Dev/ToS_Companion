@@ -2070,8 +2070,14 @@ class UIController:
         error: str | None,
     ) -> None:
         current_price = self._current_price_from_quote(normalized_snapshot.get("quote") or {})
+        if parsed and parsed.get("reason_codes") == ["NO_CANDIDATE_SETUPS"]:
+            # Treat deterministic no-candidate result as valid
+            valid = True
+            warnings: list[str] = parsed.get("validation_warnings") or ["NO_CANDIDATE_SETUPS"]
+        else:
+            parsed = self._apply_pullback_guard(parsed, current_price)
+            parsed, valid, warnings = self._validate_llm_output(parsed, current_price, normalized_snapshot)
         parsed = self._apply_pullback_guard(parsed, current_price)
-        parsed, valid, warnings = self._validate_llm_output(parsed, current_price, normalized_snapshot)
         if warnings:
             self._logger.info("LLM sanitized with warnings: %s", "; ".join(warnings))
         if not valid and not error:
@@ -2303,8 +2309,9 @@ class UIController:
             "stock_bias": "NO_EDGE",
             "summary": "No valid candidate setups available from deterministic screening.",
             "setups": [],
-            "validity": "NOT_VALID_FOR_TRADING",
+            "validation_warnings": ["NO_CANDIDATE_SETUPS"],
             "reason_codes": ["NO_CANDIDATE_SETUPS"],
+            "validity": "VALID_FOR_TRADING",
         }
 
 
