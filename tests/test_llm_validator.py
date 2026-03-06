@@ -48,6 +48,18 @@ def test_validate_trade_setups_rejects_structural_mismatch():
     assert "target_label_mismatch" in reasons
 
 
+def test_validate_selected_candidates_rejects_missing_index():
+    payload = {"candidate_setups": [{"entry_trigger_price": 10, "stop_price": 9.5, "target_price": 11, "target1_label": "nearest_resistance"}]}
+    llm_obj = {"setups": [{"entry_trigger_price": 10, "stop_price": 9.5, "target_price": 11, "target1_label": "nearest_resistance"}]}
+    from momentum_companion.llm.validator import validate_llm_selected_candidates
+
+    out, ok, reasons, action = validate_llm_selected_candidates(payload, llm_obj, retry_attempted=False)
+    assert ok is False
+    assert action == "RETRY"
+    assert "candidate_index_missing" in reasons
+    assert out.get("setups") == []
+
+
 def test_structure_context_populated_from_final_levels():
     from momentum_companion.analysis.ae import AEEngine
     eng = AEEngine(None, None)

@@ -73,6 +73,40 @@ def test_llm_service_candidate_mismatch_triggers_mismatch_reason():
     assert rec.get("reason_codes") == ["LLM_CANDIDATE_MISMATCH"]
 
 
+def test_llm_service_no_candidates_forced_no_edge():
+    payload_snapshot = {
+        "status": "ok",
+        "data_quality": "ok",
+        "as_of_ts_ms": 1,
+        "symbol": "ABC",
+        "market_state": "normal",
+        "quote": {"bid": 10, "ask": 10.1, "last": 10.05},
+        "bars_window_5m": [{"ts_ms": 1, "o": 10, "h": 10, "l": 10, "c": 10, "v": 100}] * 25,
+        "candidate_setups": [],
+    }
+    bad_resp = {
+        "validity": "VALID_FOR_TRADING",
+        "reason_codes": ["FAILED_BREAKOUT"],
+        "setup_rating": "B",
+        "stock_bias": "HAS_POTENTIAL",
+        "setups": [
+            {
+                "entry_trigger_price": 10.5,
+                "stop_price": 10.3,
+                "target_price": 10.9,
+                "target1_label": "nearest_resistance",
+            }
+        ],
+    }
+    client = StaticClient([bad_resp, bad_resp])
+    svc = LLMService(CandidateCoach(), client=client)
+    rec = svc.evaluate(payload_snapshot, "SEAMLESS", {"bid": 10, "ask": 10.1, "last": 10.05, "volume": 100}, messages_override=[{"role": "user", "content": "x"}])
+    assert rec["validity"] == "NOT_VALID_FOR_TRADING"
+    assert rec.get("reason_codes") == ["LLM_NO_CANDIDATES_FORCED_SETUP"]
+    assert rec.get("stock_bias") == "NO_EDGE"
+    assert rec.get("setups") == []
+
+
 def test_llm_service_mock_client():
     client = LLMClient(api_key="x", model="gpt-mock", mode="mock")
     svc = LLMService(DummyCoach(), client=client)

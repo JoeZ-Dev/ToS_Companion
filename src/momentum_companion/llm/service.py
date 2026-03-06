@@ -62,6 +62,24 @@ class LLMService:
 
         resp, cand_valid, cand_reasons, cand_action = validate_llm_selected_candidates(payload, resp, retry_attempted=False)
         warnings: list[str] = list(cand_reasons)
+        # If no candidates but setups came back, force repair once
+        if not payload.get("candidate_setups") and resp.get("setups"):
+            repair_messages = list(messages) + [
+                {
+                    "role": "system",
+                    "content": "No candidate_setups were provided. You must return stock_bias=NO_EDGE and setups=[]. Do not invent setups.",
+                }
+            ]
+            resp = _invoke(repair_messages)
+            if not self._coach.validate_response(resp) or not validate_llm_output(resp):
+                return {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["LLM_NO_CANDIDATES_FORCED_SETUP"], "stock_bias": "NO_EDGE", "setups": []}
+            resp, cand_valid, cand_reasons, cand_action = validate_llm_selected_candidates(payload, resp, retry_attempted=True)
+            warnings.extend(cand_reasons)
+            if resp.get("setups"):
+                return {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["LLM_NO_CANDIDATES_FORCED_SETUP"], "stock_bias": "NO_EDGE", "setups": []}
+            if resp.get("stock_bias") != "NO_EDGE":
+                resp["stock_bias"] = "NO_EDGE"
+        # normal candidate validation path
         if cand_action == "RETRY":
             logger.info("LLM candidate selection invalid; retrying with repair prompt reasons=%s", cand_reasons)
             repair_messages = list(messages) + [
@@ -77,7 +95,8 @@ class LLMService:
             resp, cand_valid, cand_reasons, cand_action = validate_llm_selected_candidates(payload, resp, retry_attempted=True)
             warnings.extend(cand_reasons)
             if cand_action != "OK":
-                return {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["LLM_CANDIDATE_MISMATCH"], "stock_bias": "NO_EDGE", "setups": []}
+                reason_code = "LLM_NO_CANDIDATES_FORCED_SETUP" if not payload.get("candidate_setups") else "LLM_CANDIDATE_MISMATCH"
+                return {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": [reason_code], "stock_bias": "NO_EDGE", "setups": []}
 
         valid, reasons, action = validate_trade_setups(payload, resp, retry_attempted=False)
         if action == "RETRY":

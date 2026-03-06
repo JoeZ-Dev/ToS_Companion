@@ -37,6 +37,7 @@ class LLMCoach:
             "- If derived.distance_to_vwap_pct is not null and > 0.05 (5%), entries must be pullback/retest based (no chase/buy-now).\n"
             "- You MUST select setups only from candidate_setups provided in the payload. Copy entry/stop/target/target1_label exactly from the chosen candidate. Include candidate_index (integer) in each setup referencing its candidate. If none are acceptable, return stock_bias=NO_EDGE and setups=[]. You may only adjust narrative fields and rating.\n"
             "- Each returned setup MUST include candidate_index and reference exactly one item from candidate_setups. Numeric fields must match the chosen candidate exactly.\n"
+            "- If candidate_setups is empty or missing, you must return stock_bias=\"NO_EDGE\" and setups=[]. Do NOT invent setups when no candidates exist.\n"
         )
 
     def run(self, snapshot_payload: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:

@@ -37,8 +37,21 @@ def validate_llm_selected_candidates(payload: Dict[str, Any], llm_obj: Dict[str,
     reasons: list[str] = []
     out = dict(llm_obj) if isinstance(llm_obj, dict) else {}
     candidates = payload.get("candidate_setups") or []
-    # If we have no candidates, do not gate.
     if not candidates:
+        setups = llm_obj.get("setups") or []
+        bias = llm_obj.get("stock_bias")
+        if setups:
+            reasons.append("no_candidates_but_setups_present")
+            action = "RETRY" if not retry_attempted else "NO_EDGE"
+            out["setups"] = []
+            out["stock_bias"] = "NO_EDGE"
+            return out, False, reasons, action
+        if bias not in (None, "NO_EDGE"):
+            reasons.append("no_candidates_bias_must_be_no_edge")
+            action = "RETRY" if not retry_attempted else "NO_EDGE"
+            out["stock_bias"] = "NO_EDGE"
+            out["setups"] = []
+            return out, False, reasons, action
         return out, True, reasons, "OK"
     setups = llm_obj.get("setups") or []
     if not setups:
@@ -49,6 +62,9 @@ def validate_llm_selected_candidates(payload: Dict[str, Any], llm_obj: Dict[str,
             reasons.append("setup_not_dict")
             continue
         idx = setup.get("candidate_index")
+        if idx is None:
+            reasons.append("candidate_index_missing")
+            continue
         try:
             idx_int = int(idx)
         except Exception:
