@@ -997,7 +997,7 @@ class UIController:
         bars_1m_len = len(bars_1m) if isinstance(bars_1m, list) else 0
         levels_info = normalized.get("levels") or {}
         self._logger.info(
-            "LLM normalized snapshot keys=%s bars_5m_len=%s bars_1m_len=%s levels_fields=%s bars_ts=%s..%s derived=%s structure_context=%s volume_structure=%s candidate_setups=%s",
+            "LLM normalized snapshot keys=%s bars_5m_len=%s bars_1m_len=%s levels_fields=%s bars_ts=%s..%s derived=%s structure_context=%s volume_structure=%s candidate_hints=%s",
             sorted(normalized.keys()),
             bars_len,
             bars_1m_len,
@@ -1007,7 +1007,7 @@ class UIController:
             "derived" in normalized,
             "structure_context" in normalized,
             "volume_structure" in normalized,
-            "candidate_hints" in normalized or "candidate_setups" in normalized,
+            "candidate_hints" in normalized,
         )
         prior_best_payload: dict | None = None
         if refresh_mode:
@@ -1306,10 +1306,8 @@ class UIController:
             norm["volume_structure"] = snapshot.get("volume_structure")
         if candidate_setups is not None:
             norm["candidate_setups"] = candidate_setups
-        try:
-            norm["candidate_hints"] = candidate_hints if candidate_hints is not None else generate_candidate_setups(dict(norm))
-        except Exception:
-            norm["candidate_hints"] = []
+        if candidate_hints is not None:
+            norm["candidate_hints"] = candidate_hints
         return norm
 
     def _extract_bars_window(self, snapshot: dict) -> list[dict]:
@@ -1665,7 +1663,7 @@ class UIController:
             "Rules:\n"
             "- Maximum 2 setups returned.\n"
             "- If there are 3+ plausible setups, return only the best 1–2 and do NOT include any rated below B+.\n"
-            "- If only 1–2 candidates exist, you may include a lone B- or C/C+ (rating rules still apply).\n"
+            "- Conditional setups are allowed: break/hold above resistance, reclaim VWAP then hold, pullback then reclaim, watch for break with volume, etc. Do not collapse these into NO_EDGE just because they are waiting for trigger.\n"
             "- Rating must reflect rr_to_target1:\n"
             "    * rr_to_target1 < 1.0  -> setup_rating cannot be above C+\n"
             "    * 1.0 <= rr_to_target1 < 1.2 -> setup_rating cannot be above B-\n"
@@ -1697,15 +1695,12 @@ class UIController:
             "- extension_trigger describes what must happen to treat it as a runner (e.g., 1m close above target1 with volume expansion).\n"
             "- extension_target must be above target_price for longs; otherwise set extension_target=null and extension_notes should state 'No higher structural level provided'.\n"
             "- Ratings are based on rr_to_target1, not extension potential.\n"
-            "- If no high-quality setup exists, return stock_bias='NO_EDGE' and setups=[].\n"
+            "- If no strategic edge exists (structure too tight/weak), return stock_bias='NO_EDGE' and setups=[]. Conditional setups are acceptable when structure is good but trigger not yet met.\n"
             "- No trade validation logic. No risk gates. No null rules.\n"
-            "Context and pullback rules:\n"
+            "Context and pullback notes:\n"
             "- Define current_price = quote.last; if missing use mid=(bid+ask)/2; else bid; else ask.\n"
-            "- If entry_trigger_price <= current_price*0.99 then: (a) trigger_condition MUST include one of: pullback, retest, reclaim; (b) confirmation_requirements must mention reclaim/hold behavior; (c) summary MUST start a sentence exactly: \"This is a pullback/retest plan, not a buy-now entry.\".\n"
-            "- If current_price > entry_trigger_price*1.01 and trigger_condition lacks pullback/retest/reclaim, treat as stale and rewrite as pullback/retest.\n"
-            "- Add a context sentence in summary referencing float_shares/short_interest_shares/short_vol_pct when present (one sentence max). Use them only as modifiers, not entry reasons.\n"
+            "- Include float_shares/short_interest_shares/short_vol_pct context in summary when present (one sentence max). Use them only as modifiers, not entry reasons.\n"
             "- Crowded-tape caps: if float_shares!=null and float_shares>10_000_000 cap setup_rating at A- unless move_pct_to_target1>=0.12 AND rr_to_target1>=1.5; if short_vol_pct>=55 set tape_warning=SPIKEY_PULLBACKS unless already set; if short_interest_shares and float_shares exist and short_interest_shares/float_shares>=0.15 add phrase 'Squeeze-prone tape; expect sharper pullbacks.'\n"
-            "- If target_price equals levels.nearest_resistance.price -> target1_label=\"nearest_resistance\"; if equals micro.micro_resistance_15m -> \"micro_resistance_15m\"; if equals session.premarket_high -> \"premarket_high\". Do not mismatch labels.\n"
             "- Do not include '$' or currency symbols in any strings.\n"
         )
 
@@ -1716,7 +1711,7 @@ class UIController:
             'stock_bias MUST be one of: "HAS_POTENTIAL" | "NO_EDGE".\n'
             "Every setup MUST include ALL required keys: name, trigger_condition, entry_trigger_price, stop_price, target_price, rr_to_target1, move_pct_to_target1, setup_rating, confirmation_requirements, target1_label, extension_trigger, extension_target, extension_notes, tape_warning.\n"
             "If you do not change a field, copy it from prior_best_setup. Do not omit fields.\n"
-            "Use prior_best_setup plus latest prices/levels to update triggers/targets/stops/RR if needed.\n"
+            "Use prior_best_setup plus latest prices/levels to update triggers/targets/stops/RR if needed. Conditional setups (break/hold, reclaim, pullback then reclaim) remain valid even if not yet triggered; do not force NO_EDGE solely because the trigger has not fired.\n"
             "Rating caps must match full mode: rr_to_target1 caps; move_pct_to_target1 caps (B- max <5%, A- max <10%, A+ only if >=10%); VWAP cap (if entry_trigger_price<vwap cap at B and mention reclaim/hold); A/A+ requires volume expansion in triggers/confirmations and rising recent volume; otherwise cap at B+.\n"
             "- Only claim \"volume expansion\" or \"elevated volume\" if: (a) the most recent completed 1m bar volume > each of the prior 2 1m bars, OR (b) the most recent completed 1m bar volume >= 1.5x median volume of last 10 1m bars; otherwise use neutral wording.\n"
             "- Use bars_5m for structure/regime context; use bars_1m for triggers/tape_warning/volume checks.\n"
@@ -1731,9 +1726,8 @@ class UIController:
             "Summary must be <=2 sentences.\n"
             "No markdown. No extra keys.\n"
             "Self-check: ensure every setup has all required keys; ensure stock_bias is one of the two enums.\n"
-            "- If abs(entry_trigger_price-current_price)/current_price < 0.003, trigger_condition MUST be a 2-step trigger like '1m close above X AND hold/retest' (not vague 'reclaim').\n"
             "- Do not include '$' or currency symbols in any strings.\n"
-            "Context/pullback rules carry over: define current_price as in full mode; if entry_trigger_price <= current_price*0.99 enforce pullback/retest wording and include the exact sentence \"This is a pullback/retest plan, not a buy-now entry.\" in summary; if current_price > entry_trigger_price*1.01 rewrite as pullback/retest unless trigger_condition already says pullback/retest/reclaim. Include float_shares/short_interest_shares/short_vol_pct modifiers in summary when present and apply the same crowded-tape rating/tape_warning caps as full mode.\n"
+            "Context/pullback rules carry over: define current_price as in full mode. Conditional pullback/reclaim setups are allowed; keep trigger wording explicit (reclaim/hold/retest) when entry is below current_price. Include float_shares/short_interest_shares/short_vol_pct modifiers in summary when present and apply the same crowded-tape rating/tape_warning caps as full mode.\n"
         )
 
     def _build_llm_messages(self, snapshot: dict) -> list[dict[str, str]]:

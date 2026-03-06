@@ -3,8 +3,6 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from momentum_companion.data.llm_contracts import LlmSnapshotPayload
-from momentum_companion.setup_engine.candidate_generator import generate_candidate_setups
-
 
 def _aggregate_1m_to_5m(bars_1m: list[dict]) -> list[dict]:
     """Aggregate 1m bars into compact 5m bars without UI dependency."""
@@ -95,8 +93,6 @@ def normalize_snapshot(raw_snapshot: Dict[str, Any], session_mode: str, quote: D
         payload["structure_context"] = raw_snapshot.get("structure_context")
     if raw_snapshot.get("candidate_setups") is not None:
         payload["candidate_setups"] = raw_snapshot.get("candidate_setups")
-    try:
-        payload["candidate_hints"] = generate_candidate_setups(dict(payload))
-    except Exception:
-        payload["candidate_hints"] = []
+    if raw_snapshot.get("candidate_hints") is not None:
+        payload["candidate_hints"] = raw_snapshot.get("candidate_hints")
     return payload  # type: ignore[return-value]

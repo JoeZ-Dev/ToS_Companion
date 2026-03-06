@@ -1,3 +1,7 @@
+import pytest
+
+pytest.importorskip("PySide6")
+
 from momentum_companion.ui.controller import UIController
 
 
