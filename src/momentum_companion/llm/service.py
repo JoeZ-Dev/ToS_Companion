@@ -61,6 +61,7 @@ class LLMService:
         ]
 
         resp = _invoke(messages)
+        logger.debug("LLM raw response: %s", resp)
         if not self._coach.validate_response(resp):
             return {"validity": "NOT_VALID_FOR_TRADING", "reason_codes": ["LLM_SCHEMA_INVALID"]}
         if not validate_llm_output(resp):
@@ -69,6 +70,7 @@ class LLMService:
 
         warnings: list[str] = []
         valid, reasons, action = validate_trade_setups(payload, resp, retry_attempted=False)
+        logger.debug("Validator result valid=%s reasons=%s action=%s", valid, reasons, action)
         if action == "RETRY":
             logger.info("LLM trade validation failed; retrying with repair prompt reasons=%s", reasons)
             repair_messages = list(messages) + [
