@@ -155,6 +155,28 @@ class CompanionRuntime:
     def snapshot(self) -> dict[str, Any]:
         return self.session.snapshot()
 
+    def auth_status(self) -> dict[str, Any]:
+        """Report companion_auth availability without exposing credentials."""
+        try:
+            token = self.token_provider()
+            return {
+                "authorized": bool(token),
+                "auth_owner": "companion_auth",
+                "helper_url_configured": bool(
+                    getattr(self.token_provider, "_auth_helper_url", None)
+                ),
+            }
+        except Exception as exc:
+            logger.warning("companion_auth status check failed", exc_info=True)
+            return {
+                "authorized": False,
+                "auth_owner": "companion_auth",
+                "helper_url_configured": bool(
+                    getattr(self.token_provider, "_auth_helper_url", None)
+                ),
+                "error": type(exc).__name__,
+            }
+
     def run_llm(self, symbol: str | None = None) -> dict[str, Any]:
         selected = self.session.normalize_symbol(symbol or self.active_symbol or "")
         if not selected:
