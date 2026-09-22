@@ -61,6 +61,7 @@ def create_app(runtime: CompanionRuntime | None = None) -> FastAPI:
     @app.get("/app-20260922-7.js")
     @app.get("/app-20260922-8.js")
     @app.get("/app-20260922-9.js")
+    @app.get("/app-20260922-10.js")
     def app_js() -> FileResponse:
         return FileResponse(
             STATIC_DIR / "app.js",

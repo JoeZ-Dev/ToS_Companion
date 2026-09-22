@@ -12,6 +12,7 @@
     reconnectTimer: null,
     chartSymbol: null,
     chartRevision: null,
+    chartFitSymbol: null,
   };
 
   const EASTERN_TZ = "America/New_York";
@@ -526,6 +527,7 @@
       candleSeries.setData([]);
       state.chartSymbol = null;
       state.chartRevision = null;
+      state.chartFitSymbol = null;
       return;
     }
 
@@ -546,8 +548,13 @@
       setStructuralLines(symbolState.ae_snapshot);
       state.chartSymbol = symbol;
       state.chartRevision = revision;
-      if (symbolChanged || chartChanged) {
+
+      // Auto-fit only once when a symbol first has usable chart data.
+      // Subsequent history/live bar updates must preserve the user's
+      // manual zoom and pan range.
+      if (bars.length > 0 && state.chartFitSymbol !== symbol) {
         chart.timeScale().fitContent();
+        state.chartFitSymbol = symbol;
       }
     }
   }
@@ -572,7 +579,11 @@
     }
 
     if (event.type === "active_symbol") {
-      state.activeSymbol = event.payload?.symbol || null;
+      const nextSymbol = event.payload?.symbol || null;
+      if (nextSymbol !== state.activeSymbol) {
+        state.chartFitSymbol = null;
+      }
+      state.activeSymbol = nextSymbol;
       renderActive();
       return;
     }
