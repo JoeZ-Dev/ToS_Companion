@@ -1,0 +1,36 @@
+services:
+  tos-companion:
+    build:
+      context: ..
+      dockerfile: Dockerfile.web
+    container_name: tos-companion
+    restart: unless-stopped
+    environment:
+      AUTH_HELPER_URL: http://companion-auth:8766
+      TOS_COMPANION_HOST: 0.0.0.0
+      TOS_COMPANION_PORT: 8787
+      TOS_COMPANION_LOG_LEVEL: info
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    volumes:
+      - tos-companion-data:/home/companion/.tos_companion
+    networks:
+      - joelab-ingress
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/api/health', timeout=3).read()",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  tos-companion-data:
+
+networks:
+  joelab-ingress:
+    external: true
