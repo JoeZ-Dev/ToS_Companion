@@ -8,9 +8,11 @@ on:
     paths:
       - 'src/momentum_companion/setup_engine/pattern_engine.py'
       - 'src/momentum_companion/setup_engine/pattern_contracts.py'
+      - 'src/momentum_companion/setup_engine/pattern_service.py'
       - 'src/momentum_companion/setup_engine/patterns/**'
       - 'src/momentum_companion/setup_engine/structure/**'
       - 'tests/test_pattern_engine.py'
+      - 'tests/test_pattern_service.py'
       - '.github/workflows/pattern-engine-ci.yml'
 
 jobs:
@@ -28,4 +30,4 @@ jobs:
       - name: Run pattern tests
         env:
           PYTHONPATH: src
-        run: pytest -q tests/test_pattern_engine.py
+        run: pytest -q tests/test_pattern_engine.py tests/test_pattern_service.py
