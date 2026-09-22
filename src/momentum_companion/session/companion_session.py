@@ -49,6 +49,7 @@ class _SymbolState:
             "raw_source": None,
         }
     )
+    history_bars: list[dict[str, Any]] = field(default_factory=list)
     bars_10s: list[dict[str, Any]] = field(default_factory=list)
     ae_snapshot: dict[str, Any] | None = None
     llm_output: dict[str, Any] | None = None
@@ -185,6 +186,17 @@ class CompanionSession:
             payload = dict(self._symbols[symbol].quote)
         self._emit("quote", symbol=symbol, payload=payload)
 
+    def set_history(self, symbol: str, bars: list[Mapping[str, Any]]) -> None:
+        normalized = self.add_symbol(symbol)
+        value = [dict(bar) for bar in bars]
+        with self._lock:
+            self._symbols[normalized].history_bars = value
+        self._emit(
+            "history",
+            symbol=normalized,
+            payload={"bars": value},
+        )
+
     def ingest_bar(self, symbol: str, bar: TenSecondBar | Mapping[str, Any]) -> None:
         normalized = self.add_symbol(symbol)
         if is_dataclass(bar):
@@ -233,6 +245,7 @@ class CompanionSession:
                 symbol: {
                     "symbol": state.symbol,
                     "quote": dict(state.quote),
+                    "history_bars": [dict(bar) for bar in state.history_bars],
                     "bars_10s": [dict(bar) for bar in state.bars_10s],
                     "ae_snapshot": (
                         dict(state.ae_snapshot) if state.ae_snapshot is not None else None
