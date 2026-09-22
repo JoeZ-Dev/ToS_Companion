@@ -73,6 +73,10 @@ def create_app(runtime: CompanionRuntime | None = None) -> FastAPI:
     def state() -> dict[str, Any]:
         return companion.snapshot()
 
+    @app.get("/api/readiness")
+    def readiness() -> dict[str, Any]:
+        return companion.readiness()
+
     @app.get("/api/auth/status")
     def auth_status() -> dict[str, Any]:
         return companion.auth_status()
