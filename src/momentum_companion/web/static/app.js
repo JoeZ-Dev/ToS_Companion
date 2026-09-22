@@ -10,6 +10,8 @@
     symbols: {},
     socket: null,
     reconnectTimer: null,
+    chartSymbol: null,
+    chartRevision: null,
   };
 
   const EASTERN_TZ = "America/New_York";
@@ -77,7 +79,30 @@
     };
   }
 
-  function renderActive() {
+  function mergedBars(symbolState) {
+    const byTime = new Map();
+    for (const source of [symbolState?.history_bars || [], symbolState?.bars_10s || []]) {
+      for (const raw of source) {
+        if (!raw || (raw.time === undefined && raw.ts === undefined)) continue;
+        const bar = normalizeBar(raw);
+        if (
+          !Number.isFinite(bar.time) ||
+          !Number.isFinite(bar.open) ||
+          !Number.isFinite(bar.high) ||
+          !Number.isFinite(bar.low) ||
+          !Number.isFinite(bar.close)
+        ) {
+          continue;
+        }
+        // Live 10-second evidence is processed after REST history, so if an
+        // exact timestamp collides it wins deterministically.
+        byTime.set(bar.time, bar);
+      }
+    }
+    return [...byTime.values()].sort((a, b) => a.time - b.time);
+  }
+
+  function renderActive({ chartChanged = false } = {}) {
     const symbol = state.activeSymbol;
     const symbolState = symbol ? state.symbols[symbol] : null;
     const quote = symbolState?.quote || {};
@@ -94,14 +119,23 @@
       ? JSON.stringify(symbolState.llm_output, null, 2)
       : "Not run.";
 
-    const history = symbolState?.history_bars || [];
-    const live = symbolState?.bars_10s || [];
-    const all = [...history, ...live]
-      .filter((bar) => bar && (bar.time !== undefined || bar.ts !== undefined))
-      .map(normalizeBar)
-      .filter((bar) => Number.isFinite(bar.time) && Number.isFinite(bar.close));
+    if (!symbolState) {
+      candleSeries.setData([]);
+      state.chartSymbol = null;
+      state.chartRevision = null;
+      return;
+    }
 
-    candleSeries.setData(all);
+    const revision = `${symbolState.history_bars?.length || 0}:${symbolState.bars_10s?.length || 0}`;
+    const symbolChanged = state.chartSymbol !== symbol;
+    if (chartChanged || symbolChanged || state.chartRevision !== revision) {
+      candleSeries.setData(mergedBars(symbolState));
+      state.chartSymbol = symbol;
+      state.chartRevision = revision;
+      if (symbolChanged || chartChanged) {
+        chart.timeScale().fitContent();
+      }
+    }
   }
 
   function applySnapshot(snapshot) {
@@ -109,7 +143,7 @@
     state.symbols = snapshot.symbols || {};
     byId("connection-state").textContent = snapshot.connection_state || "UNKNOWN";
     byId("recorder").textContent = JSON.stringify(snapshot.recorder_state || {}, null, 2);
-    renderActive();
+    renderActive({ chartChanged: true });
   }
 
   function applyEvent(event) {
@@ -139,15 +173,18 @@
       };
     }
 
+    let chartChanged = false;
     if (event.type === "quote" && symbol) {
       state.symbols[symbol].quote = event.payload || {};
     } else if (event.type === "history" && symbol) {
       state.symbols[symbol].history_bars = event.payload?.bars || [];
+      chartChanged = true;
     } else if (event.type === "completed_bar" && symbol) {
       state.symbols[symbol].bars_10s.push(event.payload);
       if (state.symbols[symbol].bars_10s.length > 600) {
         state.symbols[symbol].bars_10s.shift();
       }
+      chartChanged = true;
     } else if (event.type === "analysis_snapshot" && symbol) {
       state.symbols[symbol].ae_snapshot = event.payload?.snapshot || null;
     } else if (event.type === "llm_update" && symbol) {
@@ -156,7 +193,7 @@
       byId("recorder").textContent = JSON.stringify(event.payload || {}, null, 2);
     }
 
-    if (!symbol || symbol === state.activeSymbol) renderActive();
+    if (!symbol || symbol === state.activeSymbol) renderActive({ chartChanged });
   }
 
   async function refreshAuthStatus() {
