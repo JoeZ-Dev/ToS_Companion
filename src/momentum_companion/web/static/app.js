@@ -147,6 +147,50 @@
     };
   }
 
+  byId("record-start").addEventListener("click", async () => {
+    const raw = byId("recorder-symbols").value.trim();
+    const symbols = raw
+      .split(",")
+      .map((value) => value.trim().toUpperCase())
+      .filter(Boolean);
+    if (!symbols.length && state.activeSymbol) symbols.push(state.activeSymbol);
+    if (!symbols.length) {
+      byId("server-message").textContent = "Enter at least one recorder symbol.";
+      byId("server-message").classList.add("error");
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/recording/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbols }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || "Recorder start failed");
+      byId("recorder").textContent = JSON.stringify(payload, null, 2);
+      byId("server-message").textContent = `Recording ${symbols.join(", ")} until 3:00 PM ET.`;
+      byId("server-message").classList.remove("error");
+    } catch (error) {
+      byId("server-message").textContent = error.message;
+      byId("server-message").classList.add("error");
+    }
+  });
+
+  byId("record-stop").addEventListener("click", async () => {
+    try {
+      const response = await fetch("/api/recording/stop", { method: "POST" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || "Recorder stop failed");
+      byId("recorder").textContent = JSON.stringify(payload, null, 2);
+      byId("server-message").textContent = "Recording stopped.";
+      byId("server-message").classList.remove("error");
+    } catch (error) {
+      byId("server-message").textContent = error.message;
+      byId("server-message").classList.add("error");
+    }
+  });
+
   byId("symbol-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const input = byId("symbol-input");
