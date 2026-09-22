@@ -38,7 +38,11 @@ def test_timesales_requires_explicit_experimental_opt_in():
 
 
 def test_recorder_routes_each_stream_entry_to_its_symbol_file(tmp_path: Path):
-    recorder = MarketDayRecorder(["AEHL", "TOPS"], output_root=tmp_path)
+    recorder = MarketDayRecorder(
+        ["AEHL", "TOPS"],
+        output_root=tmp_path,
+        services={"LEVELONE_EQUITIES", "TIMESALE_EQUITY"},
+    )
     payload = {
         "data": [
             {
@@ -73,3 +77,13 @@ def test_non_recorded_services_are_ignored(tmp_path: Path):
     recorder.close()
 
     assert not (recorder.session_dir / "AEHL.jsonl").exists()
+
+
+def test_default_manifest_declares_level_one_only(tmp_path: Path):
+    recorder = MarketDayRecorder(["AEHL"], output_root=tmp_path)
+    recorder.close()
+
+    import json
+    manifest = json.loads((recorder.session_dir / "manifest.json").read_text())
+    assert manifest["services"] == ["LEVELONE_EQUITIES"]
+    assert "TIMESALE_EQUITY" not in manifest["counts"]["AEHL"]
