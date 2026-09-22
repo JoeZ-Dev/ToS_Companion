@@ -1,4 +1,17 @@
-from momentum_companion.setup_engine.patterns.ascending_triangle import detect_ascending_triangle
-from momentum_companion.setup_engine.patterns.micro_pullback import detect_micro_pullback
+from momentum_companion.setup_engine.pattern_engine import PatternEngine
+from momentum_companion.setup_engine.patterns.ascending_triangle import AscendingTriangleDetector
+from momentum_companion.setup_engine.patterns.micro_pullback import MicroPullbackDetector
 
-__all__ = ["detect_ascending_triangle", "detect_micro_pullback"]
+
+def build_default_pattern_engine() -> PatternEngine:
+    engine = PatternEngine()
+    engine.register(AscendingTriangleDetector())
+    engine.register(MicroPullbackDetector())
+    return engine
+
+
+__all__ = [
+    "AscendingTriangleDetector",
+    "MicroPullbackDetector",
+    "build_default_pattern_engine",
+]
