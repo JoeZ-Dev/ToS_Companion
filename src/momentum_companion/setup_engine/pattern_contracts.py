@@ -5,11 +5,6 @@ from enum import Enum
 from typing import Any
 
 
-class PatternType(str, Enum):
-    ASCENDING_TRIANGLE = "ASCENDING_TRIANGLE"
-    MICRO_PULLBACK = "MICRO_PULLBACK"
-
-
 class PatternState(str, Enum):
     FORMING = "FORMING"
     VALID = "VALID"
@@ -39,7 +34,7 @@ class PatternLine:
 @dataclass
 class PatternObservation:
     symbol: str
-    pattern_type: PatternType
+    pattern_type: str
     state: PatternState
     started_at: int
     updated_at: int
@@ -49,11 +44,11 @@ class PatternObservation:
 
     @property
     def id(self) -> str:
-        return f"{self.symbol}:{self.pattern_type.value}:{self.started_at}"
+        return f"{self.symbol}:{self.pattern_type}:{self.started_at}"
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["id"] = self.id
-        payload["pattern_type"] = self.pattern_type.value
+        payload["pattern_type"] = self.pattern_type
         payload["state"] = self.state.value
         return payload
