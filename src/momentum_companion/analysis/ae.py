@@ -732,9 +732,24 @@ class AEEngine:
                 open_start = datetime(now_et.year, now_et.month, now_et.day, 9, 30, tzinfo=ET_TZ)
                 open_end = open_start + timedelta(minutes=1)
                 if now_et.time() >= open_start.time():
-                    bar_resp = self._rest.fetch_price_history(proxy, int(open_start.timestamp() * 1000), int(open_end.timestamp() * 1000), "1m")
+                    bar_resp = self._rest.fetch_price_history(
+                        proxy,
+                        int(open_start.timestamp() * 1000),
+                        int(open_end.timestamp() * 1000),
+                        "1m",
+                    )
                     bar_candles = bar_resp.get("candles") or []
-                    open_bar = sorted(bar_candles, key=lambda c: c.get("datetime", 0))[0] if bar_candles else None
+                    open_bar = None
+                    for candle in sorted(bar_candles, key=lambda c: c.get("datetime", 0)):
+                        ts = candle.get("datetime")
+                        if ts is None:
+                            continue
+                        candle_et = datetime.fromtimestamp(
+                            int(ts) / 1000, tz=timezone.utc
+                        ).astimezone(ET_TZ)
+                        if candle_et.hour == 9 and candle_et.minute == 30:
+                            open_bar = candle
+                            break
                     if open_bar and open_bar.get("open") is not None:
                         baseline = float(open_bar.get("open"))
                 if baseline <= 0:
