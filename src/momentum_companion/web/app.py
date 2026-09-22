@@ -50,6 +50,7 @@ def create_app(runtime: CompanionRuntime | None = None) -> FastAPI:
         return FileResponse(STATIC_DIR / "index.html", headers=no_store)
 
     @app.get("/app.js")
+    @app.get("/app-20260922.js")
     def app_js() -> FileResponse:
         return FileResponse(
             STATIC_DIR / "app.js",
@@ -58,6 +59,7 @@ def create_app(runtime: CompanionRuntime | None = None) -> FastAPI:
         )
 
     @app.get("/styles.css")
+    @app.get("/styles-20260922.css")
     def styles() -> FileResponse:
         return FileResponse(
             STATIC_DIR / "styles.css",
@@ -66,6 +68,7 @@ def create_app(runtime: CompanionRuntime | None = None) -> FastAPI:
         )
 
     @app.get("/vendor/lightweight-charts.js")
+    @app.get("/vendor/lightweight-charts-20260922.js")
     def lightweight_charts() -> FileResponse:
         return FileResponse(
             LIGHTWEIGHT_CHARTS_JS,
