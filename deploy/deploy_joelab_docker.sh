@@ -57,6 +57,18 @@ if [[ "$status" != "healthy" ]]; then
   exit 6
 fi
 
+echo "Verifying persistent mounts..."
+mount_destinations="$(
+  docker inspect tos-companion     --format '{{range .Mounts}}{{println .Destination}}{{end}}'
+)"
+for required_mount in   /home/companion/.tos_companion   /home/companion/.local/share/MomentumTradingCompanion
+do
+  if ! grep -Fxq "$required_mount" <<<"$mount_destinations"; then
+    echo "ERROR: required persistent mount is missing: $required_mount" >&2
+    exit 7
+  fi
+done
+
 echo "Checking internal ingress-network health..."
 health_json="$(
   docker run --rm --network joelab-ingress curlimages/curl:latest     --fail --silent --show-error http://tos-companion:8787/api/health
