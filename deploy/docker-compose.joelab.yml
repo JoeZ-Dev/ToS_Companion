@@ -11,10 +11,12 @@ services:
       TOS_COMPANION_HOST: 0.0.0.0
       TOS_COMPANION_PORT: 8787
       TOS_COMPANION_LOG_LEVEL: info
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      TOS_CODEX_BRIDGE_SOCKET: /run/tos-codex/bridge.sock
+      TOS_CODEX_TIMEOUT_SECONDS: 120
     volumes:
       - tos-companion-data:/home/companion/.tos_companion
       - /srv/data/tos-companion/state:/home/companion/.local/share/MomentumTradingCompanion
+      - /srv/data/tos-companion/codex-bridge:/run/tos-codex
     networks:
       - joelab-ingress
     healthcheck:

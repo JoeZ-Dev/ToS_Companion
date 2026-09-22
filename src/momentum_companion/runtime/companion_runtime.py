@@ -18,7 +18,7 @@ from momentum_companion.clients.token_provider import TokenProvider
 from momentum_companion.data.bar_aggregator import BarAggregator10s, TenSecondBar
 from momentum_companion.data.contracts import QuoteEvent
 from momentum_companion.data.price_update import PriceUpdate
-from momentum_companion.llm.client import LLMClient
+from momentum_companion.llm.codex_bridge_client import CodexBridgeClient
 from momentum_companion.llm.coach import LLMCoach
 from momentum_companion.llm.service import LLMService
 from momentum_companion.recording.history import (
@@ -65,19 +65,16 @@ class CompanionRuntime:
         setattr(self.token_provider, "rest_client", self.rest)
 
         self.llm_coach = LLMCoach()
-        api_key = os.getenv("OPENAI_API_KEY") or self.app_state.get_secret("openai_api_key")
-        llm_client = (
-            LLMClient(
-                api_key=api_key,
-                model=self.app_state.get("llm_full_model") or "gpt-4o",
-                mode=os.getenv("LLM_MODE", "live"),
-            )
-            if api_key
-            else None
+        self._llm_client = CodexBridgeClient(
+            socket_path=os.getenv(
+                "TOS_CODEX_BRIDGE_SOCKET",
+                "/run/tos-codex/bridge.sock",
+            ),
+            timeout_seconds=float(os.getenv("TOS_CODEX_TIMEOUT_SECONDS", "120")),
         )
         self.llm_service = LLMService(
             self.llm_coach,
-            client=llm_client,
+            client=self._llm_client,
             journal=self.journal,
             state_callback=self._on_llm_state,
         )
@@ -193,9 +190,9 @@ class CompanionRuntime:
         snapshot = symbol_state.get("ae_snapshot")
         if not isinstance(snapshot, dict):
             raise ValueError(f"no AE snapshot available for {selected}")
-        if getattr(self.llm_service, "_client", None) is None:
+        if not self._llm_client.is_available():
             raise ValueError(
-                "OpenAI API key is not configured on the joelab service"
+                "Host Codex CLI bridge is unavailable or not authenticated"
             )
 
         quote = symbol_state.get("quote") or {}
@@ -211,7 +208,7 @@ class CompanionRuntime:
             snapshot,
             session_mode,
             quote,
-            model_override=self.app_state.get("llm_full_model") or "gpt-4o",
+            model_override=None,
             messages_override=messages,
         )
         self.session.update_llm_output(selected, result)
@@ -476,7 +473,9 @@ class CompanionRuntime:
             "auth_owner": "companion_auth",
             "companion_auth_authorized": bool(auth.get("authorized")),
             "companion_auth_helper_configured": bool(auth.get("helper_url_configured")),
-            "llm_configured": getattr(self.llm_service, "_client", None) is not None,
+            "llm_configured": self._llm_client.is_available(),
+            "llm_provider": "codex_cli_bridge",
+            "llm_socket": str(self._llm_client.socket_path),
             "db_path": str(self.db_path),
             "recordings_root": str(Path.home() / ".tos_companion" / "recordings"),
             "session_mode": self.session_mode(),

@@ -55,17 +55,20 @@ jobs:
           pip install pytest
       - name: Validate browser foundation
         run: |
-          python -m compileall -q src/momentum_companion/session src/momentum_companion/runtime src/momentum_companion/recording src/momentum_companion/web
+          python -m compileall -q src/momentum_companion/session src/momentum_companion/runtime src/momentum_companion/recording src/momentum_companion/llm src/momentum_companion/web
           pytest -q \
             tests/test_companion_session.py \
             tests/test_companion_runtime.py \
             tests/test_web_app.py \
             tests/test_stream_raw_recording.py \
-            tests/test_market_day_recorder.py
+            tests/test_market_day_recorder.py \
+            tests/test_codex_bridge_client.py
       - name: Validate joelab deployment scripts
         run: |
           bash -n deploy/deploy_joelab_docker.sh
+          bash -n deploy/install_codex_bridge.sh
           bash -n deploy/validate_recorder.sh
+          python -m py_compile deploy/codex_bridge.py
       - name: Validate joelab Docker Compose
         run: |
           cp deploy/joelab.env.example deploy/joelab.env

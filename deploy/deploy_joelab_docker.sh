@@ -5,6 +5,7 @@ REPO_DIR="${REPO_DIR:-/srv/apps/ToS_Companion}"
 COMPOSE_FILE="${COMPOSE_FILE:-deploy/docker-compose.joelab.yml}"
 ENV_FILE="${ENV_FILE:-deploy/joelab.env}"
 STATE_DIR="${STATE_DIR:-/srv/data/tos-companion/state}"
+CODEX_BRIDGE_DIR="${CODEX_BRIDGE_DIR:-/srv/data/tos-companion/codex-bridge}"
 
 cd "$REPO_DIR"
 
@@ -32,6 +33,9 @@ fi
 echo "Preparing persistent runtime state at $STATE_DIR..."
 sudo mkdir -p "$STATE_DIR"
 sudo chown 10001:10001 "$STATE_DIR"
+
+echo "Preparing host Codex bridge directory at $CODEX_BRIDGE_DIR..."
+sudo install -d -o "$(id -u)" -g 10001 -m 2770 "$CODEX_BRIDGE_DIR"
 
 echo "Validating compose configuration..."
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config >/dev/null
@@ -74,6 +78,10 @@ if ! grep -Fqx "$STATE_DIR -> /home/companion/.local/share/MomentumTradingCompan
   echo "ERROR: runtime state is not bound from $STATE_DIR." >&2
   exit 8
 fi
+if ! grep -Fqx "$CODEX_BRIDGE_DIR -> /run/tos-codex" <<<"$mount_pairs"; then
+  echo "ERROR: Codex bridge directory is not mounted from $CODEX_BRIDGE_DIR." >&2
+  exit 9
+fi
 
 echo "Checking internal ingress-network health..."
 health_json="$(
@@ -87,6 +95,10 @@ readiness_json="$(
   docker run --rm --network joelab-ingress curlimages/curl:latest     --fail --silent --show-error http://tos-companion:8787/api/readiness
 )"
 echo "$readiness_json"
+
+if ! python3 -c 'import json,sys; raise SystemExit(0 if json.load(sys.stdin).get("llm_configured") else 1)' <<<"$readiness_json"; then
+  echo "WARNING: host Codex CLI bridge is not available; Run LLM will remain disabled until it is installed/authenticated." >&2
+fi
 
 echo
 echo "Deployment complete."

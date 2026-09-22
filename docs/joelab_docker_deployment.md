@@ -139,13 +139,37 @@ The joelab deployment uses:
 
 The deployment helper creates `/srv/data/tos-companion/state` and assigns it to the container's non-root UID before startup. Runtime state therefore lives in joelab's standard `/srv/data` hierarchy and survives container replacement and rebuilds.
 
-## LLM integration direction
+## LLM integration: host Codex CLI bridge
 
-The current browser foundation still contains the legacy direct OpenAI API-key client, but this is transitional only.
+The joelab/browser runtime does not use `OPENAI_API_KEY`.
 
-The joelab/browser implementation is planned to move to the same CLI-style OpenAI authentication/execution pattern used by the user's newer applications, rather than requiring a long-lived `OPENAI_API_KEY` in `deploy/joelab.env`.
+It follows the same host-authenticated Codex CLI pattern used by the newer Fred runtime:
 
-Until that refactor is implemented and validated, browser LLM analysis should be treated as optional and may remain unconfigured. Do not migrate the encrypted desktop API-key secret to joelab; AppState encryption is machine-bound.
+```text
+browser
+  -> tos-companion container
+     -> Unix socket /run/tos-codex/bridge.sock
+        -> host bridge running as joe
+           -> authenticated codex exec
+        <- strict structured JSON
+     <- existing deterministic ToS LLM validation
+```
+
+Codex credentials stay on the joelab host and are never mounted into Docker or sent to the browser. The bridge uses an ephemeral, read-only Codex execution with a finite timeout and a checked-in output schema.
+
+After pulling the branch, install or refresh the host service while logged in as the user whose Codex CLI is authenticated:
+
+```bash
+cd /srv/apps/ToS_Companion
+codex login status
+bash deploy/install_codex_bridge.sh
+```
+
+The installer creates `/srv/data/tos-companion/codex-bridge`, installs a systemd service running as the current host user, and starts the bridge. Docker mounts that directory at `/run/tos-codex`.
+
+Expected readiness includes `"llm_configured": true` and `"llm_provider": "codex_cli_bridge"`.
+
+The existing direct HTTP/API-key client remains in the codebase only for desktop compatibility and tests; the joelab browser runtime no longer selects it.
 
 ## Browser order controls
 
