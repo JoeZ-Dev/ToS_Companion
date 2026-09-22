@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ToS Companion</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/vendor/lightweight-charts.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">ToS Companion</div>
+    <form id="symbol-form" class="symbol-form">
+      <input id="symbol-input" autocomplete="off" maxlength="10" placeholder="SYMBOL">
+      <button type="submit">Load</button>
+    </form>
+    <div id="connection-state" class="status">DISCONNECTED</div>
+  </header>
+
+  <main>
+    <section class="quote-strip">
+      <div><span>Symbol</span><strong id="symbol">--</strong></div>
+      <div><span>Bid</span><strong id="bid">--</strong></div>
+      <div><span>Ask</span><strong id="ask">--</strong></div>
+      <div><span>Last</span><strong id="last">--</strong></div>
+      <div><span>Volume</span><strong id="volume">--</strong></div>
+    </section>
+
+    <section class="workspace">
+      <div class="chart-card">
+        <div id="chart"></div>
+      </div>
+      <aside>
+        <section class="panel">
+          <h2>Analysis</h2>
+          <pre id="analysis">No analysis snapshot yet.</pre>
+        </section>
+        <section class="panel">
+          <h2>Recorder</h2>
+          <pre id="recorder">Inactive</pre>
+        </section>
+        <section class="panel">
+          <h2>Server</h2>
+          <div id="server-message">Connecting...</div>
+          <div class="auth-note">Schwab auth owner: companion_auth</div>
+        </section>
+      </aside>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
