@@ -91,6 +91,7 @@ class CompanionRuntime:
         self._recorder: MarketDayRecorder | None = None
         self._recording_symbols: set[str] = set()
         self._recorder_cutoff_thread: threading.Thread | None = None
+        self._last_recorder_state_emit = 0.0
 
     @property
     def active_symbol(self) -> str | None:
@@ -432,6 +433,13 @@ class CompanionRuntime:
                 raise RuntimeError("no recording session is active")
             recorder.remove_symbol(normalized)
             self._recording_symbols = set(recorder.active_symbols())
+            stream = self._stream
+            active_symbol = self._active_symbol
+        if stream is not None and normalized != active_symbol:
+            try:
+                stream.unsubscribe(normalized)
+            except Exception:
+                logger.warning("Recording symbol unsubscribe failed for %s", normalized, exc_info=True)
         self._refresh_stream_subscription()
         state = recorder.state()
         self.session.update_recorder_state(state)
@@ -464,6 +472,10 @@ class CompanionRuntime:
             return
         try:
             recorder.record_payload(payload)
+            now = time.monotonic()
+            if now - self._last_recorder_state_emit >= 5.0:
+                self._last_recorder_state_emit = now
+                self.session.update_recorder_state(recorder.state())
         except RuntimeError:
             pass
         except Exception:

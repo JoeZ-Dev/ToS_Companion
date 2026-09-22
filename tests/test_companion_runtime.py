@@ -10,9 +10,13 @@ from momentum_companion.session import CompanionSession
 class FakeStream:
     def __init__(self):
         self.symbol_sets = []
+        self.unsubscribed = []
 
     def subscribe_level_one_symbols(self, symbols):
         self.symbol_sets.append(list(symbols))
+
+    def unsubscribe(self, symbol):
+        self.unsubscribed.append(symbol)
 
 
 class FakeRecorder:
@@ -247,7 +251,9 @@ def test_completed_bar_updates_patterns_and_preserves_ae_processing():
     assert runtime.ae_engine.bars == [bar]
 
 
-def test_runtime_add_remove_recording_symbol_refreshes_stream_union():
+def test_runtime_add_remove_recording_symbol_refreshes_stream_union(monkeypatch):
+    import momentum_companion.runtime.companion_runtime as runtime_module
+    monkeypatch.setattr(runtime_module, "reached_cutoff", lambda: False)
     runtime = bare_runtime()
     recorder = FakeRecorder()
     runtime._recorder = recorder
@@ -259,4 +265,5 @@ def test_runtime_add_remove_recording_symbol_refreshes_stream_union():
 
     removed = runtime.remove_recording_symbol("TOPS")
     assert removed["active_symbols"] == []
+    assert runtime._stream.unsubscribed[-1] == "TOPS"
     assert runtime._stream.symbol_sets[-1] == ["AEHL"]

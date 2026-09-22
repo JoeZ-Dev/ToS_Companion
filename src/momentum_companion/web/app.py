@@ -8,14 +8,14 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from momentum_companion.runtime import CompanionRuntime
 
 
 STATIC_DIR = Path(__file__).with_name("static")
 class RecordingRequest(BaseModel):
-    symbols: list[str] = []
+    symbols: list[str] = Field(default_factory=list)
 
 
 class RecordingSymbolRequest(BaseModel):
