@@ -1,0 +1,113 @@
+from __future__ import annotations
+
+import asyncio
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any
+
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
+
+from momentum_companion.runtime import CompanionRuntime
+
+
+STATIC_DIR = Path(__file__).with_name("static")
+LIGHTWEIGHT_CHARTS_JS = (
+    Path(__file__).resolve().parents[1]
+    / "ui"
+    / "assets"
+    / "lightweight-charts.standalone.production.js"
+)
+
+
+def create_app(runtime: CompanionRuntime | None = None) -> FastAPI:
+    companion = runtime or CompanionRuntime()
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        companion.start()
+        try:
+            yield
+        finally:
+            companion.stop()
+
+    app = FastAPI(
+        title="ToS Companion",
+        version="0.1.0-web",
+        lifespan=lifespan,
+    )
+    app.state.runtime = companion
+
+    @app.get("/")
+    def index() -> FileResponse:
+        return FileResponse(STATIC_DIR / "index.html")
+
+    @app.get("/app.js")
+    def app_js() -> FileResponse:
+        return FileResponse(STATIC_DIR / "app.js", media_type="application/javascript")
+
+    @app.get("/styles.css")
+    def styles() -> FileResponse:
+        return FileResponse(STATIC_DIR / "styles.css", media_type="text/css")
+
+    @app.get("/vendor/lightweight-charts.js")
+    def lightweight_charts() -> FileResponse:
+        return FileResponse(LIGHTWEIGHT_CHARTS_JS, media_type="application/javascript")
+
+    @app.get("/api/health")
+    def health() -> dict[str, Any]:
+        state = companion.snapshot()
+        return {
+            "ok": True,
+            "connection_state": state["connection_state"],
+            "active_symbol": state["active_symbol"],
+            "auth_owner": "companion_auth",
+        }
+
+    @app.get("/api/state")
+    def state() -> dict[str, Any]:
+        return companion.snapshot()
+
+    @app.post("/api/symbol/{symbol}")
+    def select_symbol(symbol: str) -> dict[str, Any]:
+        try:
+            return companion.select_symbol(symbol)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"symbol selection failed: {type(exc).__name__}") from exc
+
+    @app.websocket("/ws")
+    async def websocket_endpoint(websocket: WebSocket) -> None:
+        await websocket.accept()
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=500)
+
+        def subscriber(event: dict[str, Any]) -> None:
+            def enqueue() -> None:
+                if queue.full():
+                    try:
+                        queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        pass
+                try:
+                    queue.put_nowait(event)
+                except asyncio.QueueFull:
+                    pass
+
+            loop.call_soon_threadsafe(enqueue)
+
+        unsubscribe = companion.session.subscribe(subscriber)
+        try:
+            await websocket.send_json(
+                {"type": "snapshot", "payload": companion.snapshot()}
+            )
+            while True:
+                event = await queue.get()
+                await websocket.send_json(event)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            unsubscribe()
+
+    return app
