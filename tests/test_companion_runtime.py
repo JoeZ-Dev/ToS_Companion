@@ -59,6 +59,7 @@ def bare_runtime():
     runtime._recording_symbols = {"TOPS", "DDC"}
     runtime._stream = FakeStream()
     runtime._recorder = None
+    runtime._et_tz = ZoneInfo("America/New_York")
     return runtime
 
 
@@ -86,7 +87,6 @@ def test_headless_llm_updates_session_state():
     runtime.app_state = FakeAppState()
     runtime.llm_coach = FakeCoach()
     runtime.llm_service = FakeLLMService()
-    runtime.is_intraday_window = lambda: True
 
     runtime.session.add_symbol("AEHL", make_active=True)
     runtime.session.ingest_quote(
