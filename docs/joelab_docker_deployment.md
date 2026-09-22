@@ -133,34 +133,33 @@ There is no Windows rebuild/copy/relaunch loop.
 
 ## Persistent data
 
-The compose project uses the named volume:
+The compose project uses two named volumes:
 
 ```text
 tos-companion-data
+tos-companion-state
 ```
 
 mounted at:
 
 ```text
 /home/companion/.tos_companion
+/home/companion/.local/share/MomentumTradingCompanion
 ```
 
-This persists:
-- SQLite state/journal data;
-- recordings;
-- application state
+This separates and persists:
+- recorder/session files under `.tos_companion`;
+- SQLite state, journal, and application state under the platform data directory.
 
-across container rebuilds.
+Both survive container replacement and rebuilds.
 
-## OpenAI key
+## LLM integration direction
 
-If browser-side manual LLM analysis is desired, set `OPENAI_API_KEY` in:
+The current browser foundation still contains the legacy direct OpenAI API-key client, but this is transitional only.
 
-```text
-deploy/joelab.env
-```
+The joelab/browser implementation is planned to move to the same CLI-style OpenAI authentication/execution pattern used by the user's newer applications, rather than requiring a long-lived `OPENAI_API_KEY` in `deploy/joelab.env`.
 
-Do not copy the encrypted desktop database secret to joelab because AppState encryption is machine-bound.
+Until that refactor is implemented and validated, browser LLM analysis should be treated as optional and may remain unconfigured. Do not migrate the encrypted desktop API-key secret to joelab; AppState encryption is machine-bound.
 
 ## Browser order controls
 
