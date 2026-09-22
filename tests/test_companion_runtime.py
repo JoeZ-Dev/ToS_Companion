@@ -1,3 +1,5 @@
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import threading
 
 from momentum_companion.runtime import CompanionRuntime
@@ -111,3 +113,13 @@ def test_headless_llm_updates_session_state():
     assert result["stock_bias"] == "NO_EDGE"
     assert runtime.session.snapshot()["symbols"]["AEHL"]["llm_output"] == result
     assert runtime.llm_service.calls[0]["model_override"] == "test-model"
+
+
+def test_session_mode_distinguishes_premarket_rth_and_postmarket():
+    runtime = bare_runtime()
+    runtime._et_tz = ZoneInfo("America/New_York")
+
+    assert runtime.session_mode(datetime(2026, 9, 22, 8, 0, tzinfo=runtime._et_tz)) == "PRE"
+    assert runtime.session_mode(datetime(2026, 9, 22, 10, 0, tzinfo=runtime._et_tz)) == "RTH"
+    assert runtime.session_mode(datetime(2026, 9, 22, 17, 0, tzinfo=runtime._et_tz)) == "POST"
+    assert runtime.session_mode(datetime(2026, 9, 22, 21, 0, tzinfo=runtime._et_tz)) == "CLOSED"
