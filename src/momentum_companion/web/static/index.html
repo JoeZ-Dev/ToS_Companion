@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ToS Companion</title>
-  <link rel="stylesheet" href="/styles-20260922.css">
+  <link rel="stylesheet" href="/styles-20260922-2.css">
   <script src="/vendor/lightweight-charts-20260922.js"></script>
 </head>
 <body>
@@ -38,34 +38,99 @@
         </div>
         <div id="chart"></div>
       </div>
-      <aside>
-        <section class="panel">
-          <div class="panel-heading">
-            <h2>Analysis</h2>
-            <button id="llm-run" type="button">Run LLM</button>
+
+      <aside class="analysis-shell">
+        <div class="analysis-toolbar">
+          <div class="tabs" role="tablist" aria-label="Analysis views">
+            <button class="tab-button active" type="button" data-tab="analysis">Analysis</button>
+            <button class="tab-button" type="button" data-tab="setups">Setups</button>
+            <button class="tab-button" type="button" data-tab="raw">Raw</button>
           </div>
-          <pre id="analysis">No analysis snapshot yet.</pre>
-          <h2 class="subhead">LLM</h2>
-          <pre id="llm-output">Not run.</pre>
+          <button id="llm-run" class="run-llm" type="button">Run LLM</button>
+        </div>
+
+        <section id="tab-analysis" class="tab-panel active">
+          <section class="analysis-card">
+            <div class="section-title">Market State</div>
+            <div id="market-state" class="chip-grid">
+              <span class="muted-copy">No analysis snapshot yet.</span>
+            </div>
+          </section>
+
+          <section class="analysis-card">
+            <div class="section-title">Key Metrics</div>
+            <div id="key-metrics" class="metric-grid"></div>
+          </section>
+
+          <section class="analysis-card">
+            <div class="section-title">Key Levels</div>
+            <div class="level-table-wrap">
+              <table class="level-table">
+                <thead>
+                  <tr><th>Level</th><th>Price</th><th>Distance</th></tr>
+                </thead>
+                <tbody id="key-levels"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="analysis-card">
+            <div class="section-title">LLM Summary</div>
+            <div id="llm-summary" class="summary-copy">Not run.</div>
+          </section>
+
+          <section class="analysis-card">
+            <div class="section-heading-row">
+              <div class="section-title">Trade Setups</div>
+              <button id="view-all-setups" class="text-button" type="button">View all</button>
+            </div>
+            <div id="setup-preview" class="setup-preview"></div>
+          </section>
         </section>
-        <section class="panel">
-          <h2>Recorder</h2>
-          <div class="recorder-controls">
-            <input id="recorder-symbols" placeholder="AEHL,TOPS">
-            <button id="record-start" type="button">Start</button>
-            <button id="record-stop" type="button">Stop</button>
-          </div>
-          <pre id="recorder">Inactive</pre>
+
+        <section id="tab-setups" class="tab-panel">
+          <section class="analysis-card setups-card">
+            <div class="section-heading-row">
+              <div class="section-title">Trade Setups</div>
+              <div id="setup-count" class="count-badge">0</div>
+            </div>
+            <div id="setup-list" class="setup-list">
+              <div class="muted-copy">Run LLM analysis to populate setups.</div>
+            </div>
+          </section>
         </section>
-        <section class="panel">
-          <h2>Server</h2>
-          <div id="server-message">Connecting...</div>
-          <div id="auth-status" class="auth-note">Schwab auth: checking companion_auth...</div>
+
+        <section id="tab-raw" class="tab-panel">
+          <section class="analysis-card">
+            <div class="section-title">Analysis Engine JSON</div>
+            <pre id="analysis-raw">No analysis snapshot yet.</pre>
+          </section>
+
+          <section class="analysis-card">
+            <div class="section-title">LLM JSON</div>
+            <pre id="llm-raw">Not run.</pre>
+          </section>
+
+          <section class="analysis-card">
+            <div class="section-title">Recorder</div>
+            <div class="recorder-controls">
+              <input id="recorder-symbols" placeholder="AEHL,TOPS">
+              <button id="record-start" type="button">Start</button>
+              <button id="record-stop" type="button">Stop</button>
+            </div>
+            <pre id="recorder">Inactive</pre>
+          </section>
+
+          <section class="analysis-card">
+            <div class="section-title">Server</div>
+            <div id="server-message">Connecting...</div>
+            <div id="auth-status" class="auth-note">Schwab auth: checking companion_auth...</div>
+          </section>
         </section>
       </aside>
     </section>
   </main>
 
-  <script src="/app-20260922-6.js"></script>
+  <script src="/app-20260922-7.js"></script>
 </body>
 </html>

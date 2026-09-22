@@ -209,6 +209,174 @@
     return [...byTime.values()].sort((a, b) => a.time - b.time);
   }
 
+  const escapeHtml = (value) => String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+
+  function fmtMaybePrice(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number.toFixed(2) : "--";
+  }
+
+  function fmtMaybePct(value, digits = 2) {
+    const number = Number(value);
+    return Number.isFinite(number) ? `${number.toFixed(digits)}%` : "--";
+  }
+
+  function distanceFromLast(price, last) {
+    const p = Number(price);
+    const l = Number(last);
+    if (!Number.isFinite(p) || !Number.isFinite(l) || l === 0) return null;
+    return ((p - l) / l) * 100;
+  }
+
+  function setTab(name) {
+    document.querySelectorAll(".tab-button").forEach((button) => {
+      button.classList.toggle("active", button.dataset.tab === name);
+    });
+    document.querySelectorAll(".tab-panel").forEach((panel) => {
+      panel.classList.toggle("active", panel.id === `tab-${name}`);
+    });
+  }
+
+  function renderMarketState(snapshot) {
+    const host = byId("market-state");
+    if (!snapshot) {
+      host.innerHTML = '<span class="muted-copy">No analysis snapshot yet.</span>';
+      return;
+    }
+    const regime = snapshot.regime || {};
+    const volatility = snapshot.volatility || {};
+    const volume = snapshot.volume || {};
+    const chips = [
+      [regime.is_above_vwap ? "Above VWAP" : "Below VWAP", regime.is_above_vwap ? "good" : "bad"],
+      [regime.is_above_4h_ema ? "Above 4H EMA" : "Below 4H EMA", regime.is_above_4h_ema ? "good" : "bad"],
+      [regime.is_market_green ? "Market Green" : "Market Red", regime.is_market_green ? "good" : "bad"],
+      [`MACD ${String(regime.macd_regime || "unknown").toUpperCase()}`, regime.macd_regime === "bullish" ? "good" : regime.macd_regime === "bearish" ? "bad" : ""],
+      [regime.macd_ready ? "MACD Ready" : "MACD Warming", regime.macd_ready ? "good" : "warn"],
+      [volatility.is_volatile_enough ? "Volatile" : "Low Volatility", volatility.is_volatile_enough ? "warn" : ""],
+      [`Volume ${Number.isFinite(Number(volume.volume_multiple)) ? Number(volume.volume_multiple).toFixed(2) + "x" : "--"}`, Number(volume.volume_multiple) >= 1 ? "good" : "warn"],
+    ];
+    host.innerHTML = chips
+      .map(([label, tone]) => `<span class="chip ${tone}">${escapeHtml(label)}</span>`)
+      .join("");
+  }
+
+  function renderMetrics(snapshot) {
+    const host = byId("key-metrics");
+    if (!snapshot) {
+      host.innerHTML = '<div class="muted-copy">No metrics available.</div>';
+      return;
+    }
+    const rows = [
+      ["Last", fmtMaybePrice(snapshot.last_price)],
+      ["VWAP", fmtMaybePrice(snapshot.vwap)],
+      ["Intraday Range", fmtMaybePct(snapshot.volatility?.intraday_range_pct)],
+      ["Volume Multiple", Number.isFinite(Number(snapshot.volume?.volume_multiple)) ? Number(snapshot.volume.volume_multiple).toFixed(2) + "x" : "--"],
+      ["Micro State", snapshot.micro?.micro_state || "--"],
+      ["MACD", snapshot.regime?.macd_regime || "--"],
+      ["As of", snapshot.as_of_et ? new Date(snapshot.as_of_et).toLocaleTimeString("en-US", { timeZone: EASTERN_TZ, hour: "numeric", minute: "2-digit", second: "2-digit" }) : "--"],
+      ["Data Quality", snapshot.data_quality || "--"],
+    ];
+    host.innerHTML = rows.map(([label, value]) =>
+      `<div class="metric"><span class="metric-label">${escapeHtml(label)}</span><span class="metric-value">${escapeHtml(value)}</span></div>`
+    ).join("");
+  }
+
+  function renderLevels(snapshot) {
+    const host = byId("key-levels");
+    if (!snapshot) {
+      host.innerHTML = '<tr><td colspan="3" class="muted-copy">No levels available.</td></tr>';
+      return;
+    }
+    const last = snapshot.last_price;
+    const rows = [
+      ["ORL", snapshot.session?.opening_range_low],
+      ["Micro R", snapshot.micro?.micro_resistance_15m],
+      ["VWAP", snapshot.vwap],
+      ["Nearest R", snapshot.levels?.nearest_resistance?.price],
+      ["Nearest S", snapshot.levels?.nearest_support?.price],
+      ["PMH", snapshot.session?.premarket_high],
+      ["PML", snapshot.session?.premarket_low],
+      ["ORH", snapshot.session?.opening_range_high],
+    ].filter(([, value]) => Number.isFinite(Number(value)));
+
+    rows.sort((a, b) => {
+      const da = Math.abs(distanceFromLast(a[1], last) ?? 9999);
+      const db = Math.abs(distanceFromLast(b[1], last) ?? 9999);
+      return da - db;
+    });
+
+    host.innerHTML = rows.slice(0, 6).map(([name, value]) => {
+      const distance = distanceFromLast(value, last);
+      const className = distance === null ? "distance-flat" : distance > 0 ? "distance-up" : distance < 0 ? "distance-down" : "distance-flat";
+      const distanceText = distance === null ? "--" : `${distance >= 0 ? "+" : ""}${distance.toFixed(2)}%`;
+      return `<tr><td class="level-name">${escapeHtml(name)}</td><td>${escapeHtml(fmtMaybePrice(value))}</td><td class="${className}">${escapeHtml(distanceText)}</td></tr>`;
+    }).join("");
+  }
+
+  function renderSetupCard(setup, compact = false) {
+    if (!setup || typeof setup !== "object") return "";
+    const stateName = String(setup.setup_state || "WATCH").toLowerCase();
+    const warning = setup.tape_warning && setup.tape_warning !== "NONE"
+      ? `<span class="tape-warning">${escapeHtml(String(setup.tape_warning).replaceAll("_", " "))}</span>`
+      : "";
+    return `
+      <article class="setup-card ${compact ? "compact" : ""}">
+        <div class="setup-title-row">
+          <div class="setup-title">${escapeHtml(setup.name || "Unnamed setup")}</div>
+          <div class="setup-badges">
+            <span class="setup-state ${escapeHtml(stateName)}">${escapeHtml(setup.setup_state || "WATCH")}</span>
+            ${warning}
+          </div>
+        </div>
+        <div class="setup-grid">
+          <div class="setup-field"><span>Entry</span><strong>${escapeHtml(fmtMaybePrice(setup.entry_trigger_price))}</strong></div>
+          <div class="setup-field"><span>Stop</span><strong>${escapeHtml(fmtMaybePrice(setup.stop_price))}</strong></div>
+          <div class="setup-field"><span>Target</span><strong>${escapeHtml(fmtMaybePrice(setup.target_price))}</strong></div>
+          <div class="setup-field"><span>R/R</span><strong>${escapeHtml(Number.isFinite(Number(setup.rr_to_target1)) ? Number(setup.rr_to_target1).toFixed(2) + ":1" : "--")}</strong></div>
+          <div class="setup-field"><span>Move</span><strong>${escapeHtml(fmtMaybePct(setup.move_pct_to_target1))}</strong></div>
+          <div class="setup-field"><span>Extension</span><strong>${escapeHtml(fmtMaybePrice(setup.extension_target))}</strong></div>
+        </div>
+        <div class="setup-trigger"><strong>Trigger:</strong> ${escapeHtml(setup.trigger_condition || "--")}</div>
+        <div class="setup-confirmation"><strong>Confirmation:</strong> ${escapeHtml(setup.confirmation_requirements || "--")}</div>
+        <div class="setup-extension"><strong>Extension:</strong> ${escapeHtml(setup.extension_notes || "--")}</div>
+      </article>
+    `;
+  }
+
+  function renderSetups(output) {
+    const setups = Array.isArray(output?.setups) ? output.setups : [];
+    byId("setup-count").textContent = String(setups.length);
+    byId("setup-preview").innerHTML = setups.length
+      ? setups.slice(0, 2).map((setup) => renderSetupCard(setup, true)).join("")
+      : '<div class="muted-copy">Run LLM analysis to populate setups.</div>';
+    byId("setup-list").innerHTML = setups.length
+      ? setups.map((setup) => renderSetupCard(setup, false)).join("")
+      : '<div class="muted-copy">Run LLM analysis to populate setups.</div>';
+  }
+
+  function renderAnalysisView(symbolState) {
+    const snapshot = symbolState?.ae_snapshot || null;
+    const output = symbolState?.llm_output || null;
+    renderMarketState(snapshot);
+    renderMetrics(snapshot);
+    renderLevels(snapshot);
+    byId("llm-summary").textContent = output?.error
+      ? output.error
+      : output?.summary || "Not run.";
+    renderSetups(output);
+    byId("analysis-raw").textContent = snapshot
+      ? JSON.stringify(snapshot, null, 2)
+      : "No analysis snapshot yet.";
+    byId("llm-raw").textContent = output
+      ? JSON.stringify(output, null, 2)
+      : "Not run.";
+  }
+
   function renderActive({ chartChanged = false } = {}) {
     const symbol = state.activeSymbol;
     const symbolState = symbol ? state.symbols[symbol] : null;
@@ -219,13 +387,7 @@
     byId("ask").textContent = fmtPrice(quote.ask);
     byId("last").textContent = fmtPrice(quote.last);
     byId("volume").textContent = fmtVolume(quote.volume);
-    byId("analysis").textContent = symbolState?.ae_snapshot
-      ? JSON.stringify(symbolState.ae_snapshot, null, 2)
-      : "No analysis snapshot yet.";
-    byId("llm-output").textContent = symbolState?.llm_output
-      ? JSON.stringify(symbolState.llm_output, null, 2)
-      : "Not run.";
-
+    renderAnalysisView(symbolState);
     if (!symbolState) {
       candleSeries.setData([]);
       state.chartSymbol = null;
@@ -517,6 +679,12 @@
       byId("server-message").classList.add("error");
     }
   });
+
+  document.querySelectorAll(".tab-button").forEach((button) => {
+    button.addEventListener("click", () => setTab(button.dataset.tab));
+  });
+
+  byId("view-all-setups").addEventListener("click", () => setTab("setups"));
 
   refreshAuthStatus();
   connect();
