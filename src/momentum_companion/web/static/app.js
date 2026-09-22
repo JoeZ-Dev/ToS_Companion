@@ -12,6 +12,7 @@
     reconnectTimer: null,
     patternSeries: [],
     selectedPatternId: null,
+    renderedPatternSignature: null,
   };
 
   const EASTERN_TZ = "America/New_York";
@@ -159,6 +160,7 @@
 
   function selectPattern(patternId) {
     state.selectedPatternId = state.selectedPatternId === patternId ? null : patternId;
+    state.renderedPatternSignature = null;
     renderActive();
   }
 
@@ -218,6 +220,25 @@
     }
   }
 
+  function renderPatterns(symbol, patterns) {
+    const list = Array.isArray(patterns) ? patterns : [];
+    const signature = JSON.stringify({
+      symbol: symbol || null,
+      selected: state.selectedPatternId,
+      patterns: list.map((pattern) => ({
+        id: pattern.id,
+        type: pattern.pattern_type,
+        state: pattern.state,
+        evidence: pattern.evidence,
+        lines: pattern.lines,
+      })),
+    });
+    if (signature === state.renderedPatternSignature) return;
+    state.renderedPatternSignature = signature;
+    renderPatternPanel(list);
+    renderPatternOverlays(list);
+  }
+
   function normalizeBar(bar) {
     return {
       time: Number(bar.time ?? bar.ts),
@@ -252,8 +273,6 @@
     ) {
       state.selectedPatternId = null;
     }
-    renderPatternPanel(patterns);
-
     const history = symbolState?.history_bars || [];
     const live = symbolState?.bars_10s || [];
     const all = [...history, ...live]
@@ -262,7 +281,7 @@
       .filter((bar) => Number.isFinite(bar.time) && Number.isFinite(bar.close));
 
     candleSeries.setData(all);
-    renderPatternOverlays(patterns);
+    renderPatterns(symbol, patterns);
   }
 
   function applySnapshot(snapshot) {
