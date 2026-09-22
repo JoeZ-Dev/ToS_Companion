@@ -159,3 +159,24 @@ The first live deployment validates:
 - WebSocket continuity;
 - recorder persistence;
 - optional manual LLM analysis.
+
+
+## Recorder acceptance test
+
+After deployment, validate that recording is owned by the server rather than by an open browser session:
+
+```bash
+cd /srv/apps/ToS_Companion
+RECORD_SECONDS=60 bash deploy/validate_recorder.sh IMCC,LHSW
+```
+
+The script:
+1. starts recording through the server API;
+2. exits the request immediately, with no browser connection kept open;
+3. waits while the joelab backend continues recording;
+4. confirms recorder state is still active;
+5. stops recording;
+6. verifies the manifest and per-symbol JSONL line counts agree;
+7. fails if no raw `LEVELONE_EQUITIES` events were persisted.
+
+Use symbols that are actively receiving quote updates during the test.
