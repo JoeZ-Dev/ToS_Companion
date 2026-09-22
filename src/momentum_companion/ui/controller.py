@@ -29,6 +29,7 @@ import pandas as pd
 from momentum_companion.analysis.ae import AEEngine
 from momentum_companion.utils.logging import logging
 from momentum_companion.data.bar_aggregator import TenSecondBar
+from momentum_companion.session import CompanionSession
 
 
 class _ModelSignals(QtCore.QObject):
@@ -63,6 +64,7 @@ class UIController:
         db_path: str | None = None,
         ae_engine: AEEngine | None = None,
         app_state: AppStateStore | None = None,
+        companion_session: CompanionSession | None = None,
     ) -> None:
         self._window = window
         self._llm_service = llm_service
@@ -107,6 +109,7 @@ class UIController:
         self._last_llm_hash: dict[str, str] = {}
         self._llm_enabled: bool = False
         self._app_state = app_state
+        self._companion_session = companion_session
         self._available_models: list[str] = []
         self._full_model = "gpt-4o"
         self._refresh_model = "gpt-4o-mini"
@@ -198,6 +201,8 @@ class UIController:
             return
         self._active_symbol = symbol
         self._pending_symbol = symbol
+        if self._companion_session is not None:
+            self._companion_session.add_symbol(symbol, make_active=True)
         self._aggregator = BarAggregator10s()
         self._bars = []
         self._initial_render_done = False
@@ -428,6 +433,8 @@ class UIController:
         threading.Thread(target=task, daemon=True).start()
 
     def _handle_quote(self, event: QuoteEvent) -> None:
+        if self._companion_session is not None:
+            self._companion_session.ingest_quote(event)
         bid = event.get("bid")
         ask = event.get("ask")
         last = event.get("last")
@@ -457,6 +464,8 @@ class UIController:
                     completed = self._aggregator.ingest_price(pu)
                     if completed:
                         self._append_bar_locked(completed)
+                        if self._companion_session is not None and self._active_symbol:
+                            self._companion_session.ingest_bar(self._active_symbol, completed)
                         self._request_render()
                         if self._ae_engine:
                             snap = self._ae_engine.ingest_10s_bar(completed)
@@ -534,6 +543,8 @@ class UIController:
             with self._bars_lock:
                 self._aggregator = BarAggregator10s()
                 self._append_bar_locked(ten_bar)
+                if self._companion_session is not None and symbol:
+                    self._companion_session.ingest_bar(symbol, ten_bar)
                 self._request_render()
         except Exception:
             self._logger.debug("Failed to handle chart bar", exc_info=True)
@@ -831,7 +842,9 @@ class UIController:
         return True
 
     def _on_stream_state(self, state: str) -> None:
-        """Update UI with stream state transitions (marshal to UI thread)."""
+        """Update application + UI with stream state transitions."""
+        if self._companion_session is not None:
+            self._companion_session.update_connection_state(state)
         QtCore.QTimer.singleShot(0, lambda s=state: self._update_stream_state_ui(s))
 
     def _update_stream_state_ui(self, state: str) -> None:
