@@ -385,6 +385,43 @@
     }
   }
 
+
+  async function waitForLlmResult(symbol, timeoutMs = 125000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      try {
+        const response = await fetch("/api/state", { cache: "no-store" });
+        const snapshot = await parseResponse(response);
+        if (!response.ok) continue;
+        const symbolState = snapshot?.symbols?.[symbol];
+        if (!symbolState?.llm_output) continue;
+
+        state.activeSymbol = snapshot.active_symbol;
+        state.symbols = snapshot.symbols || {};
+        renderActive();
+        byId("llm-run").disabled = false;
+
+        const output = symbolState.llm_output;
+        if (output?.error) {
+          byId("server-message").textContent = output.error;
+          byId("server-message").classList.add("error");
+        } else {
+          byId("server-message").textContent = `LLM analysis complete for ${symbol}.`;
+          byId("server-message").classList.remove("error");
+        }
+        return;
+      } catch (_error) {
+        // WebSocket remains primary; polling is only a resilience fallback.
+      }
+    }
+
+    byId("llm-run").disabled = false;
+    byId("server-message").textContent =
+      `LLM analysis did not return within ${Math.round(timeoutMs / 1000)}s.`;
+    byId("server-message").classList.add("error");
+  }
+
   byId("llm-run").addEventListener("click", async () => {
     const symbol = state.activeSymbol;
     if (!symbol) {
@@ -404,6 +441,7 @@
       byId("server-message").textContent = payload.already_running
         ? `LLM analysis already running for ${symbol}...`
         : `LLM analysis running for ${symbol}; waiting for server result...`;
+      void waitForLlmResult(symbol);
     } catch (error) {
       byId("llm-run").disabled = false;
       byId("server-message").textContent = error.message;
