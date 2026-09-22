@@ -14,6 +14,10 @@ import statistics
 
 from momentum_companion.clients.schwab_rest import SchwabRestClient
 from momentum_companion.data.bar_aggregator import TenSecondBar
+from momentum_companion.recording.history import (
+    load_recorded_minute_candles,
+    merge_candles_prefer_primary,
+)
 
 
 ET_TZ = ZoneInfo("America/New_York")
@@ -362,7 +366,16 @@ class AEEngine:
             start_ms = int(start_et.timestamp() * 1000)
             end_ms = int(now_et.timestamp() * 1000)
             resp = self._rest.fetch_price_history(symbol, start_ms, end_ms, "1m")
-            candles = resp.get("candles") or []
+            schwab_candles = resp.get("candles") or []
+            recorded_candles = load_recorded_minute_candles(
+                symbol,
+                start_ms,
+                end_ms,
+            )
+            candles = merge_candles_prefer_primary(
+                schwab_candles,
+                recorded_candles,
+            )
             seeded = 0
             last_seed_ts = None
             for c in sorted(candles, key=lambda x: x.get("datetime", 0)):
