@@ -164,3 +164,24 @@ pre {
   width: 100%;
   text-transform: uppercase;
 }
+
+
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.panel-heading h2 {
+  margin-bottom: 0;
+}
+
+.panel-heading button {
+  padding: 5px 8px;
+  font-size: 11px;
+}
+
+.subhead {
+  margin-top: 14px !important;
+}
