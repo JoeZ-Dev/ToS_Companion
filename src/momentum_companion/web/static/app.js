@@ -57,6 +57,9 @@
     byId("analysis").textContent = symbolState?.ae_snapshot
       ? JSON.stringify(symbolState.ae_snapshot, null, 2)
       : "No analysis snapshot yet.";
+    byId("llm-output").textContent = symbolState?.llm_output
+      ? JSON.stringify(symbolState.llm_output, null, 2)
+      : "Not run.";
 
     const history = symbolState?.history_bars || [];
     const live = symbolState?.bars_10s || [];
@@ -114,6 +117,8 @@
       }
     } else if (event.type === "analysis_snapshot" && symbol) {
       state.symbols[symbol].ae_snapshot = event.payload?.snapshot || null;
+    } else if (event.type === "llm_update" && symbol) {
+      state.symbols[symbol].llm_output = event.payload?.output || null;
     } else if (event.type === "recorder_state") {
       byId("recorder").textContent = JSON.stringify(event.payload || {}, null, 2);
     }
@@ -146,6 +151,30 @@
       state.reconnectTimer = setTimeout(connect, 1500);
     };
   }
+
+  byId("llm-run").addEventListener("click", async () => {
+    const symbol = state.activeSymbol;
+    if (!symbol) {
+      byId("server-message").textContent = "Select a symbol before running LLM analysis.";
+      byId("server-message").classList.add("error");
+      return;
+    }
+    byId("server-message").textContent = `Running LLM analysis for ${symbol}...`;
+    byId("server-message").classList.remove("error");
+    try {
+      const response = await fetch(`/api/llm/run/${encodeURIComponent(symbol)}`, {
+        method: "POST",
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || "LLM analysis failed");
+      state.symbols[symbol].llm_output = payload;
+      renderActive();
+      byId("server-message").textContent = `LLM analysis complete for ${symbol}.`;
+    } catch (error) {
+      byId("server-message").textContent = error.message;
+      byId("server-message").classList.add("error");
+    }
+  });
 
   byId("record-start").addEventListener("click", async () => {
     const raw = byId("recorder-symbols").value.trim();
