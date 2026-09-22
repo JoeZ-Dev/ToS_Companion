@@ -126,6 +126,24 @@
     if (!symbol || symbol === state.activeSymbol) renderActive();
   }
 
+  async function refreshAuthStatus() {
+    try {
+      const response = await fetch("/api/auth/status");
+      const payload = await response.json();
+      if (payload.authorized) {
+        byId("auth-status").textContent = "Schwab auth: companion_auth authorized";
+        byId("auth-status").classList.remove("error");
+      } else {
+        byId("auth-status").textContent =
+          "Schwab auth: authorization required in companion_auth";
+        byId("auth-status").classList.add("error");
+      }
+    } catch (_error) {
+      byId("auth-status").textContent = "Schwab auth: status unavailable";
+      byId("auth-status").classList.add("error");
+    }
+  }
+
   function connect() {
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
     const socket = new WebSocket(`${protocol}//${location.host}/ws`);
@@ -245,5 +263,6 @@
     }
   });
 
+  refreshAuthStatus();
   connect();
 })();
