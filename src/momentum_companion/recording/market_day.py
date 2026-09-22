@@ -98,11 +98,19 @@ class MarketDayRecorder:
         *,
         output_root: Path | None = None,
         started_at: datetime | None = None,
+        services: Iterable[str] | None = None,
     ) -> None:
         self.symbols = normalize_symbols(symbols)
         if not self.symbols:
             raise ValueError("At least one symbol is required")
         self._symbol_set = set(self.symbols)
+        selected_services = set(services or {"LEVELONE_EQUITIES"})
+        unknown_services = selected_services - RECORDED_SERVICES
+        if unknown_services:
+            raise ValueError(f"Unsupported recording services: {sorted(unknown_services)}")
+        if not selected_services:
+            raise ValueError("At least one recording service is required")
+        self.services = frozenset(selected_services)
         self.started_at = (started_at or datetime.now(ET)).astimezone(ET)
         root = output_root or (Path.home() / ".tos_companion" / "recordings")
         stamp = self.started_at.strftime("%Y-%m-%d_%H%M%S")
@@ -111,7 +119,7 @@ class MarketDayRecorder:
         self.session_dir.mkdir(parents=True, exist_ok=False)
         self._files: dict[str, TextIO] = {}
         self._counts: dict[str, dict[str, int]] = {
-            sym: {service: 0 for service in RECORDED_SERVICES} for sym in self.symbols
+            sym: {service: 0 for service in sorted(self.services)} for sym in self.symbols
         }
         self._lock = threading.Lock()
         self._closed = False
@@ -131,7 +139,7 @@ class MarketDayRecorder:
         with self._lock:
             for msg in _extract_stream_messages(payload):
                 service = str(msg.get("service") or "")
-                if service not in RECORDED_SERVICES:
+                if service not in self.services:
                     continue
                 content = msg.get("content")
                 if not isinstance(content, list):
@@ -176,7 +184,7 @@ class MarketDayRecorder:
             "schema_version": SCHEMA_VERSION,
             "kind": "market_day_recording",
             "symbols": self.symbols,
-            "services": sorted(RECORDED_SERVICES),
+            "services": sorted(self.services),
             "started_at_et": self.started_at.isoformat(),
             "scheduled_cutoff_et": "15:00:00",
             "ended_at_et": ended_at,
