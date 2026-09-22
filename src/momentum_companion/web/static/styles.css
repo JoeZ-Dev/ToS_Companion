@@ -95,7 +95,7 @@ button:disabled {
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(410px, 31vw);
+  grid-template-columns: minmax(0, 3fr) minmax(520px, 2fr);
   gap: 10px;
   padding: 10px;
   min-height: calc(100vh - 116px);
@@ -188,8 +188,8 @@ button:disabled {
 .tab-panel {
   display: none;
   overflow-y: auto;
-  padding: 10px;
-  gap: 9px;
+  padding: 8px;
+  gap: 7px;
 }
 
 .tab-panel.active {
@@ -201,7 +201,7 @@ button:disabled {
   background: #10151b;
   border: 1px solid #252d36;
   border-radius: 5px;
-  padding: 10px;
+  padding: 9px;
 }
 
 .section-title {
@@ -355,11 +355,60 @@ button:disabled {
 .setup-preview,
 .setup-list {
   display: grid;
-  gap: 8px;
+  gap: 7px;
 }
 
 .setup-preview {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
+}
+
+.setup-preview-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(150px, 1.7fr) auto repeat(3, minmax(58px, .55fr));
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #29323c;
+  border-radius: 5px;
+  background: #0c1116;
+  color: #d4d9df;
+  padding: 7px 8px;
+  text-align: left;
+}
+
+.setup-preview-row:hover {
+  border-color: #3b4b5c;
+  background: #10171e;
+}
+
+.setup-preview-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #e0e6ec;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.setup-preview-stat {
+  min-width: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.setup-preview-stat small {
+  display: block;
+  color: #64717f;
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
+.setup-preview-stat strong {
+  display: block;
+  margin-top: 1px;
+  color: #d2d9e0;
+  font-size: 10px;
 }
 
 .setup-card {
@@ -368,11 +417,6 @@ button:disabled {
   background: #0c1116;
   border-radius: 5px;
   padding: 9px;
-}
-
-.setup-card.compact .setup-confirmation,
-.setup-card.compact .setup-extension {
-  display: none;
 }
 
 .setup-title-row {
@@ -512,13 +556,13 @@ pre {
 
 @media (max-width: 1180px) {
   .workspace {
-    grid-template-columns: minmax(0, 1fr) 390px;
+    grid-template-columns: minmax(0, 1fr) 440px;
   }
   .chip-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .setup-preview {
-    grid-template-columns: 1fr;
+  .setup-preview-row {
+    grid-template-columns: minmax(120px, 1.4fr) auto repeat(3, minmax(50px, .5fr));
   }
 }
 

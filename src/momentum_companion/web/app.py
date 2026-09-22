@@ -59,6 +59,7 @@ def create_app(runtime: CompanionRuntime | None = None) -> FastAPI:
     @app.get("/app-20260922-5.js")
     @app.get("/app-20260922-6.js")
     @app.get("/app-20260922-7.js")
+    @app.get("/app-20260922-8.js")
     def app_js() -> FileResponse:
         return FileResponse(
             STATIC_DIR / "app.js",
@@ -69,6 +70,7 @@ def create_app(runtime: CompanionRuntime | None = None) -> FastAPI:
     @app.get("/styles.css")
     @app.get("/styles-20260922.css")
     @app.get("/styles-20260922-2.css")
+    @app.get("/styles-20260922-3.css")
     def styles() -> FileResponse:
         return FileResponse(
             STATIC_DIR / "styles.css",

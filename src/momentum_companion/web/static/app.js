@@ -292,29 +292,69 @@
       host.innerHTML = '<tr><td colspan="3" class="muted-copy">No levels available.</td></tr>';
       return;
     }
-    const last = snapshot.last_price;
-    const rows = [
+
+    const last = Number(snapshot.last_price);
+    const rawRows = [
       ["ORL", snapshot.session?.opening_range_low],
       ["Micro R", snapshot.micro?.micro_resistance_15m],
+      ["Micro S", snapshot.micro?.micro_support_15m],
       ["VWAP", snapshot.vwap],
       ["Nearest R", snapshot.levels?.nearest_resistance?.price],
       ["Nearest S", snapshot.levels?.nearest_support?.price],
       ["PMH", snapshot.session?.premarket_high],
       ["PML", snapshot.session?.premarket_low],
       ["ORH", snapshot.session?.opening_range_high],
-    ].filter(([, value]) => Number.isFinite(Number(value)));
+    ]
+      .filter(([, value]) => Number.isFinite(Number(value)))
+      .map(([name, value]) => ({
+        names: [name],
+        price: Number(value),
+        distance: distanceFromLast(value, last),
+      }))
+      .sort((a, b) => Math.abs(a.distance ?? 9999) - Math.abs(b.distance ?? 9999));
 
-    rows.sort((a, b) => {
-      const da = Math.abs(distanceFromLast(a[1], last) ?? 9999);
-      const db = Math.abs(distanceFromLast(b[1], last) ?? 9999);
-      return da - db;
-    });
+    // Collapse display-equivalent levels so VWAP/support or overlapping
+    // structural references do not consume multiple rows.
+    const merged = [];
+    const mergeTolerance = Number.isFinite(last) && last > 0
+      ? Math.max(0.01, last * 0.0015)
+      : 0.01;
+    for (const row of rawRows) {
+      const existing = merged.find((candidate) =>
+        Math.abs(candidate.price - row.price) <= mergeTolerance
+      );
+      if (existing) {
+        existing.names.push(...row.names);
+        continue;
+      }
+      merged.push(row);
+    }
 
-    host.innerHTML = rows.slice(0, 6).map(([name, value]) => {
-      const distance = distanceFromLast(value, last);
-      const className = distance === null ? "distance-flat" : distance > 0 ? "distance-up" : distance < 0 ? "distance-down" : "distance-flat";
-      const distanceText = distance === null ? "--" : `${distance >= 0 ? "+" : ""}${distance.toFixed(2)}%`;
-      return `<tr><td class="level-name">${escapeHtml(name)}</td><td>${escapeHtml(fmtMaybePrice(value))}</td><td class="${className}">${escapeHtml(distanceText)}</td></tr>`;
+    // Analysis view is intentionally proximity-focused. Keep distant session
+    // levels on the chart/Raw view unless there are too few nearby levels.
+    const nearby = merged.filter((row) =>
+      row.distance !== null && Math.abs(row.distance) <= 35
+    );
+    const displayRows = [...nearby];
+    for (const row of merged) {
+      if (displayRows.length >= 5) break;
+      if (!displayRows.includes(row)) displayRows.push(row);
+    }
+
+    host.innerHTML = displayRows.slice(0, 5).map((row) => {
+      const distance = row.distance;
+      const className = distance === null
+        ? "distance-flat"
+        : distance > 0
+          ? "distance-up"
+          : distance < 0
+            ? "distance-down"
+            : "distance-flat";
+      const distanceText = distance === null
+        ? "--"
+        : `${distance >= 0 ? "+" : ""}${distance.toFixed(2)}%`;
+      const label = row.names.join(" / ");
+      return `<tr><td class="level-name">${escapeHtml(label)}</td><td>${escapeHtml(fmtMaybePrice(row.price))}</td><td class="${className}">${escapeHtml(distanceText)}</td></tr>`;
     }).join("");
   }
 
@@ -324,6 +364,9 @@
     const warning = setup.tape_warning && setup.tape_warning !== "NONE"
       ? `<span class="tape-warning">${escapeHtml(String(setup.tape_warning).replaceAll("_", " "))}</span>`
       : "";
+    const primaryPriceLabel = String(setup.setup_state || "WATCH").toUpperCase() === "WATCH"
+      ? "Trigger"
+      : "Entry";
     return `
       <article class="setup-card ${compact ? "compact" : ""}">
         <div class="setup-title-row">
@@ -334,7 +377,7 @@
           </div>
         </div>
         <div class="setup-grid">
-          <div class="setup-field"><span>Entry</span><strong>${escapeHtml(fmtMaybePrice(setup.entry_trigger_price))}</strong></div>
+          <div class="setup-field"><span>${escapeHtml(primaryPriceLabel)}</span><strong>${escapeHtml(fmtMaybePrice(setup.entry_trigger_price))}</strong></div>
           <div class="setup-field"><span>Stop</span><strong>${escapeHtml(fmtMaybePrice(setup.stop_price))}</strong></div>
           <div class="setup-field"><span>Target</span><strong>${escapeHtml(fmtMaybePrice(setup.target_price))}</strong></div>
           <div class="setup-field"><span>R/R</span><strong>${escapeHtml(Number.isFinite(Number(setup.rr_to_target1)) ? Number(setup.rr_to_target1).toFixed(2) + ":1" : "--")}</strong></div>
@@ -348,15 +391,34 @@
     `;
   }
 
+  function renderSetupPreviewRow(setup) {
+    if (!setup || typeof setup !== "object") return "";
+    const setupState = String(setup.setup_state || "WATCH").toUpperCase();
+    const stateName = setupState.toLowerCase();
+    const primaryPriceLabel = setupState === "WATCH" ? "Trigger" : "Entry";
+    return `
+      <button class="setup-preview-row" type="button" data-open-setups="true">
+        <span class="setup-preview-name">${escapeHtml(setup.name || "Unnamed setup")}</span>
+        <span class="setup-state ${escapeHtml(stateName)}">${escapeHtml(setupState)}</span>
+        <span class="setup-preview-stat"><small>${escapeHtml(primaryPriceLabel)}</small><strong>${escapeHtml(fmtMaybePrice(setup.entry_trigger_price))}</strong></span>
+        <span class="setup-preview-stat"><small>Target</small><strong>${escapeHtml(fmtMaybePrice(setup.target_price))}</strong></span>
+        <span class="setup-preview-stat"><small>R/R</small><strong>${escapeHtml(Number.isFinite(Number(setup.rr_to_target1)) ? Number(setup.rr_to_target1).toFixed(2) + ":1" : "--")}</strong></span>
+      </button>
+    `;
+  }
+
   function renderSetups(output) {
     const setups = Array.isArray(output?.setups) ? output.setups : [];
     byId("setup-count").textContent = String(setups.length);
     byId("setup-preview").innerHTML = setups.length
-      ? setups.slice(0, 2).map((setup) => renderSetupCard(setup, true)).join("")
+      ? setups.slice(0, 2).map(renderSetupPreviewRow).join("")
       : '<div class="muted-copy">Run LLM analysis to populate setups.</div>';
     byId("setup-list").innerHTML = setups.length
       ? setups.map((setup) => renderSetupCard(setup, false)).join("")
       : '<div class="muted-copy">Run LLM analysis to populate setups.</div>';
+    document.querySelectorAll("[data-open-setups='true']").forEach((button) => {
+      button.addEventListener("click", () => setTab("setups"));
+    });
   }
 
   function renderAnalysisView(symbolState) {
