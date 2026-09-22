@@ -93,6 +93,15 @@ def create_app(runtime: CompanionRuntime | None = None) -> FastAPI:
     def stop_recording() -> dict[str, Any]:
         return companion.stop_recording(reason="browser_stop")
 
+    @app.post("/api/llm/run/{symbol}")
+    def run_llm(symbol: str) -> dict[str, Any]:
+        try:
+            return companion.run_llm(symbol)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"LLM analysis failed: {type(exc).__name__}") from exc
+
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket) -> None:
         await websocket.accept()
