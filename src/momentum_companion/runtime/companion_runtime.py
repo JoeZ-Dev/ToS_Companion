@@ -215,9 +215,23 @@ class CompanionRuntime:
 
     def _load_history(self, symbol: str) -> None:
         try:
-            now_ms = int(time.time() * 1000)
-            start_ms = now_ms - 60 * 60 * 1000
-            response = self.rest.fetch_price_history(symbol, start_ms, now_ms, "day")
+            now_et = datetime.now(self._et_tz)
+            start_et = datetime(
+                now_et.year,
+                now_et.month,
+                now_et.day,
+                4,
+                0,
+                tzinfo=self._et_tz,
+            )
+            # Before 4 AM ET, fall back to a one-hour window rather than
+            # constructing an invalid future start.
+            if now_et < start_et:
+                start_et = now_et.replace(minute=0, second=0, microsecond=0)
+                start_et = start_et.replace(hour=max(0, start_et.hour - 1))
+            start_ms = int(start_et.timestamp() * 1000)
+            now_ms = int(now_et.timestamp() * 1000)
+            response = self.rest.fetch_price_history(symbol, start_ms, now_ms, "1m")
             candles = response.get("candles") or []
             bars = [
                 {
