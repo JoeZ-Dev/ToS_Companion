@@ -96,28 +96,35 @@ class SchwabRestClient:
     ) -> Dict[str, Any]:
         """Retrieve historical candles used for AE inputs."""
 
-        def _window_ms(f: str) -> int:
-            if f == "1m":
-                return 60 * 60 * 1000  # 1h
-            if f == "5m":
-                return 6 * 60 * 60 * 1000  # 6h
-            if f == "1h":
-                return 7 * 24 * 60 * 60 * 1000  # 7d
-            return 60 * 60 * 1000
-
         now_ms = int(time.time() * 1000)
         clamp_target = now_ms - 2000
-        end = clamp_target if end_ms is None else min(int(end_ms), clamp_target)
-        start = end - _window_ms(freq) if start_ms is None else int(start_ms)
-        if start >= end:
-            start = end - _window_ms(freq)
-        start = min(start, end - 1000)
-        logger.info("pricehistory normalized freq=%s start_ms=%s end_ms=%s now_ms=%s", freq, start, end, now_ms)
+        explicit_range = start_ms is not None or end_ms is not None
 
         params: Dict[str, Any] = {"symbol": symbol}
-        params.update(self._freq_params(freq))
-        params["startDate"] = start
-        params["endDate"] = end
+        params.update(self._freq_params(freq, include_period=not explicit_range))
+
+        if explicit_range:
+            end = clamp_target if end_ms is None else min(int(end_ms), clamp_target)
+            if start_ms is None:
+                # Explicit end with no start is only used defensively; normal
+                # callers provide both bounds.
+                start = end - 60 * 60 * 1000
+            else:
+                start = int(start_ms)
+            if start >= end:
+                start = end - 60 * 1000
+            params["startDate"] = start
+            params["endDate"] = end
+            logger.info(
+                "pricehistory normalized freq=%s explicit_range=true start_ms=%s end_ms=%s now_ms=%s",
+                freq, start, end, now_ms,
+            )
+        else:
+            logger.info(
+                "pricehistory normalized freq=%s explicit_range=false period_mode=true now_ms=%s",
+                freq, now_ms,
+            )
+
         params["needExtendedHoursData"] = "true"
         resp = self._request("GET", f"{self._md_base_url}/pricehistory", params=params)
         body = resp.json()
@@ -130,20 +137,38 @@ class SchwabRestClient:
         )
         return body
 
-    def _freq_params(self, freq: str) -> Dict[str, Any]:
+    def _freq_params(self, freq: str, *, include_period: bool = True) -> Dict[str, Any]:
         if freq == "1m":
-            return {"periodType": "day", "period": 1, "frequencyType": "minute", "frequency": 1}
+            params = {"periodType": "day", "frequencyType": "minute", "frequency": 1}
+            if include_period:
+                params["period"] = 1
+            return params
         if freq == "5m":
-            return {"periodType": "day", "period": 5, "frequencyType": "minute", "frequency": 5}
+            params = {"periodType": "day", "frequencyType": "minute", "frequency": 5}
+            if include_period:
+                params["period"] = 5
+            return params
         if freq == "1h":
-            return {"periodType": "day", "period": 10, "frequencyType": "minute", "frequency": 60}
+            params = {"periodType": "day", "frequencyType": "minute", "frequency": 60}
+            if include_period:
+                params["period"] = 10
+            return params
         if freq == "4h":
             # Schwab pricehistory does not expose 4h directly; use daily as a structural proxy.
-            return {"periodType": "year", "period": 1, "frequencyType": "daily", "frequency": 1}
+            params = {"periodType": "year", "frequencyType": "daily", "frequency": 1}
+            if include_period:
+                params["period"] = 1
+            return params
         if freq == "1d":
-            return {"periodType": "year", "period": 1, "frequencyType": "daily", "frequency": 1}
+            params = {"periodType": "year", "frequencyType": "daily", "frequency": 1}
+            if include_period:
+                params["period"] = 1
+            return params
         if freq == "day":
-            return {"periodType": "day", "period": 1, "frequencyType": "minute", "frequency": 1}
+            params = {"periodType": "day", "frequencyType": "minute", "frequency": 1}
+            if include_period:
+                params["period"] = 1
+            return params
         raise ValueError(f"Unsupported freq {freq}")
 
     @with_backoff()
