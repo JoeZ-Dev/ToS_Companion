@@ -44,7 +44,7 @@ echo "Checking recorder is still active..."
 state_json="$(
   docker run --rm --network joelab-ingress curlimages/curl:latest     --fail --silent --show-error "$BASE_URL/api/state"
 )"
-python3 - <<'PY' <<<"$state_json"
+python3 -c '
 import json, sys
 state = json.load(sys.stdin)
 rec = state.get("recorder_state") or {}
@@ -53,7 +53,7 @@ if not rec.get("active"):
 print("active:", rec.get("active"))
 print("symbols:", ",".join(rec.get("symbols") or []))
 print("session_dir:", rec.get("session_dir"))
-PY
+' <<<"$state_json"
 
 echo
 echo "Stopping recorder..."
