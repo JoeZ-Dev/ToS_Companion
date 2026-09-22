@@ -2,7 +2,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import threading
 
-from momentum_companion.data.bar_aggregator import TenSecondBar
+from momentum_companion.data.bar_aggregator import BarAggregator10s, TenSecondBar
 from momentum_companion.runtime import CompanionRuntime
 from momentum_companion.session import CompanionSession
 
