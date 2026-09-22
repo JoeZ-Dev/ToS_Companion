@@ -15,6 +15,8 @@ on:
       - 'tests/test_pattern_replay.py'
       - 'tests/test_companion_runtime.py'
       - 'tests/test_companion_session.py'
+      - 'tests/test_web_app.py'
+      - 'src/momentum_companion/web/static/**'
       - '.github/workflows/pattern-engine-ci.yml'
 
 jobs:
@@ -36,4 +38,5 @@ jobs:
         env:
           PYTHONPATH: src
         run: |
-          pytest -q             tests/test_pattern_engine.py             tests/test_pattern_service.py             tests/test_companion_runtime.py             tests/test_companion_session.py
+          pytest -q             tests/test_pattern_engine.py             tests/test_pattern_service.py             tests/test_companion_runtime.py             tests/test_companion_session.py \
+            tests/test_web_app.py
