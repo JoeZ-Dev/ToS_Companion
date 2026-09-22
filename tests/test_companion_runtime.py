@@ -124,3 +124,48 @@ def test_session_mode_distinguishes_premarket_rth_and_postmarket():
     assert runtime.session_mode(datetime(2026, 9, 22, 10, 0, tzinfo=runtime._et_tz)) == "RTH"
     assert runtime.session_mode(datetime(2026, 9, 22, 17, 0, tzinfo=runtime._et_tz)) == "POST"
     assert runtime.session_mode(datetime(2026, 9, 22, 21, 0, tzinfo=runtime._et_tz)) == "CLOSED"
+
+
+class FakeHistoryRest:
+    def __init__(self):
+        self.calls = []
+
+    def fetch_price_history(self, symbol, start_ms, end_ms, freq):
+        self.calls.append((symbol, start_ms, end_ms, freq))
+        return {
+            "candles": [
+                {
+                    "datetime": start_ms + 60_000,
+                    "open": 5.0,
+                    "high": 5.2,
+                    "low": 4.9,
+                    "close": 5.1,
+                    "volume": 1000,
+                }
+            ]
+        }
+
+
+def test_chart_history_requests_one_minute_intraday_window(monkeypatch):
+    runtime = bare_runtime()
+    runtime.rest = FakeHistoryRest()
+    runtime._et_tz = ZoneInfo("America/New_York")
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = cls(2026, 9, 22, 5, 30, tzinfo=ZoneInfo("America/New_York"))
+            return value if tz else value.replace(tzinfo=None)
+
+    import momentum_companion.runtime.companion_runtime as runtime_module
+    monkeypatch.setattr(runtime_module, "datetime", FixedDateTime)
+
+    runtime._load_history("IMCC")
+
+    symbol, start_ms, end_ms, freq = runtime.rest.calls[-1]
+    start_et = datetime.fromtimestamp(start_ms / 1000, tz=ZoneInfo("America/New_York"))
+    assert symbol == "IMCC"
+    assert freq == "1m"
+    assert (start_et.hour, start_et.minute) == (4, 0)
+    assert end_ms > start_ms
+    assert runtime.session.snapshot()["symbols"]["IMCC"]["history_bars"]
