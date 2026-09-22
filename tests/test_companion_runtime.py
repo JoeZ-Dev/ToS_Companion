@@ -267,3 +267,84 @@ def test_runtime_add_remove_recording_symbol_refreshes_stream_union(monkeypatch)
     assert removed["active_symbols"] == []
     assert runtime._stream.unsubscribed[-1] == "TOPS"
     assert runtime._stream.symbol_sets[-1] == ["AEHL"]
+
+
+class FakePerSymbolAggregator:
+    def __init__(self, symbol):
+        self.symbol = symbol
+        self.updates = []
+
+    def ingest_price(self, update):
+        self.updates.append(update)
+        return TenSecondBar(
+            ts=update.timestamp,
+            open=update.price,
+            high=update.price,
+            low=update.price,
+            close=update.price,
+            volume=float(update.size or 0),
+            is_extended=True,
+        )
+
+
+class FakePerSymbolAE:
+    def __init__(self, symbol):
+        self.symbol = symbol
+        self.quote_timestamps = []
+        self.bars = []
+
+    def record_quote_ts(self, ts_ms):
+        self.quote_timestamps.append(ts_ms)
+
+    def ingest_10s_bar(self, bar):
+        self.bars.append(bar)
+        return {"status": "ok", "symbol": self.symbol}
+
+
+def test_watched_symbols_remain_on_shared_stream_when_not_recording():
+    runtime = bare_runtime()
+    runtime._recording_symbols = set()
+    runtime.session.add_symbol("AEHL", make_active=True)
+    runtime.session.add_symbol("TOPS")
+
+    runtime._refresh_stream_subscription()
+
+    assert runtime._stream.symbol_sets[-1] == ["AEHL", "TOPS"]
+
+
+def test_non_active_watched_symbol_is_aggregated_and_analyzed():
+    runtime = bare_runtime()
+    runtime._recording_symbols = set()
+    runtime.session.add_symbol("AEHL", make_active=True)
+    runtime.session.add_symbol("TOPS")
+    runtime.pattern_service = FakePatternService()
+    runtime._aggregators = {
+        "AEHL": FakePerSymbolAggregator("AEHL"),
+        "TOPS": FakePerSymbolAggregator("TOPS"),
+    }
+    runtime._ae_engines = {
+        "AEHL": FakePerSymbolAE("AEHL"),
+        "TOPS": FakePerSymbolAE("TOPS"),
+    }
+
+    runtime._handle_quote(
+        {
+            "ts_ms": 1_700_000_010_000,
+            "symbol": "TOPS",
+            "bid": 2.49,
+            "ask": 2.51,
+            "last": 2.50,
+            "bid_size": 100,
+            "ask_size": 100,
+            "last_size": 40,
+            "volume": 25_000,
+            "source_ts_type": "TRADE_TS",
+            "raw_source": "SCHWAB_STREAM",
+        }
+    )
+
+    tops = runtime.session.snapshot()["symbols"]["TOPS"]
+    assert len(runtime._aggregators["TOPS"].updates) == 1
+    assert len(runtime._ae_engines["TOPS"].bars) == 1
+    assert tops["bars_10s"][-1]["close"] == 2.50
+    assert tops["ae_snapshot"]["symbol"] == "TOPS"
