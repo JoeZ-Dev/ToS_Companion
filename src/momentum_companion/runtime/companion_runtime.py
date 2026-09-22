@@ -21,6 +21,10 @@ from momentum_companion.data.price_update import PriceUpdate
 from momentum_companion.llm.client import LLMClient
 from momentum_companion.llm.coach import LLMCoach
 from momentum_companion.llm.service import LLMService
+from momentum_companion.recording.history import (
+    load_recorded_minute_candles,
+    merge_candles_prefer_primary,
+)
 from momentum_companion.recording.market_day import MarketDayRecorder, reached_cutoff, seconds_until_cutoff
 from momentum_companion.session import CompanionSession
 from momentum_companion.utils.logging import logging
@@ -232,7 +236,23 @@ class CompanionRuntime:
             start_ms = int(start_et.timestamp() * 1000)
             now_ms = int(now_et.timestamp() * 1000)
             response = self.rest.fetch_price_history(symbol, start_ms, now_ms, "1m")
-            candles = response.get("candles") or []
+            schwab_candles = response.get("candles") or []
+            recorded_candles = load_recorded_minute_candles(
+                symbol,
+                start_ms,
+                now_ms,
+            )
+            candles = merge_candles_prefer_primary(
+                schwab_candles,
+                recorded_candles,
+            )
+            logger.info(
+                "history merged symbol=%s schwab=%d recorded=%d merged=%d",
+                symbol,
+                len(schwab_candles),
+                len(recorded_candles),
+                len(candles),
+            )
             bars = [
                 {
                     "time": int(c["datetime"] // 1000),
