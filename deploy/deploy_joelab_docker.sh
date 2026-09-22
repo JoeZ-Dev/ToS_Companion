@@ -67,26 +67,54 @@ if [[ "$status" != "healthy" ]]; then
 fi
 
 echo "Verifying persistent mounts..."
-mount_destinations="$(
-  docker inspect tos-companion     --format '{{range .Mounts}}{{println .Destination}}{{end}}'
-)"
-mount_pairs="$(
-  docker inspect tos-companion     --format '{{range .Mounts}}{{println .Source}}{{print " -> "}}{{println .Destination}}{{end}}'
-)"
-if ! grep -Fxq '/home/companion/.tos_companion' <<<"$mount_destinations"; then
-  echo "ERROR: recordings persistence mount is missing." >&2
-  exit 7
-fi
-if ! grep -Fxq '/home/companion/.local/share/MomentumTradingCompanion' <<<"$mount_destinations" \
-  || ! grep -Fq "$STATE_DIR -> /home/companion/.local/share/MomentumTradingCompanion" <<<"$mount_pairs"; then
-  echo "ERROR: runtime state is not bound from $STATE_DIR." >&2
-  exit 8
-fi
-if ! grep -Fxq '/run/tos-codex' <<<"$mount_destinations" \
-  || ! grep -Fq "$CODEX_BRIDGE_DIR -> /run/tos-codex" <<<"$mount_pairs"; then
-  echo "ERROR: Codex bridge directory is not mounted from $CODEX_BRIDGE_DIR." >&2
-  exit 9
-fi
+mounts_json="$(docker inspect tos-companion --format '{{json .Mounts}}')"
+python3 - "$STATE_DIR" "$CODEX_BRIDGE_DIR" <<'PY' <<<"$mounts_json"
+import json
+import sys
+
+state_dir = sys.argv[1]
+codex_dir = sys.argv[2]
+mounts = json.load(sys.stdin)
+
+by_destination = {
+    mount.get("Destination"): mount
+    for mount in mounts
+    if isinstance(mount, dict) and mount.get("Destination")
+}
+
+recordings = by_destination.get("/home/companion/.tos_companion")
+if recordings is None:
+    raise SystemExit(
+        "ERROR: recordings persistence mount is missing at "
+        "/home/companion/.tos_companion"
+    )
+
+state = by_destination.get(
+    "/home/companion/.local/share/MomentumTradingCompanion"
+)
+if state is None:
+    raise SystemExit(
+        "ERROR: runtime state mount destination is missing."
+    )
+if state.get("Type") != "bind" or state.get("Source") != state_dir:
+    raise SystemExit(
+        "ERROR: runtime state mount mismatch: "
+        f"type={state.get('Type')!r} source={state.get('Source')!r} "
+        f"expected_source={state_dir!r}"
+    )
+
+codex = by_destination.get("/run/tos-codex")
+if codex is None:
+    raise SystemExit("ERROR: Codex bridge mount destination is missing.")
+if codex.get("Type") != "bind" or codex.get("Source") != codex_dir:
+    raise SystemExit(
+        "ERROR: Codex bridge mount mismatch: "
+        f"type={codex.get('Type')!r} source={codex.get('Source')!r} "
+        f"expected_source={codex_dir!r}"
+    )
+
+print("Persistent mounts verified.")
+PY
 
 echo "Checking internal ingress-network health..."
 health_json="$(
