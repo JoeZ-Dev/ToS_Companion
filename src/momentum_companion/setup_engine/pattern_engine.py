@@ -1,32 +1,34 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Iterable
+from typing import Iterable, Protocol
 
 from momentum_companion.setup_engine.pattern_contracts import PatternObservation
-from momentum_companion.setup_engine.patterns import detect_ascending_triangle, detect_micro_pullback
 
 
-Detector = Callable[[str, Iterable], PatternObservation | None]
+class PatternDetector(Protocol):
+    name: str
+
+    def detect(self, symbol: str, bars: Iterable) -> PatternObservation | None:
+        ...
 
 
 @dataclass
 class PatternEngine:
-    """Pure deterministic pattern orchestrator.
+    """Pure deterministic registry/orchestrator for pluggable pattern detectors."""
 
-    The engine intentionally has no Schwab, UI, execution, or LLM dependencies so
-    the same logic can run against live bars and recorded/replayed sessions.
-    """
+    detectors: list[PatternDetector] = field(default_factory=list)
 
-    detectors: list[Detector] = field(
-        default_factory=lambda: [detect_ascending_triangle, detect_micro_pullback]
-    )
+    def register(self, detector: PatternDetector) -> None:
+        if any(existing.name == detector.name for existing in self.detectors):
+            raise ValueError(f"pattern detector already registered: {detector.name}")
+        self.detectors.append(detector)
 
     def detect(self, symbol: str, bars: Iterable) -> list[PatternObservation]:
         materialized = list(bars)
         observations: list[PatternObservation] = []
         for detector in self.detectors:
-            observation = detector(symbol, materialized)
+            observation = detector.detect(symbol, materialized)
             if observation is not None:
                 observations.append(observation)
         return observations
