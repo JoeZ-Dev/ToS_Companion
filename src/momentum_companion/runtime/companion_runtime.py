@@ -64,6 +64,9 @@ class CompanionRuntime:
             auth_token_provider=self.token_provider,
         )
         self.ae_engine = ae_engine or AEEngine(self.rest, self.db_path)
+        self._ae_engines: dict[str, AEEngine] = {}
+        self._aggregators: dict[str, BarAggregator10s] = {}
+        self._analysis_symbols: set[str] = set()
         setattr(self.token_provider, "rest_client", self.rest)
 
         self.llm_coach = LLMCoach()
@@ -81,7 +84,6 @@ class CompanionRuntime:
             state_callback=self._on_llm_state,
         )
 
-        self._aggregator = BarAggregator10s()
         self._stream: SchwabStreamClient | None = None
         self._active_symbol: str | None = None
         self._pending_symbol: str | None = None
@@ -129,33 +131,47 @@ class CompanionRuntime:
             raise ValueError("symbol is required")
 
         with self._lock:
-            prior = self._active_symbol
             self._active_symbol = normalized
             self._pending_symbol = normalized
-            self._aggregator = BarAggregator10s()
-            self.pattern_service.reset(normalized)
+            is_new_analysis_symbol = normalized not in self._analysis_symbols
+            self._analysis_symbols.add(normalized)
 
         self.session.add_symbol(normalized, make_active=True)
-        if prior and prior != normalized and self._stream is not None:
-            try:
-                self._stream.unsubscribe(prior)
-            except Exception:
-                logger.debug("Previous symbol unsubscribe failed", exc_info=True)
+        engine = self._ensure_symbol_analysis(normalized)
 
-        self.ae_engine.reset_intraday()
-        self._load_history(normalized)
-        try:
-            self.ae_engine.compute_profile(normalized)
-            seeded = self.ae_engine.seed_intraday_from_history(normalized)
-            if seeded:
-                self.session.update_ae_snapshot(normalized, seeded)
-        except Exception:
-            logger.warning("AE seed failed for %s", normalized, exc_info=True)
+        if is_new_analysis_symbol:
+            self.pattern_service.reset(normalized)
+            self._load_history(normalized)
+            try:
+                engine.compute_profile(normalized)
+                seeded = engine.seed_intraday_from_history(normalized)
+                if seeded:
+                    self.session.update_ae_snapshot(normalized, seeded)
+            except Exception:
+                logger.warning("AE seed failed for %s", normalized, exc_info=True)
 
         self._ensure_stream()
         self._refresh_stream_subscription()
 
         return self.session.snapshot()
+
+    def _ensure_symbol_analysis(self, symbol: str) -> AEEngine:
+        """Return independent analysis state for one watched symbol."""
+        with self._lock:
+            if symbol not in self._aggregators:
+                self._aggregators[symbol] = BarAggregator10s()
+            engine = self._ae_engines.get(symbol)
+            if engine is None:
+                if not self._ae_engines:
+                    engine = self.ae_engine
+                else:
+                    engine = AEEngine(self.rest, self.db_path)
+                self._ae_engines[symbol] = engine
+            if symbol == self._active_symbol:
+                # Backward-compatible alias for code that still inspects the
+                # currently active AE engine.
+                self.ae_engine = engine
+            return engine
 
     def snapshot(self) -> dict[str, Any]:
         return self.session.snapshot()
@@ -319,13 +335,18 @@ class CompanionRuntime:
         )
 
         with self._lock:
-            if symbol != self._active_symbol:
-                # Current aggregator remains single-active-symbol for parity
-                # with the desktop app. Session state itself is multi-symbol.
+            if symbol not in self._analysis_symbols:
                 return
-            completed = self._aggregator.ingest_price(update)
+            aggregator = self._aggregators.get(symbol)
+            engine = self._ae_engines.get(symbol)
 
-        self.ae_engine.record_quote_ts(int(ts_ms))
+        if aggregator is None or engine is None:
+            engine = self._ensure_symbol_analysis(symbol)
+            with self._lock:
+                aggregator = self._aggregators[symbol]
+
+        completed = aggregator.ingest_price(update)
+        engine.record_quote_ts(int(ts_ms))
         if completed is not None:
             self._handle_completed_bar(symbol, completed)
 
@@ -339,7 +360,11 @@ class CompanionRuntime:
             logger.warning("Pattern evaluation failed for %s", symbol, exc_info=True)
 
         try:
-            snapshot = self.ae_engine.ingest_10s_bar(bar)
+            with self._lock:
+                engine = self._ae_engines.get(symbol)
+            if engine is None:
+                engine = self._ensure_symbol_analysis(symbol)
+            snapshot = engine.ingest_10s_bar(bar)
             if snapshot:
                 self.session.update_ae_snapshot(symbol, snapshot)
         except Exception:
@@ -351,8 +376,7 @@ class CompanionRuntime:
     def _desired_stream_symbols(self) -> list[str]:
         with self._lock:
             symbols = set(self._recording_symbols)
-            if self._active_symbol:
-                symbols.add(self._active_symbol)
+            symbols.update(self._analysis_symbols)
         return sorted(symbols)
 
     def _refresh_stream_subscription(self) -> None:
@@ -435,7 +459,9 @@ class CompanionRuntime:
             self._recording_symbols = set(recorder.active_symbols())
             stream = self._stream
             active_symbol = self._active_symbol
-        if stream is not None and normalized != active_symbol:
+        with self._lock:
+            still_analyzed = normalized in self._analysis_symbols
+        if stream is not None and not still_analyzed:
             try:
                 stream.unsubscribe(normalized)
             except Exception:
