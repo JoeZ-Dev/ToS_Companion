@@ -10,6 +10,8 @@
     symbols: {},
     socket: null,
     reconnectTimer: null,
+    patternSeries: [],
+    selectedPatternId: null,
   };
 
   const EASTERN_TZ = "America/New_York";
@@ -67,6 +69,155 @@
     ? chart.addCandlestickSeries({})
     : chart.addSeries(LightweightCharts.CandlestickSeries, {});
 
+  function addLineSeries(options = {}) {
+    return typeof chart.addLineSeries === "function"
+      ? chart.addLineSeries(options)
+      : chart.addSeries(LightweightCharts.LineSeries, options);
+  }
+
+  function clearPatternOverlays() {
+    for (const entry of state.patternSeries) {
+      try {
+        chart.removeSeries(entry.series);
+      } catch (_error) {
+        // A stale browser series must never break live chart updates.
+      }
+    }
+    state.patternSeries = [];
+  }
+
+  function humanizePatternName(value) {
+    return String(value || "PATTERN")
+      .toLowerCase()
+      .split("_")
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
+  }
+
+  function formatEvidence(pattern) {
+    const evidence = pattern?.evidence || {};
+    if (pattern?.pattern_type === "ASCENDING_TRIANGLE") {
+      const touches = evidence.resistance_touches;
+      const lows = evidence.higher_lows;
+      const compression = evidence.compression_pct;
+      const resistance = evidence.resistance;
+      const parts = [];
+      if (Number.isFinite(Number(resistance))) parts.push(`R ${fmtPrice(resistance)}`);
+      if (touches !== undefined) parts.push(`${touches} touches`);
+      if (lows !== undefined) parts.push(`${lows} rising lows`);
+      if (Number.isFinite(Number(compression))) parts.push(`${Number(compression).toFixed(0)}% compressed`);
+      return parts.join(" · ");
+    }
+    if (pattern?.pattern_type === "MICRO_PULLBACK") {
+      const parts = [];
+      if (evidence.duration_sec !== undefined) parts.push(`${Number(evidence.duration_sec).toFixed(0)} sec`);
+      if (Number.isFinite(Number(evidence.retracement_pct))) {
+        parts.push(`${(Number(evidence.retracement_pct) * 100).toFixed(0)}% retrace`);
+      }
+      if (Number.isFinite(Number(evidence.continuation_level))) {
+        parts.push(`trigger ${fmtPrice(evidence.continuation_level)}`);
+      }
+      return parts.join(" · ");
+    }
+    const entries = Object.entries(evidence)
+      .filter(([, value]) => ["string", "number", "boolean"].includes(typeof value))
+      .slice(0, 3);
+    return entries.map(([key, value]) => `${key}: ${value}`).join(" · ");
+  }
+
+  function renderPatternOverlays(patterns) {
+    clearPatternOverlays();
+
+    for (const pattern of patterns || []) {
+      for (const line of pattern.lines || []) {
+        const startTime = Number(line?.start?.time);
+        const endTime = Number(line?.end?.time);
+        const startPrice = Number(line?.start?.price);
+        const endPrice = Number(line?.end?.price);
+        if (![startTime, endTime, startPrice, endPrice].every(Number.isFinite)) continue;
+
+        const selected = state.selectedPatternId === pattern.id;
+        const series = addLineSeries({
+          lineWidth: selected ? 3 : 2,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+        });
+        series.setData([
+          { time: startTime, value: startPrice },
+          { time: endTime, value: endPrice },
+        ]);
+        state.patternSeries.push({
+          series,
+          patternId: pattern.id,
+          role: line.role,
+        });
+      }
+    }
+  }
+
+  function selectPattern(patternId) {
+    state.selectedPatternId = state.selectedPatternId === patternId ? null : patternId;
+    renderActive();
+  }
+
+  function renderPatternPanel(patterns) {
+    const root = byId("patterns");
+    const list = Array.isArray(patterns) ? patterns : [];
+    byId("pattern-count").textContent = String(list.length);
+    root.replaceChildren();
+
+    if (!list.length) {
+      const empty = document.createElement("div");
+      empty.className = "pattern-empty";
+      empty.textContent = "No active patterns.";
+      root.appendChild(empty);
+      return;
+    }
+
+    for (const pattern of list) {
+      const item = document.createElement("div");
+      item.className = "pattern-item";
+      if (state.selectedPatternId === pattern.id) item.classList.add("active");
+      item.dataset.patternId = pattern.id || "";
+      item.dataset.state = pattern.state || "";
+      item.tabIndex = 0;
+
+      const row = document.createElement("div");
+      row.className = "pattern-row";
+
+      const name = document.createElement("div");
+      name.className = "pattern-name";
+      name.textContent = humanizePatternName(pattern.pattern_type);
+
+      const status = document.createElement("div");
+      status.className = "pattern-state";
+      status.textContent = pattern.state || "UNKNOWN";
+
+      row.append(name, status);
+      item.appendChild(row);
+
+      const evidenceText = formatEvidence(pattern);
+      if (evidenceText) {
+        const evidence = document.createElement("div");
+        evidence.className = "pattern-evidence";
+        evidence.textContent = evidenceText;
+        item.appendChild(evidence);
+      }
+
+      const choose = () => selectPattern(pattern.id);
+      item.addEventListener("click", choose);
+      item.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          choose();
+        }
+      });
+      root.appendChild(item);
+    }
+  }
+
   function normalizeBar(bar) {
     return {
       time: Number(bar.time ?? bar.ts),
@@ -94,6 +245,15 @@
       ? JSON.stringify(symbolState.llm_output, null, 2)
       : "Not run.";
 
+    const patterns = symbolState?.pattern_observations || [];
+    if (
+      state.selectedPatternId &&
+      !patterns.some((pattern) => pattern.id === state.selectedPatternId)
+    ) {
+      state.selectedPatternId = null;
+    }
+    renderPatternPanel(patterns);
+
     const history = symbolState?.history_bars || [];
     const live = symbolState?.bars_10s || [];
     const all = [...history, ...live]
@@ -102,6 +262,7 @@
       .filter((bar) => Number.isFinite(bar.time) && Number.isFinite(bar.close));
 
     candleSeries.setData(all);
+    renderPatternOverlays(patterns);
   }
 
   function applySnapshot(snapshot) {
@@ -136,6 +297,8 @@
         history_bars: [],
         bars_10s: [],
         ae_snapshot: null,
+        llm_output: null,
+        pattern_observations: [],
       };
     }
 
@@ -152,6 +315,8 @@
       state.symbols[symbol].ae_snapshot = event.payload?.snapshot || null;
     } else if (event.type === "llm_update" && symbol) {
       state.symbols[symbol].llm_output = event.payload?.output || null;
+    } else if (event.type === "pattern_update" && symbol) {
+      state.symbols[symbol].pattern_observations = event.payload?.patterns || [];
     } else if (event.type === "recorder_state") {
       byId("recorder").textContent = JSON.stringify(event.payload || {}, null, 2);
     }
