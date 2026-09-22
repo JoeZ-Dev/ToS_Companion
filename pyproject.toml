@@ -17,6 +17,7 @@ dependencies = [
     "numpy>=1.26,<2",
     "platformdirs>=4.2,<5",
     "typing-extensions>=4.10,<5",
+    "cryptography>=42",
 ]
 
 [tool.setuptools.package-dir]
