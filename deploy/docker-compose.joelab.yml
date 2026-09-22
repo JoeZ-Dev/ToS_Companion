@@ -14,7 +14,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
       - tos-companion-data:/home/companion/.tos_companion
-      - tos-companion-state:/home/companion/.local/share/MomentumTradingCompanion
+      - /srv/data/tos-companion/state:/home/companion/.local/share/MomentumTradingCompanion
     networks:
       - joelab-ingress
     healthcheck:
@@ -32,7 +32,6 @@ services:
 
 volumes:
   tos-companion-data:
-  tos-companion-state:
 
 networks:
   joelab-ingress:
