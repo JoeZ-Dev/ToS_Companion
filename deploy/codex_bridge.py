@@ -80,14 +80,18 @@ def _complete(messages: list[dict]) -> dict:
             ],
             input=_build_prompt(messages),
             text=True,
-            stdout=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=TIMEOUT_SECONDS,
             check=False,
         )
         if proc.returncode != 0:
-            detail = (proc.stderr or "").strip().replace("\n", " ")[:400]
-            raise RuntimeError(f"codex_exec_failed:{proc.returncode}:{detail}")
+            stderr = (proc.stderr or "").strip().replace("\n", " ")
+            stdout = (proc.stdout or "").strip().replace("\n", " ")
+            detail = stderr or stdout or "no_codex_diagnostics"
+            raise RuntimeError(
+                f"codex_exec_failed:{proc.returncode}:{detail[-800:]}"
+            )
         if not result_path.is_file() or result_path.stat().st_size == 0:
             raise RuntimeError("codex_cli_empty_result")
         result = json.loads(result_path.read_text(encoding="utf-8"))

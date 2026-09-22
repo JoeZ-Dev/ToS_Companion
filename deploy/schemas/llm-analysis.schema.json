@@ -4,6 +4,8 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
+    "validity",
+    "reason_codes",
     "stock_bias",
     "summary",
     "setups"
@@ -19,7 +21,32 @@
     "reason_codes": {
       "type": "array",
       "items": {
-        "type": "string"
+        "type": "string",
+        "enum": [
+          "FAILED_BREAKOUT",
+          "LOWER_HIGHS",
+          "NO_CLEAR_LEVEL",
+          "VWAP_TEST",
+          "VWAP_REJECT",
+          "VWAP_RECLAIM",
+          "VOLUME_FADE",
+          "WEAK_VOLUME_ON_EXTENSION",
+          "STRONG_VOLUME_CONTINUATION",
+          "BUYERS_WEAK",
+          "HEAVY_SELL_PRESSURE",
+          "HOD_BREAKOUT_HOLDING",
+          "HOD_REJECT",
+          "SPREAD_WIDENING",
+          "THIN_LIQUIDITY",
+          "RR_BELOW_MINIMUM",
+          "DATA_STALE",
+          "ENTRY_APPROACHING",
+          "STOP_THREAT",
+          "HALT_OR_REJECT",
+          "DISCONNECT",
+          "EXECUTION_FILL",
+          "RISK_BREACH"
+        ]
       },
       "maxItems": 12
     },
