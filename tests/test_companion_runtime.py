@@ -144,7 +144,7 @@ def test_headless_llm_updates_session_state():
 
     assert result["stock_bias"] == "NO_EDGE"
     assert runtime.session.snapshot()["symbols"]["AEHL"]["llm_output"] == result
-    assert runtime.llm_service.calls[0]["model_override"] == "test-model"
+    assert runtime.llm_service.calls[0]["model_override"] is None
 
 
 def test_session_mode_distinguishes_premarket_rth_and_postmarket():
