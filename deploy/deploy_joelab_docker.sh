@@ -67,18 +67,23 @@ if [[ "$status" != "healthy" ]]; then
 fi
 
 echo "Verifying persistent mounts..."
-mount_pairs="$(
-  docker inspect tos-companion     --format '{{range .Mounts}}{{println .Source " -> " .Destination}}{{end}}'
+mount_destinations="$(
+  docker inspect tos-companion     --format '{{range .Mounts}}{{println .Destination}}{{end}}'
 )"
-if ! grep -Fq ' -> /home/companion/.tos_companion' <<<"$mount_pairs"; then
+mount_pairs="$(
+  docker inspect tos-companion     --format '{{range .Mounts}}{{println .Source}}{{print " -> "}}{{println .Destination}}{{end}}'
+)"
+if ! grep -Fxq '/home/companion/.tos_companion' <<<"$mount_destinations"; then
   echo "ERROR: recordings persistence mount is missing." >&2
   exit 7
 fi
-if ! grep -Fqx "$STATE_DIR -> /home/companion/.local/share/MomentumTradingCompanion" <<<"$mount_pairs"; then
+if ! grep -Fxq '/home/companion/.local/share/MomentumTradingCompanion' <<<"$mount_destinations" \
+  || ! grep -Fq "$STATE_DIR -> /home/companion/.local/share/MomentumTradingCompanion" <<<"$mount_pairs"; then
   echo "ERROR: runtime state is not bound from $STATE_DIR." >&2
   exit 8
 fi
-if ! grep -Fqx "$CODEX_BRIDGE_DIR -> /run/tos-codex" <<<"$mount_pairs"; then
+if ! grep -Fxq '/run/tos-codex' <<<"$mount_destinations" \
+  || ! grep -Fq "$CODEX_BRIDGE_DIR -> /run/tos-codex" <<<"$mount_pairs"; then
   echo "ERROR: Codex bridge directory is not mounted from $CODEX_BRIDGE_DIR." >&2
   exit 9
 fi
