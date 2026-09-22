@@ -20,6 +20,28 @@ class FakeRuntime:
     def snapshot(self):
         return self.session.snapshot()
 
+    def auth_status(self):
+        return {
+            "authorized": True,
+            "auth_owner": "companion_auth",
+            "helper_url_configured": True,
+        }
+
+    def run_llm(self, symbol):
+        result = {"stock_bias": "NO_EDGE", "setups": [], "summary": "test"}
+        self.session.update_llm_output(symbol.upper(), result)
+        return result
+
+    def start_recording(self, symbols):
+        state = {"active": True, "symbols": [s.upper() for s in symbols]}
+        self.session.update_recorder_state(state)
+        return state
+
+    def stop_recording(self, reason="stopped"):
+        state = {"active": False, "stop_reason": reason}
+        self.session.update_recorder_state(state)
+        return state
+
     def select_symbol(self, symbol):
         normalized = self.session.add_symbol(symbol, make_active=True)
         self.session.set_history(
@@ -89,3 +111,40 @@ def test_websocket_receives_initial_snapshot_and_live_events():
     assert event["type"] == "quote"
     assert event["symbol"] == "AEHL"
     assert event["payload"]["last"] == 3.20
+
+
+def test_auth_status_never_returns_a_schwab_token():
+    runtime = FakeRuntime()
+    with TestClient(create_app(runtime)) as client:
+        response = client.get("/api/auth/status")
+
+    payload = response.json()
+    assert payload["authorized"] is True
+    assert payload["auth_owner"] == "companion_auth"
+    assert "access_token" not in payload
+    assert "refresh_token" not in payload
+
+
+def test_manual_llm_endpoint_updates_headless_state():
+    runtime = FakeRuntime()
+    runtime.session.add_symbol("AEHL", make_active=True)
+
+    with TestClient(create_app(runtime)) as client:
+        response = client.post("/api/llm/run/AEHL")
+
+    assert response.status_code == 200
+    assert response.json()["stock_bias"] == "NO_EDGE"
+    assert runtime.session.snapshot()["symbols"]["AEHL"]["llm_output"]["summary"] == "test"
+
+
+def test_browser_recording_controls_are_server_side():
+    runtime = FakeRuntime()
+
+    with TestClient(create_app(runtime)) as client:
+        start = client.post("/api/recording/start", json={"symbols": ["aehl", "tops"]})
+        stop = client.post("/api/recording/stop")
+
+    assert start.status_code == 200
+    assert start.json()["symbols"] == ["AEHL", "TOPS"]
+    assert stop.status_code == 200
+    assert stop.json()["stop_reason"] == "browser_stop"
