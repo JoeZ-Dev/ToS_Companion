@@ -597,12 +597,19 @@ Current observational live integration:
 - pattern observations are included in normal session snapshots and therefore are available through the existing browser state/WebSocket channel;
 - pattern failures are isolated from AE ingestion so pattern evaluation cannot stop existing analysis processing.
 
+Current browser presentation:
+
+- active patterns are shown in a dedicated browser panel;
+- pattern name, state, and concise detector evidence are displayed;
+- detector-supplied `lines` are rendered directly on Lightweight Charts;
+- clicking a pattern emphasizes its rendered geometry;
+- overlays are rebuilt only when the pattern set, active symbol, or selected pattern changes, not on every quote;
+- the browser does not infer or recompute pattern geometry.
+
 Still not integrated:
 
-- replay event decoding into the 10-second bar path;
 - setup candidate generator;
-- browser chart overlays;
 - desktop chart overlays;
 - execution logic.
 
-The runtime integration is observational only. No pattern can trigger or qualify an order at this stage.
+The runtime and browser integration remain observational only. No pattern can trigger or qualify an order at this stage.
