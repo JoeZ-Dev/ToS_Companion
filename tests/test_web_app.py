@@ -1,3 +1,5 @@
+import time
+
 from fastapi.testclient import TestClient
 
 from momentum_companion.session import CompanionSession
@@ -137,15 +139,26 @@ def test_auth_status_never_returns_a_schwab_token():
     assert "refresh_token" not in payload
 
 
-def test_manual_llm_endpoint_updates_headless_state():
+def test_manual_llm_endpoint_returns_immediately_and_updates_headless_state():
     runtime = FakeRuntime()
     runtime.session.add_symbol("AEHL", make_active=True)
+    runtime.session.update_ae_snapshot(
+        "AEHL",
+        {"symbol": "AEHL", "status": "ok", "data_quality": "ok"},
+    )
 
     with TestClient(create_app(runtime)) as client:
         response = client.post("/api/llm/run/AEHL")
+        assert response.status_code == 202
+        assert response.json()["accepted"] is True
 
-    assert response.status_code == 200
-    assert response.json()["stock_bias"] == "NO_EDGE"
+        deadline = time.time() + 2
+        while time.time() < deadline:
+            output = runtime.session.snapshot()["symbols"]["AEHL"]["llm_output"]
+            if output is not None:
+                break
+            time.sleep(0.01)
+
     assert runtime.session.snapshot()["symbols"]["AEHL"]["llm_output"]["summary"] == "test"
 
 

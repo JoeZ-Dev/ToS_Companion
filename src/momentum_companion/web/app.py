@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +43,8 @@ def create_app(runtime: CompanionRuntime | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.runtime = companion
+    llm_runs: set[str] = set()
+    llm_runs_lock = threading.RLock()
 
     no_store = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
 
@@ -53,6 +56,7 @@ def create_app(runtime: CompanionRuntime | None = None) -> FastAPI:
     @app.get("/app-20260922.js")
     @app.get("/app-20260922-3.js")
     @app.get("/app-20260922-4.js")
+    @app.get("/app-20260922-5.js")
     def app_js() -> FileResponse:
         return FileResponse(
             STATIC_DIR / "app.js",
@@ -120,14 +124,55 @@ def create_app(runtime: CompanionRuntime | None = None) -> FastAPI:
     def stop_recording() -> dict[str, Any]:
         return companion.stop_recording(reason="browser_stop")
 
-    @app.post("/api/llm/run/{symbol}")
+    @app.post("/api/llm/run/{symbol}", status_code=202)
     def run_llm(symbol: str) -> dict[str, Any]:
-        try:
-            return companion.run_llm(symbol)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"LLM analysis failed: {type(exc).__name__}") from exc
+        normalized = companion.session.normalize_symbol(symbol)
+        if not normalized:
+            raise HTTPException(status_code=400, detail="symbol is required")
+
+        state = companion.snapshot()
+        symbol_state = state.get("symbols", {}).get(normalized)
+        if not symbol_state:
+            raise HTTPException(status_code=400, detail=f"no state available for {normalized}")
+        if not isinstance(symbol_state.get("ae_snapshot"), dict):
+            raise HTTPException(status_code=400, detail=f"no AE snapshot available for {normalized}")
+
+        with llm_runs_lock:
+            if normalized in llm_runs:
+                return {
+                    "accepted": True,
+                    "symbol": normalized,
+                    "already_running": True,
+                }
+            llm_runs.add(normalized)
+
+        def worker() -> None:
+            try:
+                companion.run_llm(normalized)
+            except Exception as exc:
+                companion.session.update_llm_output(
+                    normalized,
+                    {
+                        "error": f"LLM analysis failed: {type(exc).__name__}: {exc}",
+                        "stock_bias": "NO_EDGE",
+                        "setups": [],
+                    },
+                )
+            finally:
+                with llm_runs_lock:
+                    llm_runs.discard(normalized)
+
+        threading.Thread(
+            target=worker,
+            daemon=True,
+            name=f"tos-llm-{normalized}",
+        ).start()
+
+        return {
+            "accepted": True,
+            "symbol": normalized,
+            "already_running": False,
+        }
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket) -> None:

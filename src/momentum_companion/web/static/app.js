@@ -310,6 +310,17 @@
       }
     } else if (event.type === "llm_update" && symbol) {
       state.symbols[symbol].llm_output = event.payload?.output || null;
+      if (symbol === state.activeSymbol) {
+        const output = state.symbols[symbol].llm_output;
+        byId("llm-run").disabled = false;
+        if (output?.error) {
+          byId("server-message").textContent = output.error;
+          byId("server-message").classList.add("error");
+        } else {
+          byId("server-message").textContent = `LLM analysis complete for ${symbol}.`;
+          byId("server-message").classList.remove("error");
+        }
+      }
     } else if (event.type === "recorder_state") {
       byId("recorder").textContent = JSON.stringify(event.payload || {}, null, 2);
     }
@@ -361,6 +372,19 @@
     };
   }
 
+  async function parseResponse(response) {
+    const text = await response.text();
+    if (!text) return {};
+    try {
+      return JSON.parse(text);
+    } catch (_error) {
+      const preview = text.replace(/\s+/g, " ").slice(0, 240);
+      throw new Error(
+        `Server returned non-JSON response (HTTP ${response.status}): ${preview}`
+      );
+    }
+  }
+
   byId("llm-run").addEventListener("click", async () => {
     const symbol = state.activeSymbol;
     if (!symbol) {
@@ -368,18 +392,20 @@
       byId("server-message").classList.add("error");
       return;
     }
-    byId("server-message").textContent = `Running LLM analysis for ${symbol}...`;
+    byId("llm-run").disabled = true;
+    byId("server-message").textContent = `Starting LLM analysis for ${symbol}...`;
     byId("server-message").classList.remove("error");
     try {
       const response = await fetch(`/api/llm/run/${encodeURIComponent(symbol)}`, {
         method: "POST",
       });
-      const payload = await response.json();
+      const payload = await parseResponse(response);
       if (!response.ok) throw new Error(payload.detail || "LLM analysis failed");
-      state.symbols[symbol].llm_output = payload;
-      renderActive();
-      byId("server-message").textContent = `LLM analysis complete for ${symbol}.`;
+      byId("server-message").textContent = payload.already_running
+        ? `LLM analysis already running for ${symbol}...`
+        : `LLM analysis running for ${symbol}; waiting for server result...`;
     } catch (error) {
+      byId("llm-run").disabled = false;
       byId("server-message").textContent = error.message;
       byId("server-message").classList.add("error");
     }
