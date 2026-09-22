@@ -4,6 +4,7 @@ set -euo pipefail
 REPO_DIR="${REPO_DIR:-/srv/apps/ToS_Companion}"
 COMPOSE_FILE="${COMPOSE_FILE:-deploy/docker-compose.joelab.yml}"
 ENV_FILE="${ENV_FILE:-deploy/joelab.env}"
+STATE_DIR="${STATE_DIR:-/srv/data/tos-companion/state}"
 
 cd "$REPO_DIR"
 
@@ -27,6 +28,10 @@ if [[ ! -f "$ENV_FILE" ]]; then
   chmod 600 "$ENV_FILE"
   echo "Created $ENV_FILE from the example."
 fi
+
+echo "Preparing persistent runtime state at $STATE_DIR..."
+sudo mkdir -p "$STATE_DIR"
+sudo chown 10001:10001 "$STATE_DIR"
 
 echo "Validating compose configuration..."
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config >/dev/null
@@ -58,16 +63,17 @@ if [[ "$status" != "healthy" ]]; then
 fi
 
 echo "Verifying persistent mounts..."
-mount_destinations="$(
-  docker inspect tos-companion     --format '{{range .Mounts}}{{println .Destination}}{{end}}'
+mount_pairs="$(
+  docker inspect tos-companion     --format '{{range .Mounts}}{{println .Source " -> " .Destination}}{{end}}'
 )"
-for required_mount in   /home/companion/.tos_companion   /home/companion/.local/share/MomentumTradingCompanion
-do
-  if ! grep -Fxq "$required_mount" <<<"$mount_destinations"; then
-    echo "ERROR: required persistent mount is missing: $required_mount" >&2
-    exit 7
-  fi
-done
+if ! grep -Fq ' -> /home/companion/.tos_companion' <<<"$mount_pairs"; then
+  echo "ERROR: recordings persistence mount is missing." >&2
+  exit 7
+fi
+if ! grep -Fqx "$STATE_DIR -> /home/companion/.local/share/MomentumTradingCompanion" <<<"$mount_pairs"; then
+  echo "ERROR: runtime state is not bound from $STATE_DIR." >&2
+  exit 8
+fi
 
 echo "Checking internal ingress-network health..."
 health_json="$(
