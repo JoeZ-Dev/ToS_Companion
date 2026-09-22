@@ -133,25 +133,11 @@ There is no Windows rebuild/copy/relaunch loop.
 
 ## Persistent data
 
-The compose project uses two named volumes:
+The joelab deployment uses:
+- the named volume `tos-companion-data` for recorder/session files at `/home/companion/.tos_companion`;
+- the host bind path `/srv/data/tos-companion/state` for SQLite state, journal, and application state, mounted into `/home/companion/.local/share/MomentumTradingCompanion`.
 
-```text
-tos-companion-data
-tos-companion-state
-```
-
-mounted at:
-
-```text
-/home/companion/.tos_companion
-/home/companion/.local/share/MomentumTradingCompanion
-```
-
-This separates and persists:
-- recorder/session files under `.tos_companion`;
-- SQLite state, journal, and application state under the platform data directory.
-
-Both survive container replacement and rebuilds.
+The deployment helper creates `/srv/data/tos-companion/state` and assigns it to the container's non-root UID before startup. Runtime state therefore lives in joelab's standard `/srv/data` hierarchy and survives container replacement and rebuilds.
 
 ## LLM integration direction
 
