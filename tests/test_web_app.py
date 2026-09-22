@@ -27,6 +27,18 @@ class FakeRuntime:
             "helper_url_configured": True,
         }
 
+    def readiness(self):
+        return {
+            "ok": True,
+            "auth_owner": "companion_auth",
+            "companion_auth_authorized": True,
+            "companion_auth_helper_configured": True,
+            "llm_configured": False,
+            "db_path": "/tmp/test.db",
+            "recordings_root": "/tmp/recordings",
+            "session_mode": "PRE",
+        }
+
     def run_llm(self, symbol):
         result = {"stock_bias": "NO_EDGE", "setups": [], "summary": "test"}
         self.session.update_llm_output(symbol.upper(), result)
@@ -148,3 +160,16 @@ def test_browser_recording_controls_are_server_side():
     assert start.json()["symbols"] == ["AEHL", "TOPS"]
     assert stop.status_code == 200
     assert stop.json()["stop_reason"] == "browser_stop"
+
+
+def test_readiness_is_non_secret_and_reports_auth_owner():
+    runtime = FakeRuntime()
+    with TestClient(create_app(runtime)) as client:
+        response = client.get("/api/readiness")
+
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["auth_owner"] == "companion_auth"
+    assert payload["companion_auth_authorized"] is True
+    assert "access_token" not in payload
+    assert "refresh_token" not in payload
