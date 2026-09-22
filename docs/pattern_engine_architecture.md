@@ -589,12 +589,20 @@ As of this branch:
 - source-agnostic `PatternEvaluationService` exists;
 - live/replay completed-bar boundary is covered by tests.
 
-Not yet integrated:
+Current observational live integration:
 
-- live runtime;
-- replay runtime;
+- completed 10-second bars in `CompanionRuntime._handle_completed_bar()` are passed to `PatternEvaluationService`;
+- resulting observations are stored in `CompanionSession`;
+- the session emits `pattern_update` events;
+- pattern observations are included in normal session snapshots and therefore are available through the existing browser state/WebSocket channel;
+- pattern failures are isolated from AE ingestion so pattern evaluation cannot stop existing analysis processing.
+
+Still not integrated:
+
+- replay event decoding into the 10-second bar path;
 - setup candidate generator;
-- WebSocket payloads;
 - browser chart overlays;
 - desktop chart overlays;
 - execution logic.
+
+The runtime integration is observational only. No pattern can trigger or qualify an order at this stage.
