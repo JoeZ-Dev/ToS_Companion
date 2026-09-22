@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import asdict
 from datetime import datetime, time as dtime
 from pathlib import Path
+import json
+import os
 import threading
 import time
 from typing import Any
@@ -16,6 +18,9 @@ from momentum_companion.clients.token_provider import TokenProvider
 from momentum_companion.data.bar_aggregator import BarAggregator10s, TenSecondBar
 from momentum_companion.data.contracts import QuoteEvent
 from momentum_companion.data.price_update import PriceUpdate
+from momentum_companion.llm.client import LLMClient
+from momentum_companion.llm.coach import LLMCoach
+from momentum_companion.llm.service import LLMService
 from momentum_companion.recording.market_day import MarketDayRecorder, reached_cutoff, seconds_until_cutoff
 from momentum_companion.session import CompanionSession
 from momentum_companion.utils.logging import logging
@@ -54,6 +59,24 @@ class CompanionRuntime:
         )
         self.ae_engine = ae_engine or AEEngine(self.rest, self.db_path)
         setattr(self.token_provider, "rest_client", self.rest)
+
+        self.llm_coach = LLMCoach()
+        api_key = os.getenv("OPENAI_API_KEY") or self.app_state.get_secret("openai_api_key")
+        llm_client = (
+            LLMClient(
+                api_key=api_key,
+                model=self.app_state.get("llm_full_model") or "gpt-4o",
+                mode=os.getenv("LLM_MODE", "live"),
+            )
+            if api_key
+            else None
+        )
+        self.llm_service = LLMService(
+            self.llm_coach,
+            client=llm_client,
+            journal=self.journal,
+            state_callback=self._on_llm_state,
+        )
 
         self._aggregator = BarAggregator10s()
         self._stream: SchwabStreamClient | None = None
@@ -131,6 +154,42 @@ class CompanionRuntime:
 
     def snapshot(self) -> dict[str, Any]:
         return self.session.snapshot()
+
+    def run_llm(self, symbol: str | None = None) -> dict[str, Any]:
+        selected = self.session.normalize_symbol(symbol or self.active_symbol or "")
+        if not selected:
+            raise ValueError("select a symbol before running LLM analysis")
+
+        state = self.session.snapshot()
+        symbol_state = state["symbols"].get(selected)
+        if not symbol_state:
+            raise ValueError(f"no state available for {selected}")
+        snapshot = symbol_state.get("ae_snapshot")
+        if not isinstance(snapshot, dict):
+            raise ValueError(f"no AE snapshot available for {selected}")
+        if getattr(self.llm_service, "_client", None) is None:
+            raise ValueError(
+                "OpenAI API key is not configured on the joelab service"
+            )
+
+        quote = symbol_state.get("quote") or {}
+        session_mode = "RTH" if self.is_intraday_window() else "PRE"
+        messages = [
+            {"role": "system", "content": self.llm_coach.system_prompt},
+            {
+                "role": "user",
+                "content": json.dumps(snapshot, separators=(",", ":"), default=str),
+            },
+        ]
+        result = self.llm_service.evaluate(
+            snapshot,
+            session_mode,
+            quote,
+            model_override=self.app_state.get("llm_full_model") or "gpt-4o",
+            messages_override=messages,
+        )
+        self.session.update_llm_output(selected, result)
+        return result
 
     def _load_history(self, symbol: str) -> None:
         try:
@@ -327,6 +386,9 @@ class CompanionRuntime:
 
     def _on_auth_state(self, state: str) -> None:
         self.session.update_connection_state(state)
+
+    def _on_llm_state(self, state: str) -> None:
+        logger.warning("LLM state: %s", state)
 
     def is_intraday_window(self) -> bool:
         now_et = datetime.now(self._et_tz)
