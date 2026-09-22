@@ -128,3 +128,28 @@ def test_auth_helper_requires_auth(monkeypatch):
     monkeypatch.setattr("httpx.get", lambda url, timeout=10.0: FakeResp())
     provider()
     assert getattr(provider, "_state", None) == "AUTH_REQUIRED"
+
+
+def test_auth_helper_sends_internal_auth_header(monkeypatch):
+    from momentum_companion.clients.token_provider import TokenProvider
+
+    class Response:
+        status_code = 200
+        def json(self):
+            return {"access_token": "abc", "expires_at": 9999999999}
+
+    class Client:
+        def __init__(self):
+            self.calls = []
+        def get(self, url, **kwargs):
+            self.calls.append((url, kwargs))
+            return Response()
+
+    monkeypatch.setenv("AUTH_HELPER_URL", "http://companion-auth:8766")
+    monkeypatch.setenv("INTERNAL_AUTH_SECRET", "shared-secret")
+    provider = TokenProvider()
+    client = Client()
+    provider._helper_http = client
+
+    assert provider() == "abc"
+    assert client.calls[0][1]["headers"]["X-Internal-Auth"] == "shared-secret"

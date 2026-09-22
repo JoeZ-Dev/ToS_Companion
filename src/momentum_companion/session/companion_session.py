@@ -242,11 +242,7 @@ class CompanionSession:
         value = [dict(observation) for observation in observations]
         with self._lock:
             self._symbols[normalized].pattern_observations = value
-        self._emit(
-            "pattern_update",
-            symbol=normalized,
-            payload={"patterns": value},
-        )
+        self._emit("pattern_update", symbol=normalized, payload={"patterns": value})
 
     def update_recorder_state(self, state: Mapping[str, Any]) -> None:
         value = dict(state)

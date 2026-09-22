@@ -115,23 +115,8 @@ def test_pattern_observations_are_exposed_and_emitted_for_browser_clients():
     session = CompanionSession()
     events = []
     unsubscribe = session.subscribe(events.append)
-
-    session.update_pattern_observations(
-        "AEHL",
-        [
-            {
-                "id": "AEHL:MICRO_PULLBACK:10",
-                "symbol": "AEHL",
-                "pattern_type": "MICRO_PULLBACK",
-                "state": "TURNING",
-                "evidence": {"duration_sec": 40},
-                "points": [],
-                "lines": [],
-            }
-        ],
-    )
+    session.update_pattern_observations("AEHL", [{"id": "AEHL:MICRO_PULLBACK:10", "symbol": "AEHL", "pattern_type": "MICRO_PULLBACK", "state": "TURNING", "evidence": {"duration_sec": 40}, "points": [], "lines": []}])
     unsubscribe()
-
     snap = session.snapshot()
     patterns = snap["symbols"]["AEHL"]["pattern_observations"]
     assert patterns[0]["pattern_type"] == "MICRO_PULLBACK"

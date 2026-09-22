@@ -173,3 +173,12 @@ def test_readiness_is_non_secret_and_reports_auth_owner():
     assert payload["companion_auth_authorized"] is True
     assert "access_token" not in payload
     assert "refresh_token" not in payload
+
+
+def test_browser_assets_are_not_cached():
+    runtime = FakeRuntime()
+    with TestClient(create_app(runtime)) as client:
+        response = client.get("/app.js")
+
+    assert response.status_code == 200
+    assert "no-store" in response.headers["cache-control"]

@@ -1,0 +1,18 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1     PYTHONUNBUFFERED=1     TOS_COMPANION_HOST=0.0.0.0     TOS_COMPANION_PORT=8787
+
+WORKDIR /app
+
+COPY pyproject.toml README.md* /app/
+COPY src /app/src
+
+RUN python -m pip install --no-cache-dir --upgrade pip     && python -m pip install --no-cache-dir '.[web]'
+
+RUN useradd --create-home --uid 10001 companion     && mkdir -p /home/companion/.tos_companion     && chown -R companion:companion /home/companion /app
+
+USER companion
+
+EXPOSE 8787
+
+CMD ["python", "-m", "momentum_companion.web"]

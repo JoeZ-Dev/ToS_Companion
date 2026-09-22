@@ -183,16 +183,29 @@ This is important for future fill simulation and strategy validation.
 
 ## Deployment model
 
-Target services on joelab:
+The confirmed joelab topology is Docker + Cloudflare Tunnel.
+
+Target containers share the external `joelab-ingress` network:
 
 ```text
-companion-auth.service
-tos-companion.service
+cloudflared
+companion-auth
+tos-companion
 ```
 
-A reverse proxy exposes the web application over HTTPS.
+ToS_Companion resolves the existing auth helper internally as:
 
-The exact public/internal hostname can be decided during deployment.
+```text
+http://companion-auth:8766
+```
+
+Cloudflare Tunnel should route the browser hostname directly to:
+
+```text
+http://tos-companion:8787
+```
+
+No host port needs to be published.
 
 ## Migration stages
 

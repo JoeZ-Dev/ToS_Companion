@@ -2,8 +2,8 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import threading
 
-from momentum_companion.runtime import CompanionRuntime
 from momentum_companion.data.bar_aggregator import TenSecondBar
+from momentum_companion.runtime import CompanionRuntime
 from momentum_companion.session import CompanionSession
 
 
@@ -127,23 +127,58 @@ def test_session_mode_distinguishes_premarket_rth_and_postmarket():
     assert runtime.session_mode(datetime(2026, 9, 22, 21, 0, tzinfo=runtime._et_tz)) == "CLOSED"
 
 
+class FakeHistoryRest:
+    def __init__(self):
+        self.calls = []
+
+    def fetch_price_history(self, symbol, start_ms, end_ms, freq):
+        self.calls.append((symbol, start_ms, end_ms, freq))
+        return {
+            "candles": [
+                {
+                    "datetime": start_ms + 60_000,
+                    "open": 5.0,
+                    "high": 5.2,
+                    "low": 4.9,
+                    "close": 5.1,
+                    "volume": 1000,
+                }
+            ]
+        }
+
+
+def test_chart_history_requests_one_minute_intraday_window(monkeypatch):
+    runtime = bare_runtime()
+    runtime.rest = FakeHistoryRest()
+    runtime._et_tz = ZoneInfo("America/New_York")
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = cls(2026, 9, 22, 5, 30, tzinfo=ZoneInfo("America/New_York"))
+            return value if tz else value.replace(tzinfo=None)
+
+    import momentum_companion.runtime.companion_runtime as runtime_module
+    monkeypatch.setattr(runtime_module, "datetime", FixedDateTime)
+
+    runtime._load_history("IMCC")
+
+    symbol, start_ms, end_ms, freq = runtime.rest.calls[-1]
+    start_et = datetime.fromtimestamp(start_ms / 1000, tz=ZoneInfo("America/New_York"))
+    assert symbol == "IMCC"
+    assert freq == "1m"
+    assert (start_et.hour, start_et.minute) == (4, 0)
+    assert end_ms > start_ms
+    assert runtime.session.snapshot()["symbols"]["IMCC"]["history_bars"]
+
+
 class FakePatternService:
     def __init__(self):
         self.calls = []
 
     def ingest_completed_bar(self, symbol, bar):
         self.calls.append((symbol, bar))
-        return [
-            {
-                "id": f"{symbol}:TEST_PATTERN:{bar.ts}",
-                "symbol": symbol,
-                "pattern_type": "TEST_PATTERN",
-                "state": "FORMING",
-                "evidence": {"bar_ts": bar.ts},
-                "points": [],
-                "lines": [],
-            }
-        ]
+        return [{"id": f"{symbol}:TEST_PATTERN:{bar.ts}", "symbol": symbol, "pattern_type": "TEST_PATTERN", "state": "FORMING", "evidence": {"bar_ts": bar.ts}, "points": [], "lines": []}]
 
 
 class FakeAEEngine:
@@ -159,19 +194,8 @@ def test_completed_bar_updates_patterns_and_preserves_ae_processing():
     runtime = bare_runtime()
     runtime.pattern_service = FakePatternService()
     runtime.ae_engine = FakeAEEngine()
-
-    bar = TenSecondBar(
-        ts=10,
-        open=3.0,
-        high=3.2,
-        low=2.9,
-        close=3.1,
-        volume=100,
-        is_extended=True,
-    )
-
+    bar = TenSecondBar(ts=10, open=3.0, high=3.2, low=2.9, close=3.1, volume=100, is_extended=True)
     runtime._handle_completed_bar("AEHL", bar)
-
     symbol_state = runtime.session.snapshot()["symbols"]["AEHL"]
     assert runtime.pattern_service.calls == [("AEHL", bar)]
     assert symbol_state["pattern_observations"][0]["pattern_type"] == "TEST_PATTERN"
