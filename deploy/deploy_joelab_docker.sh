@@ -68,13 +68,13 @@ fi
 
 echo "Verifying persistent mounts..."
 mounts_json="$(docker inspect tos-companion --format '{{json .Mounts}}')"
-python3 - "$STATE_DIR" "$CODEX_BRIDGE_DIR" <<'PY' <<<"$mounts_json"
+python3 - "$STATE_DIR" "$CODEX_BRIDGE_DIR" "$mounts_json" <<'PY'
 import json
 import sys
 
 state_dir = sys.argv[1]
 codex_dir = sys.argv[2]
-mounts = json.load(sys.stdin)
+mounts = json.loads(sys.argv[3])
 
 by_destination = {
     mount.get("Destination"): mount
