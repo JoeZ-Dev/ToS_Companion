@@ -3,6 +3,7 @@ from zoneinfo import ZoneInfo
 import threading
 
 from momentum_companion.runtime import CompanionRuntime
+from momentum_companion.data.bar_aggregator import TenSecondBar
 from momentum_companion.session import CompanionSession
 
 
@@ -124,3 +125,55 @@ def test_session_mode_distinguishes_premarket_rth_and_postmarket():
     assert runtime.session_mode(datetime(2026, 9, 22, 10, 0, tzinfo=runtime._et_tz)) == "RTH"
     assert runtime.session_mode(datetime(2026, 9, 22, 17, 0, tzinfo=runtime._et_tz)) == "POST"
     assert runtime.session_mode(datetime(2026, 9, 22, 21, 0, tzinfo=runtime._et_tz)) == "CLOSED"
+
+
+class FakePatternService:
+    def __init__(self):
+        self.calls = []
+
+    def ingest_completed_bar(self, symbol, bar):
+        self.calls.append((symbol, bar))
+        return [
+            {
+                "id": f"{symbol}:TEST_PATTERN:{bar.ts}",
+                "symbol": symbol,
+                "pattern_type": "TEST_PATTERN",
+                "state": "FORMING",
+                "evidence": {"bar_ts": bar.ts},
+                "points": [],
+                "lines": [],
+            }
+        ]
+
+
+class FakeAEEngine:
+    def __init__(self):
+        self.bars = []
+
+    def ingest_10s_bar(self, bar):
+        self.bars.append(bar)
+        return {"status": "ok", "symbol": "AEHL"}
+
+
+def test_completed_bar_updates_patterns_and_preserves_ae_processing():
+    runtime = bare_runtime()
+    runtime.pattern_service = FakePatternService()
+    runtime.ae_engine = FakeAEEngine()
+
+    bar = TenSecondBar(
+        ts=10,
+        open=3.0,
+        high=3.2,
+        low=2.9,
+        close=3.1,
+        volume=100,
+        is_extended=True,
+    )
+
+    runtime._handle_completed_bar("AEHL", bar)
+
+    symbol_state = runtime.session.snapshot()["symbols"]["AEHL"]
+    assert runtime.pattern_service.calls == [("AEHL", bar)]
+    assert symbol_state["pattern_observations"][0]["pattern_type"] == "TEST_PATTERN"
+    assert symbol_state["ae_snapshot"]["status"] == "ok"
+    assert runtime.ae_engine.bars == [bar]
