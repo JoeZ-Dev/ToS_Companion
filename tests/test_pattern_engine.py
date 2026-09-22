@@ -1,5 +1,6 @@
-from momentum_companion.setup_engine.pattern_contracts import PatternState, PatternType
+from momentum_companion.setup_engine.pattern_contracts import PatternObservation, PatternState
 from momentum_companion.setup_engine.pattern_engine import PatternEngine
+from momentum_companion.setup_engine.patterns import build_default_pattern_engine
 from momentum_companion.setup_engine.patterns.ascending_triangle import detect_ascending_triangle
 from momentum_companion.setup_engine.patterns.micro_pullback import detect_micro_pullback
 
@@ -43,7 +44,7 @@ def test_detects_ascending_triangle_with_explainable_geometry():
     observation = detect_ascending_triangle("abcd", triangle_bars())
 
     assert observation is not None
-    assert observation.pattern_type == PatternType.ASCENDING_TRIANGLE
+    assert observation.pattern_type == "ASCENDING_TRIANGLE"
     assert observation.evidence["resistance_touches"] >= 2
     assert observation.evidence["higher_lows"] >= 2
     assert observation.evidence["support_slope_per_sec"] > 0
@@ -63,7 +64,7 @@ def test_detects_micro_pullback_and_exposes_impulse_pullback_geometry():
     observation = detect_micro_pullback("abcd", micro_pullback_bars())
 
     assert observation is not None
-    assert observation.pattern_type == PatternType.MICRO_PULLBACK
+    assert observation.pattern_type == "MICRO_PULLBACK"
     assert 0.08 <= observation.evidence["retracement_pct"] <= 0.50
     assert observation.evidence["duration_sec"] <= 180
     assert {line.role for line in observation.lines} == {"impulse", "pullback"}
@@ -77,22 +78,59 @@ def test_micro_pullback_can_transition_to_continuation():
     assert observation.state == PatternState.CONTINUATION
 
 
-def test_pattern_engine_returns_serializable_observations_without_external_dependencies():
-    observations = PatternEngine().detect_dicts("abcd", triangle_bars())
+def test_default_engine_is_assembled_outside_core_engine():
+    observations = build_default_pattern_engine().detect_dicts("abcd", triangle_bars())
 
     assert observations
-    assert all(item["symbol"] == "ABCD" for item in observations)
     triangle = next(item for item in observations if item["pattern_type"] == "ASCENDING_TRIANGLE")
     assert triangle["id"].startswith("ABCD:ASCENDING_TRIANGLE:")
     assert triangle["lines"]
-    assert triangle["evidence"]["resistance_touches"] >= 2
+
+
+def test_core_engine_accepts_new_pattern_without_core_code_changes():
+    class ExampleDetector:
+        name = "FUTURE_PATTERN"
+
+        def detect(self, symbol, bars):
+            materialized = list(bars)
+            return PatternObservation(
+                symbol=symbol.upper(),
+                pattern_type=self.name,
+                state=PatternState.FORMING,
+                started_at=materialized[0]["time"],
+                updated_at=materialized[-1]["time"],
+                evidence={"source": "test"},
+            )
+
+    engine = PatternEngine()
+    engine.register(ExampleDetector())
+
+    observations = engine.detect_dicts("xyz", triangle_bars())
+
+    assert observations[0]["pattern_type"] == "FUTURE_PATTERN"
+    assert observations[0]["symbol"] == "XYZ"
+
+
+def test_duplicate_detector_names_are_rejected():
+    class ExampleDetector:
+        name = "SAME_NAME"
+
+        def detect(self, symbol, bars):
+            return None
+
+    engine = PatternEngine()
+    engine.register(ExampleDetector())
+
+    try:
+        engine.register(ExampleDetector())
+    except ValueError as exc:
+        assert "already registered" in str(exc)
+    else:
+        raise AssertionError("duplicate detector name should be rejected")
 
 
 def test_detectors_return_none_for_flat_noise():
-    bars = [
-        bar(i * 10, 10.00, 10.02, 9.98, 10.00)
-        for i in range(12)
-    ]
+    bars = [bar(i * 10, 10.00, 10.02, 9.98, 10.00) for i in range(12)]
 
     assert detect_ascending_triangle("FLAT", bars) is None
     assert detect_micro_pullback("FLAT", bars) is None
