@@ -98,3 +98,14 @@ def test_bad_subscriber_cannot_break_market_state():
     session.ingest_quote(quote())
 
     assert session.snapshot()["symbols"]["AEHL"]["quote"]["last"] == 3.21
+
+
+def test_history_is_exposed_for_browser_chart():
+    session = CompanionSession()
+    session.set_history(
+        "AEHL",
+        [{"time": 10, "open": 1, "high": 2, "low": 0.5, "close": 1.5, "volume": 50}],
+    )
+
+    snap = session.snapshot()
+    assert snap["symbols"]["AEHL"]["history_bars"][0]["close"] == 1.5
