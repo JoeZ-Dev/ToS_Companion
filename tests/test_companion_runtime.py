@@ -29,6 +29,11 @@ class FakeAppState:
         return None
 
 
+class FakeLLMClient:
+    def is_available(self):
+        return True
+
+
 class FakeLLMService:
     def __init__(self):
         self.calls = []
@@ -86,6 +91,7 @@ def test_headless_llm_updates_session_state():
     runtime = bare_runtime()
     runtime.app_state = FakeAppState()
     runtime.llm_coach = FakeCoach()
+    runtime._llm_client = FakeLLMClient()
     runtime.llm_service = FakeLLMService()
 
     runtime.session.add_symbol("AEHL", make_active=True)
