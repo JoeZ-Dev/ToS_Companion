@@ -235,6 +235,9 @@ class CompanionRuntime:
                 self._stream = stream
             else:
                 return
+        # Seed desired subscriptions before the async LOGIN completes so the
+        # stream client can restore them itself on initial login/reconnect.
+        stream.subscribe_level_one_symbols(self._desired_stream_symbols())
         stream.connect()
 
     def _handle_quote(self, event: QuoteEvent) -> None:
@@ -280,8 +283,6 @@ class CompanionRuntime:
 
     def _on_stream_state(self, state: str) -> None:
         self.session.update_connection_state(state)
-        if state == "CONNECTED":
-            self._refresh_stream_subscription()
 
     def _desired_stream_symbols(self) -> list[str]:
         with self._lock:
@@ -293,9 +294,10 @@ class CompanionRuntime:
     def _refresh_stream_subscription(self) -> None:
         stream = self._stream
         symbols = self._desired_stream_symbols()
-        if stream is None or not stream.is_connected() or not symbols:
+        if stream is None or not symbols:
             return
         try:
+            # This updates desired subscription state even before LOGIN.
             stream.subscribe_level_one_symbols(symbols)
         except Exception:
             logger.warning("Live multi-symbol subscribe failed for %s", symbols, exc_info=True)
