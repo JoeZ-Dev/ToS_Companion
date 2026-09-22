@@ -151,3 +151,16 @@ pre {
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+
+.recorder-controls {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.recorder-controls input {
+  width: 100%;
+  text-transform: uppercase;
+}
