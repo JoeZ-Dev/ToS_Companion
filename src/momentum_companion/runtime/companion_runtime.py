@@ -195,7 +195,7 @@ class CompanionRuntime:
             )
 
         quote = symbol_state.get("quote") or {}
-        session_mode = "RTH" if self.is_intraday_window() else "PRE"
+        session_mode = self.session_mode()
         messages = [
             {"role": "system", "content": self.llm_coach.system_prompt},
             {
@@ -414,9 +414,36 @@ class CompanionRuntime:
     def _on_llm_state(self, state: str) -> None:
         logger.warning("LLM state: %s", state)
 
+    def session_mode(self, now_et: datetime | None = None) -> str:
+        current = now_et or datetime.now(self._et_tz)
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=self._et_tz)
+        else:
+            current = current.astimezone(self._et_tz)
+        tod = current.time()
+        if dtime(hour=9, minute=30) <= tod < dtime(hour=16):
+            return "RTH"
+        if dtime(hour=4) <= tod < dtime(hour=9, minute=30):
+            return "PRE"
+        if dtime(hour=16) <= tod <= dtime(hour=20):
+            return "POST"
+        return "CLOSED"
+
     def is_intraday_window(self) -> bool:
         now_et = datetime.now(self._et_tz)
         if now_et.weekday() >= 5:
             return False
-        tod = now_et.time()
-        return dtime(hour=4) <= tod <= dtime(hour=20)
+        return self.session_mode(now_et) != "CLOSED"
+
+    def readiness(self) -> dict[str, Any]:
+        auth = self.auth_status()
+        return {
+            "ok": True,
+            "auth_owner": "companion_auth",
+            "companion_auth_authorized": bool(auth.get("authorized")),
+            "companion_auth_helper_configured": bool(auth.get("helper_url_configured")),
+            "llm_configured": getattr(self.llm_service, "_client", None) is not None,
+            "db_path": str(self.db_path),
+            "recordings_root": str(Path.home() / ".tos_companion" / "recordings"),
+            "session_mode": self.session_mode(),
+        }
