@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Iterable
 
 from momentum_companion.setup_engine.pattern_contracts import (
     PatternLine,
     PatternObservation,
     PatternPoint,
     PatternState,
-    PatternType,
 )
-from momentum_companion.setup_engine.patterns.swing_points import normalize_bars
+from momentum_companion.setup_engine.structure import (
+    measure_retracement,
+    normalize_bars,
+    strongest_bullish_impulse,
+)
+
+
+PATTERN_NAME = "MICRO_PULLBACK"
 
 
 @dataclass(frozen=True)
@@ -22,11 +29,16 @@ class MicroPullbackConfig:
     continuation_buffer_pct: float = 0.001
 
 
-def detect_micro_pullback(
-    symbol: str,
-    bars,
-    config: MicroPullbackConfig | None = None,
-) -> PatternObservation | None:
+@dataclass(frozen=True)
+class MicroPullbackDetector:
+    config: MicroPullbackConfig = MicroPullbackConfig()
+    name: str = PATTERN_NAME
+
+    def detect(self, symbol: str, bars: Iterable) -> PatternObservation | None:
+        return detect_micro_pullback(symbol, bars, self.config)
+
+
+def detect_micro_pullback(symbol: str, bars, config: MicroPullbackConfig | None = None) -> PatternObservation | None:
     cfg = config or MicroPullbackConfig()
     normalized = normalize_bars(bars)
     if len(normalized) < cfg.min_bars:
@@ -37,83 +49,50 @@ def detect_micro_pullback(
     if len(window) < cfg.min_bars:
         return None
 
-    # Use the strongest recent impulse that finishes before the final bar.
-    best = None
-    for start_i in range(0, len(window) - 3):
-        start_price = window[start_i].low
-        if start_price <= 0:
-            continue
-        for high_i in range(start_i + 1, len(window) - 1):
-            high_price = window[high_i].high
-            impulse_pct = (high_price - start_price) / start_price
-            if impulse_pct < cfg.min_impulse_pct:
-                continue
-            score = impulse_pct
-            if best is None or score > best[0]:
-                best = (score, start_i, high_i, start_price, high_price)
-
-    if best is None:
+    impulse = strongest_bullish_impulse(window, min_move_pct=cfg.min_impulse_pct, reserve_tail_bars=1)
+    if impulse is None:
+        return None
+    retracement = measure_retracement(window, impulse)
+    if retracement is None:
+        return None
+    if retracement.duration_sec <= 0 or retracement.duration_sec > cfg.max_duration_sec:
+        return None
+    if not (cfg.min_retracement_pct <= retracement.depth_pct <= cfg.max_retracement_pct):
         return None
 
-    _, start_i, high_i, impulse_start, impulse_high = best
-    pullback_bars = window[high_i + 1 :]
-    if not pullback_bars:
-        return None
-
-    duration_sec = pullback_bars[-1].time - window[high_i].time
-    if duration_sec <= 0 or duration_sec > cfg.max_duration_sec:
-        return None
-
-    pullback_low_bar = min(pullback_bars, key=lambda b: b.low)
-    impulse_range = impulse_high - impulse_start
-    if impulse_range <= 0:
-        return None
-    retracement_pct = (impulse_high - pullback_low_bar.low) / impulse_range
-    if retracement_pct < cfg.min_retracement_pct or retracement_pct > cfg.max_retracement_pct:
-        return None
-
+    pullback_bars = window[impulse.end_index + 1 :]
     last = pullback_bars[-1]
-    prior = pullback_bars[-2] if len(pullback_bars) > 1 else window[high_i]
-    continuation_level = impulse_high * (1 + cfg.continuation_buffer_pct)
-
-    if last.close >= continuation_level:
-        state = PatternState.CONTINUATION
-    elif last.close > prior.close and last.close > pullback_low_bar.low:
-        state = PatternState.TURNING
-    else:
-        state = PatternState.PULLBACK
+    prior = pullback_bars[-2] if len(pullback_bars) > 1 else window[impulse.end_index]
+    continuation_level = impulse.end_price * (1 + cfg.continuation_buffer_pct)
+    state = (
+        PatternState.CONTINUATION if last.close >= continuation_level
+        else PatternState.TURNING if last.close > prior.close and last.close > retracement.low_price
+        else PatternState.PULLBACK
+    )
 
     points = [
-        PatternPoint(window[start_i].time, impulse_start, "impulse_start"),
-        PatternPoint(window[high_i].time, impulse_high, "impulse_high"),
-        PatternPoint(pullback_low_bar.time, pullback_low_bar.low, "pullback_low"),
+        PatternPoint(impulse.start_time, impulse.start_price, "impulse_start"),
+        PatternPoint(impulse.end_time, impulse.end_price, "impulse_high"),
+        PatternPoint(retracement.low_time, retracement.low_price, "pullback_low"),
     ]
     lines = [
-        PatternLine(
-            role="impulse",
-            start=PatternPoint(window[start_i].time, impulse_start, "impulse_start"),
-            end=PatternPoint(window[high_i].time, impulse_high, "impulse_high"),
-        ),
-        PatternLine(
-            role="pullback",
-            start=PatternPoint(window[high_i].time, impulse_high, "impulse_high"),
-            end=PatternPoint(pullback_low_bar.time, pullback_low_bar.low, "pullback_low"),
-        ),
+        PatternLine("impulse", points[0], points[1]),
+        PatternLine("pullback", points[1], points[2]),
     ]
 
     return PatternObservation(
         symbol=symbol.upper(),
-        pattern_type=PatternType.MICRO_PULLBACK,
+        pattern_type=PATTERN_NAME,
         state=state,
-        started_at=window[start_i].time,
+        started_at=impulse.start_time,
         updated_at=last.time,
         evidence={
-            "impulse_start": impulse_start,
-            "impulse_high": impulse_high,
-            "impulse_pct": (impulse_high - impulse_start) / impulse_start,
-            "pullback_low": pullback_low_bar.low,
-            "duration_sec": duration_sec,
-            "retracement_pct": retracement_pct,
+            "impulse_start": impulse.start_price,
+            "impulse_high": impulse.end_price,
+            "impulse_pct": impulse.move_pct,
+            "pullback_low": retracement.low_price,
+            "duration_sec": retracement.duration_sec,
+            "retracement_pct": retracement.depth_pct,
             "continuation_level": continuation_level,
         },
         points=points,
