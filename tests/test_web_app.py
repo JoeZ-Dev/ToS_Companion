@@ -47,7 +47,28 @@ class FakeRuntime:
         return result
 
     def start_recording(self, symbols):
-        state = {"active": True, "symbols": [s.upper() for s in symbols]}
+        normalized = [s.upper() for s in symbols]
+        state = {"active": True, "symbols": normalized, "active_symbols": normalized}
+        self.session.update_recorder_state(state)
+        return state
+
+    def add_recording_symbol(self, symbol):
+        state = dict(self.session.snapshot()["recorder_state"])
+        symbols = list(state.get("symbols") or [])
+        active_symbols = list(state.get("active_symbols") or symbols)
+        normalized = symbol.upper()
+        if normalized not in symbols:
+            symbols.append(normalized)
+        if normalized not in active_symbols:
+            active_symbols.append(normalized)
+        state.update({"active": True, "symbols": symbols, "active_symbols": active_symbols})
+        self.session.update_recorder_state(state)
+        return state
+
+    def remove_recording_symbol(self, symbol):
+        state = dict(self.session.snapshot()["recorder_state"])
+        normalized = symbol.upper()
+        state["active_symbols"] = [s for s in state.get("active_symbols") or [] if s != normalized]
         self.session.update_recorder_state(state)
         return state
 
@@ -195,3 +216,16 @@ def test_browser_assets_are_not_cached():
 
     assert response.status_code == 200
     assert "no-store" in response.headers["cache-control"]
+
+
+def test_browser_recording_symbols_can_be_added_and_removed_without_restart():
+    runtime = FakeRuntime()
+    with TestClient(create_app(runtime)) as client:
+        start = client.post("/api/recording/start", json={"symbols": []})
+        added = client.post("/api/recording/symbol", json={"symbol": "aehl"})
+        removed = client.delete("/api/recording/symbol/AEHL")
+
+    assert start.status_code == 200
+    assert added.json()["active_symbols"] == ["AEHL"]
+    assert removed.json()["active_symbols"] == []
+    assert removed.json()["symbols"] == ["AEHL"]

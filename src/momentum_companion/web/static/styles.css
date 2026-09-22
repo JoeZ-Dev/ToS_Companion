@@ -589,16 +589,108 @@ pre {
   color: #aeb9c4;
 }
 
-.recorder-controls {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  gap: 6px;
+ .recording-session-actions,
+.recording-add-row {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+}
+
+.recording-session-actions {
   margin-bottom: 10px;
 }
 
-.recorder-controls input {
-  width: 100%;
-  text-transform: uppercase;
+.recording-add-row input {
+  flex: 1;
+  width: auto;
+}
+
+.recording-status {
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.recording-status.active {
+  color: #76d59b;
+  border: 1px solid #28543a;
+  background: #10271b;
+}
+
+.recording-status.inactive {
+  color: #8c98a4;
+  border: 1px solid #303944;
+  background: #171d24;
+}
+
+.recording-meta {
+  display: grid;
+  gap: 5px;
+  color: #778492;
+  font-size: 10px;
+}
+
+.recording-meta strong {
+  color: #b9c4ce;
+  font-weight: 600;
+}
+
+.recording-symbol-list {
+  display: grid;
+  gap: 6px;
+}
+
+.recording-symbol-row {
+  display: grid;
+  grid-template-columns: minmax(115px, .8fr) minmax(170px, 1.3fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #27323c;
+  background: #0c1319;
+  border-radius: 5px;
+  padding: 8px;
+}
+
+.recording-symbol-main {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+}
+
+.recording-symbol-main strong {
+  font-size: 12px;
+}
+
+.recording-symbol-state {
+  border-radius: 999px;
+  padding: 3px 6px;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.recording-symbol-state.active {
+  color: #76d59b;
+  background: #10271b;
+  border: 1px solid #28543a;
+}
+
+.recording-symbol-state.stopped {
+  color: #9aa5b0;
+  background: #171d24;
+  border: 1px solid #36414c;
+}
+
+.recording-symbol-detail {
+  display: flex;
+  gap: 12px;
+  color: #7f8c99;
+  font-size: 10px;
+}
+
+.recording-toggle {
+  padding: 5px 8px;
+  font-size: 10px;
 }
 
 .auth-note {

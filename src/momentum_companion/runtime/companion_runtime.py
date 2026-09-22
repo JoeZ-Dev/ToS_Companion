@@ -375,9 +375,6 @@ class CompanionRuntime:
             if self.session.normalize_symbol(symbol)
         ]
         normalized = list(dict.fromkeys(normalized))
-        if not normalized:
-            raise ValueError("at least one recording symbol is required")
-
         with self._lock:
             if self._recorder is not None:
                 raise RuntimeError("a recording session is already active")
@@ -387,14 +384,7 @@ class CompanionRuntime:
 
         self._ensure_stream()
         self._refresh_stream_subscription()
-        self.session.update_recorder_state(
-            {
-                "active": True,
-                "symbols": recorder.symbols,
-                "session_dir": str(recorder.session_dir),
-                "cutoff_et": "15:00:00",
-            }
-        )
+        self.session.update_recorder_state(recorder.state())
 
         def cutoff_worker() -> None:
             delay = seconds_until_cutoff()
@@ -414,6 +404,39 @@ class CompanionRuntime:
         thread.start()
         return self.session.snapshot()["recorder_state"]
 
+    def add_recording_symbol(self, symbol: str) -> dict[str, Any]:
+        if reached_cutoff():
+            raise ValueError("3:00 PM ET recording cutoff has already been reached")
+        normalized = self.session.normalize_symbol(symbol)
+        if not normalized:
+            raise ValueError("symbol is required")
+        with self._lock:
+            recorder = self._recorder
+            if recorder is None:
+                raise RuntimeError("no recording session is active")
+            recorder.add_symbol(normalized)
+            self._recording_symbols = set(recorder.active_symbols())
+        self._ensure_stream()
+        self._refresh_stream_subscription()
+        state = recorder.state()
+        self.session.update_recorder_state(state)
+        return state
+
+    def remove_recording_symbol(self, symbol: str) -> dict[str, Any]:
+        normalized = self.session.normalize_symbol(symbol)
+        if not normalized:
+            raise ValueError("symbol is required")
+        with self._lock:
+            recorder = self._recorder
+            if recorder is None:
+                raise RuntimeError("no recording session is active")
+            recorder.remove_symbol(normalized)
+            self._recording_symbols = set(recorder.active_symbols())
+        self._refresh_stream_subscription()
+        state = recorder.state()
+        self.session.update_recorder_state(state)
+        return state
+
     def stop_recording(self, *, reason: str = "stopped") -> dict[str, Any]:
         with self._lock:
             recorder = self._recorder
@@ -427,12 +450,9 @@ class CompanionRuntime:
         try:
             recorder.close(stop_reason=reason)
         finally:
-            state = {
-                "active": False,
-                "symbols": recorder.symbols,
-                "session_dir": str(recorder.session_dir),
-                "stop_reason": reason,
-            }
+            state = recorder.state()
+            state["active"] = False
+            state["stop_reason"] = reason
             self.session.update_recorder_state(state)
             self._refresh_stream_subscription()
         return state

@@ -219,3 +219,35 @@ def test_schwab_candles_win_over_recorder_on_timestamp_collision():
     assert [c["datetime"] for c in merged] == [60_000, 120_000]
     assert merged[0]["close"] == 6.0
     assert merged[1]["close"] == 5.15
+
+
+def test_recorder_can_start_empty_then_add_remove_and_resume_symbol(tmp_path: Path):
+    import json
+
+    recorder = MarketDayRecorder([], output_root=tmp_path)
+    assert recorder.active_symbols() == []
+
+    assert recorder.add_symbol(" aehl ") is True
+    assert recorder.add_symbol("AEHL") is False
+    recorder.record_payload(
+        {"data": [{"service": "LEVELONE_EQUITIES", "timestamp": 1, "content": [{"key": "AEHL", "3": 3.2, "8": 100}]}]},
+        received_at="2026-09-23T13:00:00Z",
+    )
+    assert recorder.remove_symbol("AEHL") is True
+    recorder.record_payload(
+        {"data": [{"service": "LEVELONE_EQUITIES", "timestamp": 2, "content": [{"key": "AEHL", "3": 3.3, "8": 110}]}]},
+        received_at="2026-09-23T13:01:00Z",
+    )
+    assert recorder.add_symbol("AEHL") is True
+    recorder.record_payload(
+        {"data": [{"service": "LEVELONE_EQUITIES", "timestamp": 3, "content": [{"key": "AEHL", "3": 3.4, "8": 120}]}]},
+        received_at="2026-09-23T13:02:00Z",
+    )
+    recorder.close()
+
+    lines = (recorder.session_dir / "AEHL.jsonl").read_text().splitlines()
+    manifest = json.loads((recorder.session_dir / "manifest.json").read_text())
+    assert len(lines) == 2
+    assert manifest["counts"]["AEHL"]["LEVELONE_EQUITIES"] == 2
+    assert len(manifest["symbol_lifecycle"]["AEHL"]["periods"]) == 2
+    assert manifest["active_symbols"] == []

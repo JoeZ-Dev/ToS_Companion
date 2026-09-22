@@ -243,6 +243,72 @@
     });
   }
 
+  function recordingEventCount(counts) {
+    if (!counts || typeof counts !== "object") return 0;
+    return Object.values(counts).reduce((total, value) => total + (Number(value) || 0), 0);
+  }
+
+  function renderRecorderState(recorderState) {
+    const recorder = recorderState || { active: false };
+    const active = Boolean(recorder.active);
+    const symbols = Array.isArray(recorder.symbols) ? recorder.symbols : [];
+    const activeSymbols = new Set(Array.isArray(recorder.active_symbols) ? recorder.active_symbols : []);
+    const lifecycle = recorder.symbol_lifecycle || {};
+    const counts = recorder.counts || {};
+
+    byId("recording-status").textContent = active ? "ACTIVE" : "INACTIVE";
+    byId("recording-status").classList.toggle("active", active);
+    byId("recording-status").classList.toggle("inactive", !active);
+    byId("record-start").disabled = active;
+    byId("record-stop").disabled = !active;
+    byId("record-add-symbol").disabled = !active;
+    byId("record-add-active").disabled = !active;
+    byId("recording-count").textContent = String(activeSymbols.size);
+    byId("recording-session-dir").textContent = recorder.session_dir || "--";
+    byId("recording-cutoff").textContent = recorder.cutoff_et ? `${recorder.cutoff_et} ET` : "3:00 PM ET";
+
+    byId("recording-symbol-list").innerHTML = symbols.length
+      ? symbols.map((symbol) => {
+          const isActive = activeSymbols.has(symbol);
+          const periods = lifecycle[symbol]?.periods || [];
+          const latest = periods[periods.length - 1] || {};
+          const count = recordingEventCount(counts[symbol]);
+          return `
+            <div class="recording-symbol-row">
+              <div class="recording-symbol-main">
+                <strong>${escapeHtml(symbol)}</strong>
+                <span class="recording-symbol-state ${isActive ? "active" : "stopped"}">${isActive ? "RECORDING" : "STOPPED"}</span>
+              </div>
+              <div class="recording-symbol-detail">
+                <span>${count.toLocaleString()} events</span>
+                <span>${isActive ? "since" : "last interval"} ${escapeHtml(latest.started_at_et ? new Date(latest.started_at_et).toLocaleTimeString("en-US", {timeZone: EASTERN_TZ, hour: "numeric", minute: "2-digit"}) : "--")}</span>
+              </div>
+              <button class="recording-toggle" type="button" data-record-symbol="${escapeHtml(symbol)}" data-record-action="${isActive ? "remove" : "add"}" ${active ? "" : "disabled"}>
+                ${isActive ? "Remove" : "Resume"}
+              </button>
+            </div>
+          `;
+        }).join("")
+      : '<div class="muted-copy">Session is active. Add a ticker to begin collecting data.</div>';
+
+    document.querySelectorAll("[data-record-symbol]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const symbol = button.dataset.recordSymbol;
+        if (button.dataset.recordAction === "remove") {
+          void removeRecordingSymbol(symbol);
+        } else {
+          void addRecordingSymbol(symbol);
+        }
+      });
+    });
+  }
+
+  function setRecordingMessage(message, error = false) {
+    const host = byId("recording-message");
+    host.textContent = message;
+    host.classList.toggle("error", error);
+  }
+
   function renderMarketState(snapshot) {
     const host = byId("market-state");
     if (!snapshot) {
@@ -563,7 +629,7 @@
     state.activeSymbol = snapshot.active_symbol;
     state.symbols = snapshot.symbols || {};
     byId("connection-state").textContent = snapshot.connection_state || "UNKNOWN";
-    byId("recorder").textContent = JSON.stringify(snapshot.recorder_state || {}, null, 2);
+    renderRecorderState(snapshot.recorder_state || {});
     renderActive({ chartChanged: true });
   }
 
@@ -632,7 +698,7 @@
         }
       }
     } else if (event.type === "recorder_state") {
-      byId("recorder").textContent = JSON.stringify(event.payload || {}, null, 2);
+      renderRecorderState(event.payload || {});
     }
 
     if (!symbol || symbol === state.activeSymbol) renderActive({ chartChanged });
@@ -759,48 +825,84 @@
     }
   });
 
-  byId("record-start").addEventListener("click", async () => {
-    const raw = byId("recorder-symbols").value.trim();
-    const symbols = raw
-      .split(",")
-      .map((value) => value.trim().toUpperCase())
-      .filter(Boolean);
-    if (!symbols.length && state.activeSymbol) symbols.push(state.activeSymbol);
-    if (!symbols.length) {
-      byId("server-message").textContent = "Enter at least one recorder symbol.";
-      byId("server-message").classList.add("error");
+  async function addRecordingSymbol(symbol) {
+    const normalized = String(symbol || "").trim().toUpperCase();
+    if (!normalized) {
+      setRecordingMessage("Enter a ticker to add.", true);
       return;
     }
+    try {
+      const response = await fetch("/api/recording/symbol", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol: normalized }),
+      });
+      const payload = await parseResponse(response);
+      if (!response.ok) throw new Error(payload.detail || "Unable to add ticker");
+      renderRecorderState(payload);
+      byId("recorder-symbol").value = "";
+      setRecordingMessage(`${normalized} is now recording.`);
+    } catch (error) {
+      setRecordingMessage(error.message, true);
+    }
+  }
 
+  async function removeRecordingSymbol(symbol) {
+    const normalized = String(symbol || "").trim().toUpperCase();
+    try {
+      const response = await fetch(`/api/recording/symbol/${encodeURIComponent(normalized)}`, {
+        method: "DELETE",
+      });
+      const payload = await parseResponse(response);
+      if (!response.ok) throw new Error(payload.detail || "Unable to remove ticker");
+      renderRecorderState(payload);
+      setRecordingMessage(`${normalized} stopped recording. Existing data was preserved.`);
+    } catch (error) {
+      setRecordingMessage(error.message, true);
+    }
+  }
+
+  byId("record-start").addEventListener("click", async () => {
     try {
       const response = await fetch("/api/recording/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbols }),
+        body: JSON.stringify({ symbols: [] }),
       });
-      const payload = await response.json();
+      const payload = await parseResponse(response);
       if (!response.ok) throw new Error(payload.detail || "Recorder start failed");
-      byId("recorder").textContent = JSON.stringify(payload, null, 2);
-      byId("server-message").textContent = `Recording ${symbols.join(", ")} until 3:00 PM ET.`;
-      byId("server-message").classList.remove("error");
+      renderRecorderState(payload);
+      setRecordingMessage("Recording session started. Add tickers as they appear.");
     } catch (error) {
-      byId("server-message").textContent = error.message;
-      byId("server-message").classList.add("error");
+      setRecordingMessage(error.message, true);
     }
   });
 
   byId("record-stop").addEventListener("click", async () => {
     try {
       const response = await fetch("/api/recording/stop", { method: "POST" });
-      const payload = await response.json();
+      const payload = await parseResponse(response);
       if (!response.ok) throw new Error(payload.detail || "Recorder stop failed");
-      byId("recorder").textContent = JSON.stringify(payload, null, 2);
-      byId("server-message").textContent = "Recording stopped.";
-      byId("server-message").classList.remove("error");
+      renderRecorderState(payload);
+      setRecordingMessage("Recording session stopped. All captured files were preserved.");
     } catch (error) {
-      byId("server-message").textContent = error.message;
-      byId("server-message").classList.add("error");
+      setRecordingMessage(error.message, true);
     }
+  });
+
+  byId("record-add-symbol").addEventListener("click", () => {
+    void addRecordingSymbol(byId("recorder-symbol").value);
+  });
+
+  byId("recorder-symbol").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void addRecordingSymbol(byId("recorder-symbol").value);
+    }
+  });
+
+  byId("record-add-active").addEventListener("click", () => {
+    void addRecordingSymbol(state.activeSymbol);
   });
 
   byId("symbol-form").addEventListener("submit", async (event) => {

@@ -15,7 +15,11 @@ from momentum_companion.runtime import CompanionRuntime
 
 STATIC_DIR = Path(__file__).with_name("static")
 class RecordingRequest(BaseModel):
-    symbols: list[str]
+    symbols: list[str] = []
+
+
+class RecordingSymbolRequest(BaseModel):
+    symbol: str
 
 
 LIGHTWEIGHT_CHARTS_JS = (
@@ -62,6 +66,7 @@ def create_app(runtime: CompanionRuntime | None = None) -> FastAPI:
     @app.get("/app-20260922-8.js")
     @app.get("/app-20260922-9.js")
     @app.get("/app-20260922-10.js")
+    @app.get("/app-20260922-11.js")
     def app_js() -> FileResponse:
         return FileResponse(
             STATIC_DIR / "app.js",
@@ -74,6 +79,7 @@ def create_app(runtime: CompanionRuntime | None = None) -> FastAPI:
     @app.get("/styles-20260922-2.css")
     @app.get("/styles-20260922-3.css")
     @app.get("/styles-20260922-4.css")
+    @app.get("/styles-20260922-5.css")
     def styles() -> FileResponse:
         return FileResponse(
             STATIC_DIR / "styles.css",
@@ -125,6 +131,20 @@ def create_app(runtime: CompanionRuntime | None = None) -> FastAPI:
     def start_recording(request: RecordingRequest) -> dict[str, Any]:
         try:
             return companion.start_recording(request.symbols)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/recording/symbol")
+    def add_recording_symbol(request: RecordingSymbolRequest) -> dict[str, Any]:
+        try:
+            return companion.add_recording_symbol(request.symbol)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.delete("/api/recording/symbol/{symbol}")
+    def remove_recording_symbol(symbol: str) -> dict[str, Any]:
+        try:
+            return companion.remove_recording_symbol(symbol)
         except (ValueError, RuntimeError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

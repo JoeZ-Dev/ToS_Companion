@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ToS Companion</title>
-  <link rel="stylesheet" href="/styles-20260922-4.css">
+  <link rel="stylesheet" href="/styles-20260922-5.css">
   <script src="/vendor/lightweight-charts-20260922.js"></script>
 </head>
 <body>
@@ -44,6 +44,7 @@
           <div class="tabs" role="tablist" aria-label="Analysis views">
             <button class="tab-button active" type="button" data-tab="analysis">Analysis</button>
             <button class="tab-button" type="button" data-tab="setups">Setups</button>
+            <button class="tab-button" type="button" data-tab="recording">Recording</button>
             <button class="tab-button" type="button" data-tab="raw">Raw</button>
           </div>
           <button id="llm-run" class="run-llm" type="button">Run LLM</button>
@@ -110,6 +111,43 @@
           </section>
         </section>
 
+        <section id="tab-recording" class="tab-panel">
+          <section class="analysis-card recording-session-card">
+            <div class="section-heading-row">
+              <div class="section-title">Market-Day Recording</div>
+              <span id="recording-status" class="recording-status inactive">INACTIVE</span>
+            </div>
+            <div class="recording-session-actions">
+              <button id="record-start" type="button">Start Session</button>
+              <button id="record-stop" type="button" disabled>Stop Session</button>
+            </div>
+            <div class="recording-meta">
+              <span>Cutoff <strong id="recording-cutoff">3:00 PM ET</strong></span>
+              <span>Session <strong id="recording-session-dir">--</strong></span>
+            </div>
+          </section>
+
+          <section class="analysis-card">
+            <div class="section-title">Add Ticker</div>
+            <div class="recording-add-row">
+              <input id="recorder-symbol" maxlength="10" placeholder="SYMBOL">
+              <button id="record-add-symbol" type="button">Add</button>
+              <button id="record-add-active" type="button">Add Current</button>
+            </div>
+            <div id="recording-message" class="auth-note">Start a recording session, then add tickers as they appear.</div>
+          </section>
+
+          <section class="analysis-card">
+            <div class="section-heading-row">
+              <div class="section-title">Recorded Tickers</div>
+              <div id="recording-count" class="count-badge">0</div>
+            </div>
+            <div id="recording-symbol-list" class="recording-symbol-list">
+              <div class="muted-copy">No recording session active.</div>
+            </div>
+          </section>
+        </section>
+
         <section id="tab-raw" class="tab-panel">
           <section class="analysis-card">
             <div class="section-title">Analysis Engine JSON</div>
@@ -127,16 +165,6 @@
           </section>
 
           <section class="analysis-card">
-            <div class="section-title">Recorder</div>
-            <div class="recorder-controls">
-              <input id="recorder-symbols" placeholder="AEHL,TOPS">
-              <button id="record-start" type="button">Start</button>
-              <button id="record-stop" type="button">Stop</button>
-            </div>
-            <pre id="recorder">Inactive</pre>
-          </section>
-
-          <section class="analysis-card">
             <div class="section-title">Server</div>
             <div id="server-message">Connecting...</div>
             <div id="auth-status" class="auth-note">Schwab auth: checking companion_auth...</div>
@@ -146,6 +174,6 @@
     </section>
   </main>
 
-  <script src="/app-20260922-10.js"></script>
+  <script src="/app-20260922-11.js"></script>
 </body>
 </html>

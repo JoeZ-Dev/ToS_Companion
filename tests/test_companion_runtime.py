@@ -18,9 +18,29 @@ class FakeStream:
 class FakeRecorder:
     def __init__(self):
         self.payloads = []
+        self.symbols = []
+        self._active = []
 
     def record_payload(self, payload):
         self.payloads.append(payload)
+
+    def add_symbol(self, symbol):
+        if symbol not in self.symbols:
+            self.symbols.append(symbol)
+        if symbol not in self._active:
+            self._active.append(symbol)
+        return True
+
+    def remove_symbol(self, symbol):
+        if symbol in self._active:
+            self._active.remove(symbol)
+        return True
+
+    def active_symbols(self):
+        return list(self._active)
+
+    def state(self):
+        return {"active": True, "symbols": list(self.symbols), "active_symbols": list(self._active)}
 
 
 class FakeAppState:
@@ -225,3 +245,18 @@ def test_completed_bar_updates_patterns_and_preserves_ae_processing():
     assert symbol_state["pattern_observations"][0]["pattern_type"] == "TEST_PATTERN"
     assert symbol_state["ae_snapshot"]["status"] == "ok"
     assert runtime.ae_engine.bars == [bar]
+
+
+def test_runtime_add_remove_recording_symbol_refreshes_stream_union():
+    runtime = bare_runtime()
+    recorder = FakeRecorder()
+    runtime._recorder = recorder
+    runtime._recording_symbols = set()
+
+    added = runtime.add_recording_symbol("tops")
+    assert added["active_symbols"] == ["TOPS"]
+    assert runtime._stream.symbol_sets[-1] == ["AEHL", "TOPS"]
+
+    removed = runtime.remove_recording_symbol("TOPS")
+    assert removed["active_symbols"] == []
+    assert runtime._stream.symbol_sets[-1] == ["AEHL"]

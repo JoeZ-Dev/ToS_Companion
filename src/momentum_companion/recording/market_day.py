@@ -101,9 +101,8 @@ class MarketDayRecorder:
         services: Iterable[str] | None = None,
     ) -> None:
         self.symbols = normalize_symbols(symbols)
-        if not self.symbols:
-            raise ValueError("At least one symbol is required")
         self._symbol_set = set(self.symbols)
+        self._active_symbols = set(self.symbols)
         selected_services = set(services or {"LEVELONE_EQUITIES"})
         unknown_services = selected_services - RECORDED_SERVICES
         if unknown_services:
@@ -114,14 +113,18 @@ class MarketDayRecorder:
         self.started_at = (started_at or datetime.now(ET)).astimezone(ET)
         root = output_root or (Path.home() / ".tos_companion" / "recordings")
         stamp = self.started_at.strftime("%Y-%m-%d_%H%M%S")
-        label = "-".join(self.symbols)
-        self.session_dir = root / f"{stamp}_{label}"
+        self.session_dir = root / f"{stamp}_session"
         self.session_dir.mkdir(parents=True, exist_ok=False)
         self._files: dict[str, TextIO] = {}
         self._counts: dict[str, dict[str, int]] = {
             sym: {service: 0 for service in sorted(self.services)} for sym in self.symbols
         }
-        self._lock = threading.Lock()
+        started_iso = self.started_at.isoformat()
+        self._symbol_lifecycle: dict[str, dict] = {
+            sym: {"active": True, "periods": [{"started_at_et": started_iso, "ended_at_et": None}]}
+            for sym in self.symbols
+        }
+        self._lock = threading.RLock()
         self._closed = False
         self._write_manifest(ended_at=None, stop_reason=None)
 
@@ -149,7 +152,7 @@ class MarketDayRecorder:
                     if not isinstance(entry, dict):
                         continue
                     symbol = _entry_symbol(entry)
-                    if symbol not in self._symbol_set:
+                    if symbol not in self._active_symbols:
                         continue
                     record = {
                         "schema_version": SCHEMA_VERSION,
@@ -165,17 +168,98 @@ class MarketDayRecorder:
                     handle.flush()
                     self._counts[symbol][service] += 1
 
+    def add_symbol(self, symbol: str, *, changed_at: datetime | None = None) -> bool:
+        normalized = str(symbol or "").strip().upper()
+        if not normalized:
+            raise ValueError("symbol is required")
+        when = (changed_at or datetime.now(ET)).astimezone(ET).isoformat()
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("Recorder is closed")
+            if normalized in self._active_symbols:
+                return False
+            if normalized not in self._symbol_set:
+                self._symbol_set.add(normalized)
+                self.symbols.append(normalized)
+                self._counts[normalized] = {
+                    service: 0 for service in sorted(self.services)
+                }
+                self._symbol_lifecycle[normalized] = {"active": True, "periods": []}
+            lifecycle = self._symbol_lifecycle[normalized]
+            lifecycle["active"] = True
+            lifecycle["periods"].append({"started_at_et": when, "ended_at_et": None})
+            self._active_symbols.add(normalized)
+            self._write_manifest(ended_at=None, stop_reason=None)
+            return True
+
+    def remove_symbol(self, symbol: str, *, changed_at: datetime | None = None) -> bool:
+        normalized = str(symbol or "").strip().upper()
+        if not normalized:
+            raise ValueError("symbol is required")
+        when = (changed_at or datetime.now(ET)).astimezone(ET).isoformat()
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("Recorder is closed")
+            if normalized not in self._active_symbols:
+                return False
+            self._active_symbols.remove(normalized)
+            lifecycle = self._symbol_lifecycle.get(normalized)
+            if lifecycle is not None:
+                lifecycle["active"] = False
+                periods = lifecycle.get("periods") or []
+                if periods and periods[-1].get("ended_at_et") is None:
+                    periods[-1]["ended_at_et"] = when
+            handle = self._files.pop(normalized, None)
+            if handle is not None:
+                handle.flush()
+                handle.close()
+            self._write_manifest(ended_at=None, stop_reason=None)
+            return True
+
+    def active_symbols(self) -> list[str]:
+        with self._lock:
+            return [symbol for symbol in self.symbols if symbol in self._active_symbols]
+
+    def state(self) -> dict:
+        with self._lock:
+            return {
+                "active": not self._closed,
+                "symbols": list(self.symbols),
+                "active_symbols": self.active_symbols(),
+                "session_dir": str(self.session_dir),
+                "cutoff_et": "15:00:00",
+                "counts": {
+                    symbol: dict(counts) for symbol, counts in self._counts.items()
+                },
+                "symbol_lifecycle": {
+                    symbol: {
+                        "active": bool(value.get("active")),
+                        "periods": [dict(period) for period in value.get("periods") or []],
+                    }
+                    for symbol, value in self._symbol_lifecycle.items()
+                },
+            }
+
     def close(self, *, stop_reason: str = "stopped") -> None:
         if self._closed:
             return
         with self._lock:
+            ended_iso = datetime.now(ET).isoformat()
+            for symbol in list(self._active_symbols):
+                lifecycle = self._symbol_lifecycle.get(symbol)
+                if lifecycle is not None:
+                    lifecycle["active"] = False
+                    periods = lifecycle.get("periods") or []
+                    if periods and periods[-1].get("ended_at_et") is None:
+                        periods[-1]["ended_at_et"] = ended_iso
+            self._active_symbols.clear()
             for handle in self._files.values():
                 handle.flush()
                 handle.close()
             self._files.clear()
             self._closed = True
             self._write_manifest(
-                ended_at=datetime.now(ET).isoformat(),
+                ended_at=ended_iso,
                 stop_reason=stop_reason,
             )
 
@@ -184,6 +268,8 @@ class MarketDayRecorder:
             "schema_version": SCHEMA_VERSION,
             "kind": "market_day_recording",
             "symbols": self.symbols,
+            "active_symbols": self.active_symbols(),
+            "symbol_lifecycle": self._symbol_lifecycle,
             "services": sorted(self.services),
             "started_at_et": self.started_at.isoformat(),
             "scheduled_cutoff_et": "15:00:00",
