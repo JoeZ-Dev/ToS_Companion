@@ -507,15 +507,36 @@ This keeps the same observation usable by:
 
 ## Live/replay integration rule
 
-When integration begins:
+The source-agnostic integration boundary now exists as:
+
+```text
+src/momentum_companion/setup_engine/pattern_service.py
+```
+
+`PatternEvaluationService` owns a bounded rolling bar window per symbol and exposes the same detector path to any source.
+
+Primary interfaces:
+
+```python
+service.ingest_completed_bar(symbol, bar)
+service.seed_bars(symbol, bars)
+service.observations(symbol)
+service.reset(symbol)
+```
+
+The intended flow is:
 
 ```text
 Live:
-Schwab -> bars -> PatternEngine
+Schwab -> 10s completed bar -> PatternEvaluationService -> PatternEngine
 
 Replay:
-recorded market events -> bars -> PatternEngine
+recorded market events -> same 10s completed bar shape
+                       -> PatternEvaluationService
+                       -> PatternEngine
 ```
+
+`PatternEvaluationService` does not know whether a bar came from Schwab, replay, historical seeding, or a test fixture.
 
 There must not be separate live and replay pattern implementations.
 
@@ -564,7 +585,9 @@ As of this branch:
 - explicit default registration exists;
 - duplicate registration is rejected;
 - synthetic pattern tests exist;
-- pattern-only CI passes.
+- pattern-only CI passes;
+- source-agnostic `PatternEvaluationService` exists;
+- live/replay completed-bar boundary is covered by tests.
 
 Not yet integrated:
 
