@@ -83,6 +83,9 @@ def test_websocket_receives_initial_snapshot_and_live_events():
                 }
             )
             event = websocket.receive_json()
+            while event["type"] != "quote":
+                event = websocket.receive_json()
 
-    assert event["type"] == "symbol_added" or event["type"] == "active_symbol"
-    # Drain ordering is intentionally event-based; quote follows symbol creation.
+    assert event["type"] == "quote"
+    assert event["symbol"] == "AEHL"
+    assert event["payload"]["last"] == 3.20
