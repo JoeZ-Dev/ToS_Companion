@@ -62,6 +62,10 @@ jobs:
             tests/test_web_app.py \
             tests/test_stream_raw_recording.py \
             tests/test_market_day_recorder.py
+      - name: Validate joelab deployment scripts
+        run: |
+          bash -n deploy/deploy_joelab_docker.sh
+          bash -n deploy/validate_recorder.sh
       - name: Validate joelab Docker Compose
         run: |
           cp deploy/joelab.env.example deploy/joelab.env
