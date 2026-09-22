@@ -68,7 +68,8 @@ class LLMCoach:
             "- Tape_warning SPIKEY_PULLBACKS when recent failed breakouts with elevated volume.\n"
             "\n"
             "GENERAL\n"
-            "- No fabricated levels; target1_label must match structural source.\n"
+            "- No fabricated levels; target1_label must be one of: nearest_resistance, micro_resistance_15m, opening_range_high, premarket_high, swing_high, resistance_cluster.\n"
+            "- Use resistance_cluster only when target_price matches an AE levels.resistance_clusters price zone.\n"
             "- No currency symbols. Summary <=3 sentences.\n"
         )
 

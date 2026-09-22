@@ -135,7 +135,15 @@
             "type": "string"
           },
           "target1_label": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "nearest_resistance",
+              "micro_resistance_15m",
+              "opening_range_high",
+              "premarket_high",
+              "swing_high",
+              "resistance_cluster"
+            ]
           },
           "extension_trigger": {
             "type": "string"
