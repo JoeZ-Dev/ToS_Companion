@@ -87,3 +87,42 @@ def test_default_manifest_declares_level_one_only(tmp_path: Path):
     manifest = json.loads((recorder.session_dir / "manifest.json").read_text())
     assert manifest["services"] == ["LEVELONE_EQUITIES"]
     assert "TIMESALE_EQUITY" not in manifest["counts"]["AEHL"]
+
+
+def test_manifest_counts_match_jsonl_records(tmp_path: Path):
+    import json
+
+    recorder = MarketDayRecorder(["AEHL"], output_root=tmp_path)
+    for idx in range(3):
+        recorder.record_payload(
+            {
+                "data": [
+                    {
+                        "service": "LEVELONE_EQUITIES",
+                        "timestamp": 1234567890000 + idx,
+                        "content": [
+                            {
+                                "key": "AEHL",
+                                "1": 3.10 + idx * 0.01,
+                                "2": 3.11 + idx * 0.01,
+                                "3": 3.105 + idx * 0.01,
+                                "8": 1000 + idx * 100,
+                            }
+                        ],
+                    }
+                ]
+            },
+            received_at=f"2026-09-22T13:00:0{idx}Z",
+        )
+    recorder.close(stop_reason="browser_stop")
+
+    manifest = json.loads((recorder.session_dir / "manifest.json").read_text())
+    jsonl_lines = [
+        line
+        for line in (recorder.session_dir / "AEHL.jsonl").read_text().splitlines()
+        if line.strip()
+    ]
+
+    assert manifest["stop_reason"] == "browser_stop"
+    assert manifest["counts"]["AEHL"]["LEVELONE_EQUITIES"] == 3
+    assert len(jsonl_lines) == 3
