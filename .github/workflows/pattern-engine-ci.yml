@@ -9,6 +9,7 @@ on:
       - 'src/momentum_companion/setup_engine/pattern_engine.py'
       - 'src/momentum_companion/setup_engine/pattern_contracts.py'
       - 'src/momentum_companion/setup_engine/patterns/**'
+      - 'src/momentum_companion/setup_engine/structure/**'
       - 'tests/test_pattern_engine.py'
       - '.github/workflows/pattern-engine-ci.yml'
 
