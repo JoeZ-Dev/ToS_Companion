@@ -1,6 +1,10 @@
 from datetime import datetime
 from pathlib import Path
 
+from momentum_companion.recording.history import (
+    load_recorded_minute_candles,
+    merge_candles_prefer_primary,
+)
 from momentum_companion.recording.market_day import (
     ET,
     MarketDayRecorder,
@@ -126,3 +130,92 @@ def test_manifest_counts_match_jsonl_records(tmp_path: Path):
     assert manifest["stop_reason"] == "browser_stop"
     assert manifest["counts"]["AEHL"]["LEVELONE_EQUITIES"] == 3
     assert len(jsonl_lines) == 3
+
+
+def test_recorded_l1_can_reconstruct_minute_candles(tmp_path: Path):
+    started = datetime(2026, 9, 22, 4, 0, 0, tzinfo=ET)
+    start_ms = int(started.timestamp() * 1000)
+    recorder = MarketDayRecorder(
+        ["IMCC"],
+        output_root=tmp_path,
+        started_at=started,
+    )
+
+    recorder.record_payload(
+        {
+            "data": [
+                {
+                    "service": "LEVELONE_EQUITIES",
+                    "timestamp": start_ms + 5_000,
+                    "content": [{"key": "IMCC", "3": 5.00, "8": 1000}],
+                },
+                {
+                    "service": "LEVELONE_EQUITIES",
+                    "timestamp": start_ms + 25_000,
+                    "content": [{"key": "IMCC", "3": 5.20, "8": 1100}],
+                },
+                {
+                    "service": "LEVELONE_EQUITIES",
+                    "timestamp": start_ms + 65_000,
+                    "content": [{"key": "IMCC", "8": 1200}],
+                },
+            ]
+        },
+        received_at="2026-09-22T08:01:05Z",
+    )
+    recorder.close()
+
+    candles = load_recorded_minute_candles(
+        "IMCC",
+        start_ms,
+        start_ms + 120_000,
+        root=tmp_path,
+    )
+
+    assert len(candles) == 2
+    assert candles[0]["datetime"] == start_ms
+    assert candles[0]["open"] == 5.00
+    assert candles[0]["high"] == 5.20
+    assert candles[0]["low"] == 5.00
+    assert candles[0]["close"] == 5.20
+    assert candles[0]["volume"] == 100.0
+    assert candles[1]["open"] == 5.20
+    assert candles[1]["close"] == 5.20
+    assert candles[1]["volume"] == 100.0
+
+
+def test_schwab_candles_win_over_recorder_on_timestamp_collision():
+    fallback = [
+        {
+            "datetime": 60_000,
+            "open": 5.0,
+            "high": 5.1,
+            "low": 4.9,
+            "close": 5.0,
+            "volume": 100,
+        },
+        {
+            "datetime": 120_000,
+            "open": 5.1,
+            "high": 5.2,
+            "low": 5.0,
+            "close": 5.15,
+            "volume": 200,
+        },
+    ]
+    primary = [
+        {
+            "datetime": 60_000,
+            "open": 6.0,
+            "high": 6.1,
+            "low": 5.9,
+            "close": 6.0,
+            "volume": 300,
+        }
+    ]
+
+    merged = merge_candles_prefer_primary(primary, fallback)
+
+    assert [c["datetime"] for c in merged] == [60_000, 120_000]
+    assert merged[0]["close"] == 6.0
+    assert merged[1]["close"] == 5.15

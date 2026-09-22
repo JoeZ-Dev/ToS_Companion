@@ -180,3 +180,23 @@ The script:
 7. fails if no raw `LEVELONE_EQUITIES` events were persisted.
 
 Use symbols that are actively receiving quote updates during the test.
+
+
+## Early premarket history behavior
+
+Live validation on 2026-09-22 showed an important Schwab distinction:
+
+- the live LEVELONE_EQUITIES stream can deliver updates before 7:00 AM ET;
+- Schwab REST 1-minute price history returned no candles before 7:00 AM ET;
+- after 7:00 AM ET, the same intraday history request began returning minute candles.
+
+To preserve the 4:00-7:00 AM window, ToS_Companion can reconstruct 1-minute fallback candles from its own persisted LEVELONE_EQUITIES recordings. The runtime and AE seed paths merge those fallback candles with Schwab REST history.
+
+Merge rule:
+
+```text
+Schwab REST candle wins on an overlapping minute.
+Recorder-derived candle fills only a missing minute.
+```
+
+This does not manufacture history. A 4:00-7:00 AM minute can only be reconstructed for a symbol that ToS_Companion was actually recording while those raw L1 events occurred.
