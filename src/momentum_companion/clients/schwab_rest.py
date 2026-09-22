@@ -118,8 +118,17 @@ class SchwabRestClient:
         params.update(self._freq_params(freq))
         params["startDate"] = start
         params["endDate"] = end
+        params["needExtendedHoursData"] = "true"
         resp = self._request("GET", f"{self._md_base_url}/pricehistory", params=params)
-        return resp.json()
+        body = resp.json()
+        logger.info(
+            "pricehistory result symbol=%s freq=%s candles=%d empty=%s",
+            symbol,
+            freq,
+            len(body.get("candles") or []),
+            body.get("empty"),
+        )
+        return body
 
     def _freq_params(self, freq: str) -> Dict[str, Any]:
         if freq == "1m":
