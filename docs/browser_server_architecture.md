@@ -248,3 +248,10 @@ Do not combine this refactor with:
 - rewriting all backend Python.
 
 The browser project should first solve deployment friction and establish a clean long-running architecture.
+
+
+## LLM runtime direction
+
+The initial browser foundation inherited the desktop direct-API-key OpenAI client for compatibility. That is not the intended long-term joelab design.
+
+The planned server implementation should use the same CLI-style OpenAI authentication/execution pattern used by the user's newer applications. The browser remains a thin client and must never receive OpenAI credentials. The current API-key path should remain transitional until the CLI-backed adapter is implemented and tested.
