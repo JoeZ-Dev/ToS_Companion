@@ -182,3 +182,50 @@ def test_browser_assets_are_not_cached():
 
     assert response.status_code == 200
     assert "no-store" in response.headers["cache-control"]
+
+
+def test_browser_assets_include_observational_pattern_ui():
+    runtime = FakeRuntime()
+    with TestClient(create_app(runtime)) as client:
+        html = client.get("/").text
+        javascript = client.get("/app.js").text
+        css = client.get("/styles.css").text
+
+    assert 'id="patterns"' in html
+    assert 'id="pattern-count"' in html
+    assert 'event.type === "pattern_update"' in javascript
+    assert "renderPatternOverlays" in javascript
+    assert "chart.removeSeries" in javascript
+    assert ".pattern-item" in css
+
+
+def test_websocket_carries_pattern_update_events_without_trade_action():
+    runtime = FakeRuntime()
+    runtime.session.add_symbol("AEHL", make_active=True)
+
+    with TestClient(create_app(runtime)) as client:
+        with client.websocket_connect("/ws") as websocket:
+            initial = websocket.receive_json()
+            assert initial["type"] == "snapshot"
+
+            runtime.session.update_pattern_observations(
+                "AEHL",
+                [
+                    {
+                        "id": "AEHL:ASCENDING_TRIANGLE:10",
+                        "symbol": "AEHL",
+                        "pattern_type": "ASCENDING_TRIANGLE",
+                        "state": "TESTING",
+                        "evidence": {"resistance_touches": 3},
+                        "points": [],
+                        "lines": [],
+                    }
+                ],
+            )
+            event = websocket.receive_json()
+            while event["type"] != "pattern_update":
+                event = websocket.receive_json()
+
+    assert event["symbol"] == "AEHL"
+    assert event["payload"]["patterns"][0]["pattern_type"] == "ASCENDING_TRIANGLE"
+    assert runtime.session.snapshot()["symbols"]["AEHL"]["trade_state"] is None
