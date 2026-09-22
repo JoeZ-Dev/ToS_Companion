@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ToS Companion</title>
-  <link rel="stylesheet" href="/styles-20260922-3.css">
+  <link rel="stylesheet" href="/styles-20260922-4.css">
   <script src="/vendor/lightweight-charts-20260922.js"></script>
 </head>
 <body>
@@ -75,6 +75,16 @@
           </section>
 
           <section class="analysis-card">
+            <div class="section-heading-row">
+              <div class="section-title">Patterns</div>
+              <div id="pattern-count" class="count-badge">0</div>
+            </div>
+            <div id="pattern-list" class="pattern-list">
+              <div class="muted-copy">Waiting for completed live bars.</div>
+            </div>
+          </section>
+
+          <section class="analysis-card">
             <div class="section-title">LLM Summary</div>
             <div id="llm-summary" class="summary-copy">Not run.</div>
           </section>
@@ -112,6 +122,11 @@
           </section>
 
           <section class="analysis-card">
+            <div class="section-title">Pattern Engine JSON</div>
+            <pre id="pattern-raw">No pattern observations yet.</pre>
+          </section>
+
+          <section class="analysis-card">
             <div class="section-title">Recorder</div>
             <div class="recorder-controls">
               <input id="recorder-symbols" placeholder="AEHL,TOPS">
@@ -131,6 +146,6 @@
     </section>
   </main>
 
-  <script src="/app-20260922-8.js"></script>
+  <script src="/app-20260922-9.js"></script>
 </body>
 </html>

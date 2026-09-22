@@ -27,6 +27,7 @@ from momentum_companion.recording.history import (
 )
 from momentum_companion.recording.market_day import MarketDayRecorder, reached_cutoff, seconds_until_cutoff
 from momentum_companion.session import CompanionSession
+from momentum_companion.setup_engine.pattern_service import PatternEvaluationService
 from momentum_companion.utils.logging import logging
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,7 @@ class CompanionRuntime:
         self.app_state = app_state
         self.journal = journal
         self.session = session or CompanionSession()
+        self.pattern_service = PatternEvaluationService()
 
         self.token_provider = token_provider or TokenProvider(
             state_callback=self._on_auth_state
@@ -130,6 +132,7 @@ class CompanionRuntime:
             self._active_symbol = normalized
             self._pending_symbol = normalized
             self._aggregator = BarAggregator10s()
+            self.pattern_service.reset(normalized)
 
         self.session.add_symbol(normalized, make_active=True)
         if prior and prior != normalized and self._stream is not None:
@@ -327,6 +330,13 @@ class CompanionRuntime:
 
     def _handle_completed_bar(self, symbol: str, bar: TenSecondBar) -> None:
         self.session.ingest_bar(symbol, bar)
+
+        try:
+            patterns = self.pattern_service.ingest_completed_bar(symbol, bar)
+            self.session.update_pattern_observations(symbol, patterns)
+        except Exception:
+            logger.warning("Pattern evaluation failed for %s", symbol, exc_info=True)
+
         try:
             snapshot = self.ae_engine.ingest_10s_bar(bar)
             if snapshot:

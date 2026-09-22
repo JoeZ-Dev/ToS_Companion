@@ -54,6 +54,7 @@ class _SymbolState:
     ae_snapshot: dict[str, Any] | None = None
     llm_output: dict[str, Any] | None = None
     trade_state: dict[str, Any] | None = None
+    pattern_observations: list[dict[str, Any]] = field(default_factory=list)
 
 
 class CompanionSession:
@@ -232,6 +233,17 @@ class CompanionSession:
             self._symbols[normalized].trade_state = value
         self._emit("trade_state", symbol=normalized, payload={"state": value})
 
+    def update_pattern_observations(
+        self,
+        symbol: str,
+        observations: list[Mapping[str, Any]],
+    ) -> None:
+        normalized = self.add_symbol(symbol)
+        value = [dict(observation) for observation in observations]
+        with self._lock:
+            self._symbols[normalized].pattern_observations = value
+        self._emit("pattern_update", symbol=normalized, payload={"patterns": value})
+
     def update_recorder_state(self, state: Mapping[str, Any]) -> None:
         value = dict(state)
         with self._lock:
@@ -256,6 +268,9 @@ class CompanionSession:
                     "trade_state": (
                         dict(state.trade_state) if state.trade_state is not None else None
                     ),
+                    "pattern_observations": [
+                        dict(observation) for observation in state.pattern_observations
+                    ],
                 }
                 for symbol, state in self._symbols.items()
             }

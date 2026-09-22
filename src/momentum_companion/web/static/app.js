@@ -358,6 +358,75 @@
     }).join("");
   }
 
+  function humanizePatternName(value) {
+    return String(value || "Pattern")
+      .toLowerCase()
+      .split("_")
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
+  }
+
+  function patternEvidenceSummary(pattern) {
+    const evidence = pattern?.evidence || {};
+    if (pattern?.pattern_type === "MICRO_PULLBACK") {
+      const impulse = Number(evidence.impulse_pct);
+      const retrace = Number(evidence.retracement_pct);
+      const duration = Number(evidence.duration_sec);
+      const parts = [];
+      if (Number.isFinite(impulse)) parts.push(`impulse ${(impulse * 100).toFixed(1)}%`);
+      if (Number.isFinite(retrace)) parts.push(`retracement ${(retrace * 100).toFixed(1)}%`);
+      if (Number.isFinite(duration)) parts.push(`${Math.round(duration)}s`);
+      return parts.join(" · ");
+    }
+    if (pattern?.pattern_type === "ASCENDING_TRIANGLE") {
+      const touches = Number(evidence.resistance_touches);
+      const lows = Number(evidence.higher_lows);
+      const compression = Number(evidence.compression_pct);
+      const parts = [];
+      if (Number.isFinite(touches)) parts.push(`${touches} resistance touches`);
+      if (Number.isFinite(lows)) parts.push(`${lows} higher lows`);
+      if (Number.isFinite(compression)) parts.push(`${compression.toFixed(0)}% compression`);
+      return parts.join(" · ");
+    }
+    const keys = Object.keys(evidence).slice(0, 3);
+    return keys.map((key) => `${key.replaceAll("_", " ")}: ${String(evidence[key])}`).join(" · ");
+  }
+
+  function patternTone(patternState) {
+    const value = String(patternState || "").toUpperCase();
+    if (["BREAKOUT", "CONTINUATION", "VALID"].includes(value)) return "good";
+    if (value === "INVALIDATED") return "bad";
+    return "warn";
+  }
+
+  function renderPatterns(symbolState) {
+    const patterns = Array.isArray(symbolState?.pattern_observations)
+      ? symbolState.pattern_observations
+      : [];
+    byId("pattern-count").textContent = String(patterns.length);
+    byId("pattern-list").innerHTML = patterns.length
+      ? patterns.map((pattern) => `
+          <div class="pattern-row">
+            <span class="pattern-name">${escapeHtml(humanizePatternName(pattern.pattern_type))}</span>
+            <span class="chip pattern-state ${patternTone(pattern.state)}">${escapeHtml(pattern.state || "--")}</span>
+            <span class="pattern-evidence">${escapeHtml(patternEvidenceSummary(pattern) || "detected structure")}</span>
+          </div>
+        `).join("")
+      : '<div class="muted-copy">No active patterns detected yet.</div>';
+    byId("pattern-raw").textContent = patterns.length
+      ? JSON.stringify(patterns, null, 2)
+      : "No pattern observations yet.";
+  }
+
+  function setupSourceBadge(setup) {
+    const pattern = setup?.source_pattern || setup?.pattern_type;
+    if (pattern) {
+      return `<span class="setup-source pattern-source">PATTERN: ${escapeHtml(humanizePatternName(pattern))}</span>`;
+    }
+    return '<span class="setup-source llm-source">LLM</span>';
+  }
+
   function renderSetupCard(setup, compact = false) {
     if (!setup || typeof setup !== "object") return "";
     const stateName = String(setup.setup_state || "WATCH").toLowerCase();
@@ -372,6 +441,7 @@
         <div class="setup-title-row">
           <div class="setup-title">${escapeHtml(setup.name || "Unnamed setup")}</div>
           <div class="setup-badges">
+            ${setupSourceBadge(setup)}
             <span class="setup-state ${escapeHtml(stateName)}">${escapeHtml(setup.setup_state || "WATCH")}</span>
             ${warning}
           </div>
@@ -399,6 +469,7 @@
     return `
       <button class="setup-preview-row" type="button" data-open-setups="true">
         <span class="setup-preview-name">${escapeHtml(setup.name || "Unnamed setup")}</span>
+        ${setupSourceBadge(setup)}
         <span class="setup-state ${escapeHtml(stateName)}">${escapeHtml(setupState)}</span>
         <span class="setup-preview-stat"><small>${escapeHtml(primaryPriceLabel)}</small><strong>${escapeHtml(fmtMaybePrice(setup.entry_trigger_price))}</strong></span>
         <span class="setup-preview-stat"><small>Target</small><strong>${escapeHtml(fmtMaybePrice(setup.target_price))}</strong></span>
@@ -427,6 +498,7 @@
     renderMarketState(snapshot);
     renderMetrics(snapshot);
     renderLevels(snapshot);
+    renderPatterns(symbolState);
     byId("llm-summary").textContent = output?.error
       ? output.error
       : output?.summary || "Not run.";
@@ -512,6 +584,7 @@
         history_bars: [],
         bars_10s: [],
         ae_snapshot: null,
+        pattern_observations: [],
       };
     }
 
@@ -532,6 +605,8 @@
       if (symbol === state.activeSymbol) {
         setStructuralLines(state.symbols[symbol].ae_snapshot);
       }
+    } else if (event.type === "pattern_update" && symbol) {
+      state.symbols[symbol].pattern_observations = event.payload?.patterns || [];
     } else if (event.type === "llm_update" && symbol) {
       state.symbols[symbol].llm_output = event.payload?.output || null;
       if (symbol === state.activeSymbol) {
