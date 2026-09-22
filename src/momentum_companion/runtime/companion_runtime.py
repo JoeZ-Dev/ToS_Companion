@@ -16,6 +16,7 @@ from momentum_companion.clients.token_provider import TokenProvider
 from momentum_companion.data.bar_aggregator import BarAggregator10s, TenSecondBar
 from momentum_companion.data.contracts import QuoteEvent
 from momentum_companion.data.price_update import PriceUpdate
+from momentum_companion.recording.market_day import MarketDayRecorder, reached_cutoff, seconds_until_cutoff
 from momentum_companion.session import CompanionSession
 from momentum_companion.utils.logging import logging
 
@@ -61,6 +62,9 @@ class CompanionRuntime:
         self._lock = threading.RLock()
         self._et_tz = ZoneInfo("America/New_York")
         self._started = False
+        self._recorder: MarketDayRecorder | None = None
+        self._recording_symbols: set[str] = set()
+        self._recorder_cutoff_thread: threading.Thread | None = None
 
     @property
     def active_symbol(self) -> str | None:
@@ -83,6 +87,7 @@ class CompanionRuntime:
             stream = self._stream
             self._stream = None
             self._started = False
+        self.stop_recording(reason="runtime_stopped")
         if stream is not None:
             try:
                 stream.disconnect()
@@ -120,8 +125,7 @@ class CompanionRuntime:
             logger.warning("AE seed failed for %s", normalized, exc_info=True)
 
         self._ensure_stream()
-        if self._stream is not None and self._stream.is_connected():
-            self._stream.subscribe_level_one(normalized)
+        self._refresh_stream_subscription()
 
         return self.session.snapshot()
 
@@ -165,6 +169,7 @@ class CompanionRuntime:
             token_provider=self.token_provider,
             journal=self.journal,
             state_callback=self._on_stream_state,
+            raw_payload_callback=self._handle_raw_payload,
         )
         with self._lock:
             if self._stream is None:
@@ -217,13 +222,108 @@ class CompanionRuntime:
     def _on_stream_state(self, state: str) -> None:
         self.session.update_connection_state(state)
         if state == "CONNECTED":
-            symbol = self.active_symbol
-            stream = self._stream
-            if symbol and stream is not None:
-                try:
-                    stream.subscribe_level_one(symbol)
-                except Exception:
-                    logger.warning("Live subscribe failed for %s", symbol, exc_info=True)
+            self._refresh_stream_subscription()
+
+    def _desired_stream_symbols(self) -> list[str]:
+        with self._lock:
+            symbols = set(self._recording_symbols)
+            if self._active_symbol:
+                symbols.add(self._active_symbol)
+        return sorted(symbols)
+
+    def _refresh_stream_subscription(self) -> None:
+        stream = self._stream
+        symbols = self._desired_stream_symbols()
+        if stream is None or not stream.is_connected() or not symbols:
+            return
+        try:
+            stream.subscribe_level_one_symbols(symbols)
+        except Exception:
+            logger.warning("Live multi-symbol subscribe failed for %s", symbols, exc_info=True)
+
+    def start_recording(self, symbols: list[str]) -> dict[str, Any]:
+        if reached_cutoff():
+            raise ValueError("3:00 PM ET recording cutoff has already been reached")
+
+        normalized = [
+            self.session.normalize_symbol(symbol)
+            for symbol in symbols
+            if self.session.normalize_symbol(symbol)
+        ]
+        normalized = list(dict.fromkeys(normalized))
+        if not normalized:
+            raise ValueError("at least one recording symbol is required")
+
+        with self._lock:
+            if self._recorder is not None:
+                raise RuntimeError("a recording session is already active")
+            recorder = MarketDayRecorder(normalized)
+            self._recorder = recorder
+            self._recording_symbols = set(recorder.symbols)
+
+        self._ensure_stream()
+        self._refresh_stream_subscription()
+        self.session.update_recorder_state(
+            {
+                "active": True,
+                "symbols": recorder.symbols,
+                "session_dir": str(recorder.session_dir),
+                "cutoff_et": "15:00:00",
+            }
+        )
+
+        def cutoff_worker() -> None:
+            delay = seconds_until_cutoff()
+            if delay > 0:
+                time.sleep(delay)
+            with self._lock:
+                active = self._recorder is recorder
+            if active:
+                self.stop_recording(reason="3pm_cutoff")
+
+        thread = threading.Thread(
+            target=cutoff_worker,
+            daemon=True,
+            name="tos-companion-recorder-cutoff",
+        )
+        self._recorder_cutoff_thread = thread
+        thread.start()
+        return self.session.snapshot()["recorder_state"]
+
+    def stop_recording(self, *, reason: str = "stopped") -> dict[str, Any]:
+        with self._lock:
+            recorder = self._recorder
+            self._recorder = None
+            self._recording_symbols = set()
+        if recorder is None:
+            state = {"active": False}
+            self.session.update_recorder_state(state)
+            return state
+
+        try:
+            recorder.close(stop_reason=reason)
+        finally:
+            state = {
+                "active": False,
+                "symbols": recorder.symbols,
+                "session_dir": str(recorder.session_dir),
+                "stop_reason": reason,
+            }
+            self.session.update_recorder_state(state)
+            self._refresh_stream_subscription()
+        return state
+
+    def _handle_raw_payload(self, payload: dict) -> None:
+        with self._lock:
+            recorder = self._recorder
+        if recorder is None:
+            return
+        try:
+            recorder.record_payload(payload)
+        except RuntimeError:
+            pass
+        except Exception:
+            logger.warning("Raw market recording failed", exc_info=True)
 
     def _on_auth_state(self, state: str) -> None:
         self.session.update_connection_state(state)
