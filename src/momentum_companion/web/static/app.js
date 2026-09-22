@@ -91,16 +91,19 @@
   });
 
   const vwapSeries = addLineSeries({
+    color: "#b455ff",
     lineWidth: 2,
     lastValueVisible: false,
     priceLineVisible: false,
   });
   const ema9Series = addLineSeries({
+    color: "#f5c542",
     lineWidth: 1,
     lastValueVisible: false,
     priceLineVisible: false,
   });
   const ema20Series = addLineSeries({
+    color: "#4aa3ff",
     lineWidth: 1,
     lastValueVisible: false,
     priceLineVisible: false,
