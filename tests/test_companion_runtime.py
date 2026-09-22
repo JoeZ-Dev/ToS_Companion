@@ -32,6 +32,7 @@ class FakeAppState:
 class FakeLLMService:
     def __init__(self):
         self.calls = []
+        self._client = object()
 
     def evaluate(self, snapshot, session_mode, quote, model_override=None, messages_override=None):
         self.calls.append(
