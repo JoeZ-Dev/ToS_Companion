@@ -127,7 +127,9 @@ class SchwabStreamClient:
         self._ws.send(json.dumps(sub_msg))
 
     def unsubscribe(self, symbol: str) -> None:
-        """Unsubscribe from the active symbol stream."""
+        """Unsubscribe one symbol and keep reconnect state consistent."""
+        normalized = str(symbol).strip().upper()
+        self._level_one_symbols.discard(normalized)
         if not self._connected or not self._ws:
             return
         unsub_msg = {
