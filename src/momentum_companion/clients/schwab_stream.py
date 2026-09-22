@@ -32,6 +32,7 @@ class SchwabStreamClient:
         token_provider: Optional[object] = None,
         journal: Optional[JournalWriter] = None,
         state_callback: Optional[Callable[[str], None]] = None,
+        raw_payload_callback: Optional[Callable[[dict], None]] = None,
     ) -> None:
         self._streamer_info = streamer_info
         self._on_quote = on_quote
@@ -46,6 +47,8 @@ class SchwabStreamClient:
         self._connection_state: str = "DISCONNECTED"
         self._journal = journal
         self._state_callback = state_callback
+        self._raw_payload_callback = raw_payload_callback
+        self._level_one_symbols: set[str] = set()
         self._conn_id = 0
         self._connecting = False
         self._reconnecting = False
@@ -100,9 +103,15 @@ class SchwabStreamClient:
             self._connecting = False
 
     def subscribe_level_one(self, symbol: str) -> None:
-        """Subscribe to LEVELONE_EQUITIES for the active symbol."""
+        """Replace LEVELONE_EQUITIES subscription with one active symbol."""
         self._active_symbol = symbol
-        if not self._connected or not self._ws:
+        self.subscribe_level_one_symbols([symbol])
+
+    def subscribe_level_one_symbols(self, symbols: list[str]) -> None:
+        """Replace LEVELONE_EQUITIES subscription with the provided symbols."""
+        normalized = {str(symbol).strip().upper() for symbol in symbols if str(symbol).strip()}
+        self._level_one_symbols = normalized
+        if not self._connected or not self._ws or not normalized:
             return
         sub_msg = {
             "service": "LEVELONE_EQUITIES",
@@ -110,7 +119,10 @@ class SchwabStreamClient:
             "requestid": "2",
             "SchwabClientCustomerId": self._streamer_info["schwabClientCustomerId"],
             "SchwabClientCorrelId": self._streamer_info["schwabClientCorrelId"],
-            "parameters": {"keys": symbol, "fields": "0,1,2,3,4,5,8"},
+            "parameters": {
+                "keys": ",".join(sorted(normalized)),
+                "fields": "0,1,2,3,4,5,8,9,10,11,12,13,14,15",
+            },
         }
         self._ws.send(json.dumps(sub_msg))
 
@@ -260,6 +272,11 @@ class SchwabStreamClient:
         except json.JSONDecodeError:
             logger.warning("Malformed JSON from stream")
             return
+        if self._raw_payload_callback is not None:
+            try:
+                self._raw_payload_callback(payload)
+            except Exception:
+                logger.warning("Raw stream payload callback failed", exc_info=True)
         messages = []
         if payload.get("service"):
             messages.append(payload)
@@ -279,10 +296,12 @@ class SchwabStreamClient:
                 if command == "LOGIN" and code == 0:
                     self._connected = True
                     self._emit_state("CONNECTED")
-                    if self._active_symbol:
+                    if self._level_one_symbols:
+                        self.subscribe_level_one_symbols(sorted(self._level_one_symbols))
+                    elif self._active_symbol:
                         self.subscribe_level_one(self._active_symbol)
-                        if self._chart_enabled:
-                            self.subscribe_chart(self._active_symbol)
+                    if self._active_symbol and self._chart_enabled:
+                        self.subscribe_chart(self._active_symbol)
                 elif command == "LOGIN" and code != 0:
                     logger.error("Stream LOGIN failed code=%s", code)
                     self._emit_state("LOGIN_FAILED")
@@ -377,7 +396,9 @@ class SchwabStreamClient:
                     break
                 try:
                     self.connect()
-                    if self._active_symbol:
+                    if self._level_one_symbols:
+                        self.subscribe_level_one_symbols(sorted(self._level_one_symbols))
+                    elif self._active_symbol:
                         self.subscribe_level_one(self._active_symbol)
                     self._reconnecting = False
                     return
