@@ -8,9 +8,11 @@ on:
     paths:
       - 'src/momentum_companion/setup_engine/**'
       - 'src/momentum_companion/runtime/companion_runtime.py'
+      - 'src/momentum_companion/recording/pattern_replay.py'
       - 'src/momentum_companion/session/companion_session.py'
       - 'tests/test_pattern_engine.py'
       - 'tests/test_pattern_service.py'
+      - 'tests/test_pattern_replay.py'
       - 'tests/test_companion_runtime.py'
       - 'tests/test_companion_session.py'
       - '.github/workflows/pattern-engine-ci.yml'
