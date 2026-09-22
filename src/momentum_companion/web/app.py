@@ -7,11 +7,16 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from momentum_companion.runtime import CompanionRuntime
 
 
 STATIC_DIR = Path(__file__).with_name("static")
+class RecordingRequest(BaseModel):
+    symbols: list[str]
+
+
 LIGHTWEIGHT_CHARTS_JS = (
     Path(__file__).resolve().parents[1]
     / "ui"
@@ -76,6 +81,17 @@ def create_app(runtime: CompanionRuntime | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"symbol selection failed: {type(exc).__name__}") from exc
+
+    @app.post("/api/recording/start")
+    def start_recording(request: RecordingRequest) -> dict[str, Any]:
+        try:
+            return companion.start_recording(request.symbols)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/recording/stop")
+    def stop_recording() -> dict[str, Any]:
+        return companion.stop_recording(reason="browser_stop")
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket) -> None:
