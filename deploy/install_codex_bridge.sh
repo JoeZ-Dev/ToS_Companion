@@ -6,6 +6,7 @@ BRIDGE_DIR="${CODEX_BRIDGE_DIR:-/srv/data/tos-companion/codex-bridge}"
 SERVICE_NAME="tos-companion-codex-bridge"
 RUN_USER="${TOS_CODEX_USER:-$(id -un)}"
 RUN_GROUP="${TOS_CODEX_GROUP:-$(id -gn)}"
+RUN_HOME="${TOS_CODEX_HOME:-$(getent passwd "$RUN_USER" | cut -d: -f6)}"
 CONTAINER_GID="${TOS_COMPANION_GID:-10001}"
 
 cd "$REPO_DIR"
@@ -47,6 +48,7 @@ Type=simple
 User=$RUN_USER
 Group=$RUN_GROUP
 WorkingDirectory=$REPO_DIR
+Environment=HOME=$RUN_HOME
 Environment=TOS_CODEX_BIN=$CODEX_BIN
 Environment=TOS_CODEX_REPO_DIR=$REPO_DIR
 Environment=TOS_CODEX_SOCKET=$BRIDGE_DIR/bridge.sock
