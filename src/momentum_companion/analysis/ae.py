@@ -313,8 +313,24 @@ class AEEngine:
             candles = resp.get("candles") or []
             if not candles:
                 return None
-            candle = sorted(candles, key=lambda c: c.get("datetime", 0))[0]
-            return float(candle.get("open")) if candle.get("open") is not None else None
+
+            # Schwab may return a broader intraday set than the explicit
+            # start/end range requested. Select the actual 09:30 ET candle
+            # instead of assuming the first returned candle is the RTH open.
+            target = None
+            for candle in sorted(candles, key=lambda c: c.get("datetime", 0)):
+                ts = candle.get("datetime")
+                if ts is None:
+                    continue
+                candle_et = datetime.fromtimestamp(
+                    int(ts) / 1000, tz=timezone.utc
+                ).astimezone(ET_TZ)
+                if candle_et.hour == 9 and candle_et.minute == 30:
+                    target = candle
+                    break
+            if target is None:
+                return None
+            return float(target.get("open")) if target.get("open") is not None else None
         except Exception:
             return None
 
