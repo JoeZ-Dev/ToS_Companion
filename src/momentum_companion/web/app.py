@@ -43,21 +43,35 @@ def create_app(runtime: CompanionRuntime | None = None) -> FastAPI:
     )
     app.state.runtime = companion
 
+    no_store = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
+
     @app.get("/")
     def index() -> FileResponse:
-        return FileResponse(STATIC_DIR / "index.html")
+        return FileResponse(STATIC_DIR / "index.html", headers=no_store)
 
     @app.get("/app.js")
     def app_js() -> FileResponse:
-        return FileResponse(STATIC_DIR / "app.js", media_type="application/javascript")
+        return FileResponse(
+            STATIC_DIR / "app.js",
+            media_type="application/javascript",
+            headers=no_store,
+        )
 
     @app.get("/styles.css")
     def styles() -> FileResponse:
-        return FileResponse(STATIC_DIR / "styles.css", media_type="text/css")
+        return FileResponse(
+            STATIC_DIR / "styles.css",
+            media_type="text/css",
+            headers=no_store,
+        )
 
     @app.get("/vendor/lightweight-charts.js")
     def lightweight_charts() -> FileResponse:
-        return FileResponse(LIGHTWEIGHT_CHARTS_JS, media_type="application/javascript")
+        return FileResponse(
+            LIGHTWEIGHT_CHARTS_JS,
+            media_type="application/javascript",
+            headers=no_store,
+        )
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
