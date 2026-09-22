@@ -86,6 +86,9 @@ def bare_runtime():
     runtime.session = CompanionSession()
     runtime._lock = threading.RLock()
     runtime._active_symbol = "AEHL"
+    runtime._analysis_symbols = {"AEHL"}
+    runtime._aggregators = {"AEHL": BarAggregator10s()}
+    runtime._ae_engines = {}
     runtime._recording_symbols = {"TOPS", "DDC"}
     runtime._stream = FakeStream()
     runtime._recorder = None
@@ -232,6 +235,7 @@ def test_completed_bar_updates_patterns_and_preserves_ae_processing():
     runtime = bare_runtime()
     runtime.pattern_service = FakePatternService()
     runtime.ae_engine = FakeAEEngineForPatterns()
+    runtime._ae_engines = {"AEHL": runtime.ae_engine}
     bar = TenSecondBar(
         ts=10,
         open=3.0,
@@ -304,6 +308,7 @@ class FakePerSymbolAE:
 def test_watched_symbols_remain_on_shared_stream_when_not_recording():
     runtime = bare_runtime()
     runtime._recording_symbols = set()
+    runtime._analysis_symbols = {"AEHL", "TOPS"}
     runtime.session.add_symbol("AEHL", make_active=True)
     runtime.session.add_symbol("TOPS")
 
@@ -317,6 +322,7 @@ def test_non_active_watched_symbol_is_aggregated_and_analyzed():
     runtime._recording_symbols = set()
     runtime.session.add_symbol("AEHL", make_active=True)
     runtime.session.add_symbol("TOPS")
+    runtime._analysis_symbols = {"AEHL", "TOPS"}
     runtime.pattern_service = FakePatternService()
     runtime._aggregators = {
         "AEHL": FakePerSymbolAggregator("AEHL"),
