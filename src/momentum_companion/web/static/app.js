@@ -69,6 +69,45 @@
     ? chart.addCandlestickSeries({})
     : chart.addSeries(LightweightCharts.CandlestickSeries, {});
 
+  const addLineSeries = (options) =>
+    typeof chart.addLineSeries === "function"
+      ? chart.addLineSeries(options)
+      : chart.addSeries(LightweightCharts.LineSeries, options);
+
+  const addHistogramSeries = (options) =>
+    typeof chart.addHistogramSeries === "function"
+      ? chart.addHistogramSeries(options)
+      : chart.addSeries(LightweightCharts.HistogramSeries, options);
+
+  const volumeSeries = addHistogramSeries({
+    priceFormat: { type: "volume" },
+    priceScaleId: "",
+    lastValueVisible: false,
+    priceLineVisible: false,
+  });
+  chart.priceScale("").applyOptions({
+    scaleMargins: { top: 0.82, bottom: 0 },
+    visible: false,
+  });
+
+  const vwapSeries = addLineSeries({
+    lineWidth: 2,
+    lastValueVisible: false,
+    priceLineVisible: false,
+  });
+  const ema9Series = addLineSeries({
+    lineWidth: 1,
+    lastValueVisible: false,
+    priceLineVisible: false,
+  });
+  const ema20Series = addLineSeries({
+    lineWidth: 1,
+    lastValueVisible: false,
+    priceLineVisible: false,
+  });
+
+  let structuralPriceLines = [];
+
   function normalizeBar(bar) {
     return {
       time: Number(bar.time ?? bar.ts),
@@ -76,7 +115,72 @@
       high: Number(bar.high),
       low: Number(bar.low),
       close: Number(bar.close),
+      volume: Number(bar.volume || 0),
     };
+  }
+
+  function emaPoints(bars, length) {
+    const alpha = 2 / (length + 1);
+    let ema = null;
+    return bars.map((bar) => {
+      ema = ema === null ? bar.close : alpha * bar.close + (1 - alpha) * ema;
+      return { time: bar.time, value: ema };
+    });
+  }
+
+  function vwapPoints(bars) {
+    let cumulativePV = 0;
+    let cumulativeVolume = 0;
+    const points = [];
+    for (const bar of bars) {
+      const volume = Number.isFinite(bar.volume) ? Math.max(0, bar.volume) : 0;
+      cumulativePV += bar.close * volume;
+      cumulativeVolume += volume;
+      if (cumulativeVolume > 0) {
+        points.push({ time: bar.time, value: cumulativePV / cumulativeVolume });
+      }
+    }
+    return points;
+  }
+
+  function setStructuralLines(snapshot) {
+    for (const line of structuralPriceLines) {
+      try {
+        candleSeries.removePriceLine(line);
+      } catch (_error) {}
+    }
+    structuralPriceLines = [];
+
+    const session = snapshot?.session || {};
+    const levels = snapshot?.levels || {};
+    const candidates = [
+      ["PMH", session.premarket_high],
+      ["PML", session.premarket_low],
+      ["ORH", session.opening_range_high],
+      ["ORL", session.opening_range_low],
+      ["R", levels.nearest_resistance?.price],
+      ["S", levels.nearest_support?.price],
+    ];
+
+    const seen = new Set();
+    for (const [title, rawPrice] of candidates) {
+      const price = Number(rawPrice);
+      if (!Number.isFinite(price)) continue;
+      const key = price.toFixed(6);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      try {
+        structuralPriceLines.push(
+          candleSeries.createPriceLine({
+            price,
+            title,
+            axisLabelVisible: true,
+            lineWidth: 1,
+            lineStyle: LightweightCharts.LineStyle?.Dashed ?? 2,
+          })
+        );
+      } catch (_error) {}
+    }
   }
 
   function mergedBars(symbolState) {
@@ -129,7 +233,18 @@
     const revision = `${symbolState.history_bars?.length || 0}:${symbolState.bars_10s?.length || 0}`;
     const symbolChanged = state.chartSymbol !== symbol;
     if (chartChanged || symbolChanged || state.chartRevision !== revision) {
-      candleSeries.setData(mergedBars(symbolState));
+      const bars = mergedBars(symbolState);
+      candleSeries.setData(bars);
+      volumeSeries.setData(
+        bars.map((bar) => ({
+          time: bar.time,
+          value: Number.isFinite(bar.volume) ? Math.max(0, bar.volume) : 0,
+        }))
+      );
+      vwapSeries.setData(vwapPoints(bars));
+      ema9Series.setData(emaPoints(bars, 9));
+      ema20Series.setData(emaPoints(bars, 20));
+      setStructuralLines(symbolState.ae_snapshot);
       state.chartSymbol = symbol;
       state.chartRevision = revision;
       if (symbolChanged || chartChanged) {
@@ -187,6 +302,9 @@
       chartChanged = true;
     } else if (event.type === "analysis_snapshot" && symbol) {
       state.symbols[symbol].ae_snapshot = event.payload?.snapshot || null;
+      if (symbol === state.activeSymbol) {
+        setStructuralLines(state.symbols[symbol].ae_snapshot);
+      }
     } else if (event.type === "llm_update" && symbol) {
       state.symbols[symbol].llm_output = event.payload?.output || null;
     } else if (event.type === "recorder_state") {
