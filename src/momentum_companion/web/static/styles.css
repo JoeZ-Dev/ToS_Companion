@@ -185,3 +185,25 @@ pre {
 .subhead {
   margin-top: 14px !important;
 }
+
+
+.chart-card {
+  position: relative;
+}
+
+.chart-legend {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  z-index: 4;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  pointer-events: none;
+  opacity: 0.88;
+}
+
+.legend-vwap { color: #b455ff; }
+.legend-ema9 { color: #f5c542; }
+.legend-ema20 { color: #4aa3ff; }
