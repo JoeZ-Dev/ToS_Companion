@@ -12,6 +12,35 @@
     reconnectTimer: null,
   };
 
+  const EASTERN_TZ = "America/New_York";
+
+  function formatEasternTime(timestamp) {
+    const seconds = typeof timestamp === "number"
+      ? timestamp
+      : Number(timestamp?.timestamp ?? timestamp);
+    if (!Number.isFinite(seconds)) return "";
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone: EASTERN_TZ,
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+    }).format(new Date(seconds * 1000));
+  }
+
+  function formatEasternTick(timestamp) {
+    const seconds = typeof timestamp === "number"
+      ? timestamp
+      : Number(timestamp?.timestamp ?? timestamp);
+    if (!Number.isFinite(seconds)) return "";
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone: EASTERN_TZ,
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    }).format(new Date(seconds * 1000));
+  }
+
   const chart = LightweightCharts.createChart(byId("chart"), {
     autoSize: true,
     layout: {
@@ -22,11 +51,15 @@
       vertLines: { color: "#171c22" },
       horzLines: { color: "#171c22" },
     },
+    localization: {
+      timeFormatter: formatEasternTime,
+    },
     rightPriceScale: { borderColor: "#252c34" },
     timeScale: {
       borderColor: "#252c34",
       timeVisible: true,
       secondsVisible: true,
+      tickMarkFormatter: formatEasternTick,
     },
   });
 
