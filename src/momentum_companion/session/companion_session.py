@@ -47,6 +47,7 @@ class _SymbolState:
             "volume": None,
             "source_ts_type": None,
             "raw_source": None,
+            "received_at_ms": None,
         }
     )
     history_bars: list[dict[str, Any]] = field(default_factory=list)
@@ -170,6 +171,7 @@ class CompanionSession:
             raise ValueError("quote symbol is required")
         self.add_symbol(symbol)
 
+        received_at_ms = int(time.time() * 1000)
         update = {
             "ts_ms": quote.get("ts_ms"),
             "bid": quote.get("bid"),
@@ -181,6 +183,7 @@ class CompanionSession:
             "volume": quote.get("volume"),
             "source_ts_type": quote.get("source_ts_type"),
             "raw_source": quote.get("raw_source"),
+            "received_at_ms": received_at_ms,
         }
         with self._lock:
             self._symbols[symbol].quote.update(update)
@@ -253,10 +256,23 @@ class CompanionSession:
     def snapshot(self) -> dict[str, Any]:
         """Return a self-contained JSON-serializable application snapshot."""
         with self._lock:
+            now_ms = int(time.time() * 1000)
             symbols = {
                 symbol: {
                     "symbol": state.symbol,
                     "quote": dict(state.quote),
+                    "freshness": (
+                        {"status": "NO_DATA", "age_ms": None}
+                        if state.quote.get("received_at_ms") is None
+                        else {
+                            "status": (
+                                "LIVE"
+                                if max(0, now_ms - int(state.quote["received_at_ms"])) <= 5_000
+                                else "STALE"
+                            ),
+                            "age_ms": max(0, now_ms - int(state.quote["received_at_ms"])),
+                        }
+                    ),
                     "history_bars": [dict(bar) for bar in state.history_bars],
                     "bars_10s": [dict(bar) for bar in state.bars_10s],
                     "ae_snapshot": (
