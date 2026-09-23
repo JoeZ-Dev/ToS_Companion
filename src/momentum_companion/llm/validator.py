@@ -166,4 +166,19 @@ def _matches_structural_target(snapshot: Dict[str, Any], label: Any, target_pric
             if _close(h_f, target_price):
                 return True
         return False
-    return True
+    if label == "resistance_cluster":
+        clusters = levels.get("resistance_clusters") if isinstance(levels, dict) else None
+        for cluster in clusters or []:
+            if not isinstance(cluster, dict):
+                continue
+            low = cluster.get("price_zone_low")
+            high = cluster.get("price_zone_high")
+            try:
+                low_f = float(low)
+                high_f = float(high)
+            except Exception:
+                continue
+            if low_f - tol <= target_price <= high_f + tol:
+                return True
+        return False
+    return False

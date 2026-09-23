@@ -2,6 +2,8 @@ name: CI
 
 on:
   push:
+    branches:
+      - main
   pull_request:
 
 jobs:
@@ -15,7 +17,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-web.txt
           pip install pyinstaller
       - name: Run tests
         run: |
@@ -39,3 +41,60 @@ jobs:
         run: |
           Set-ExecutionPolicy Bypass -Scope Process -Force
           ./tools/windows_smoke.ps1
+
+
+  browser-foundation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install browser package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[web]'
+          pip install pytest
+      - name: Validate browser foundation
+        run: |
+          python -m compileall -q src/momentum_companion/session src/momentum_companion/runtime src/momentum_companion/recording src/momentum_companion/setup_engine src/momentum_companion/llm src/momentum_companion/web
+          pytest -q \
+            tests/test_companion_session.py \
+            tests/test_companion_runtime.py \
+            tests/test_web_app.py \
+            tests/test_stream_raw_recording.py \
+            tests/test_market_day_recorder.py \
+            tests/test_codex_bridge_client.py \
+            tests/test_pattern_engine.py \
+            tests/test_pattern_service.py \
+            tests/test_pattern_replay.py
+      - name: Validate joelab deployment scripts
+        run: |
+          bash -n deploy/deploy_joelab_docker.sh
+          bash -n deploy/install_codex_bridge.sh
+          bash -n deploy/validate_recorder.sh
+          python -m py_compile deploy/codex_bridge.py
+      - name: Validate joelab Docker Compose
+        run: |
+          cp deploy/joelab.env.example deploy/joelab.env
+          sed -i 's/^INTERNAL_AUTH_SECRET=.*/INTERNAL_AUTH_SECRET=ci-test-secret/' deploy/joelab.env
+          docker network create joelab-ingress >/dev/null
+          docker compose --env-file deploy/joelab.env -f deploy/docker-compose.joelab.yml config >/dev/null
+      - name: Smoke boot browser server
+        env:
+          TOS_COMPANION_HOST: 127.0.0.1
+          TOS_COMPANION_PORT: 8787
+          LLM_MODE: mock
+        run: |
+          python -m momentum_companion.web > /tmp/tos-companion-web.log 2>&1 &
+          WEB_PID=$!
+          trap 'kill $WEB_PID 2>/dev/null || true' EXIT
+          for i in {1..20}; do
+            if curl --fail --silent http://127.0.0.1:8787/api/health > /tmp/tos-health.json; then
+              cat /tmp/tos-health.json
+              exit 0
+            fi
+            sleep 0.5
+          done
+          cat /tmp/tos-companion-web.log
+          exit 1

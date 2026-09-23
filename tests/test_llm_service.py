@@ -175,3 +175,70 @@ def test_llm_service_mock_client():
         {"bid": 1, "ask": 2, "last": 1.5, "volume": 100},
     )
     assert resp["validity"] == "VALID_FOR_TRADING"
+
+
+def test_trade_validator_rejects_unknown_target_label():
+    from momentum_companion.llm.validator import validate_trade_setups
+
+    snapshot = {
+        "levels": {
+            "nearest_resistance": {"price": 10.5},
+            "resistance_clusters": [
+                {"price_zone_low": 11.0, "price_zone_high": 11.1}
+            ],
+        },
+        "session": {},
+        "bars_window": [],
+    }
+    obj = {
+        "stock_bias": "HAS_POTENTIAL",
+        "setups": [
+            {
+                "setup_state": "WATCH",
+                "entry_trigger_price": 10.0,
+                "stop_price": 9.5,
+                "target_price": 11.05,
+                "target1_label": "4h resistance cluster",
+                "extension_target": None,
+            }
+        ],
+    }
+
+    valid, reasons, action = validate_trade_setups(snapshot, obj)
+
+    assert valid is False
+    assert "target_label_mismatch" in reasons
+    assert action == "RETRY"
+
+
+def test_trade_validator_accepts_canonical_resistance_cluster_target():
+    from momentum_companion.llm.validator import validate_trade_setups
+
+    snapshot = {
+        "levels": {
+            "nearest_resistance": {"price": 10.5},
+            "resistance_clusters": [
+                {"price_zone_low": 11.0, "price_zone_high": 11.1}
+            ],
+        },
+        "session": {},
+        "bars_window": [],
+    }
+    obj = {
+        "stock_bias": "HAS_POTENTIAL",
+        "setups": [
+            {
+                "setup_state": "WATCH",
+                "entry_trigger_price": 10.0,
+                "stop_price": 9.5,
+                "target_price": 11.05,
+                "target1_label": "resistance_cluster",
+                "extension_target": None,
+            }
+        ],
+    }
+
+    valid, reasons, action = validate_trade_setups(snapshot, obj)
+
+    assert valid is True
+    assert action == "OK"

@@ -32,6 +32,7 @@ class SchwabStreamClient:
         token_provider: Optional[object] = None,
         journal: Optional[JournalWriter] = None,
         state_callback: Optional[Callable[[str], None]] = None,
+        raw_payload_callback: Optional[Callable[[dict], None]] = None,
     ) -> None:
         self._streamer_info = streamer_info
         self._on_quote = on_quote
@@ -43,9 +44,13 @@ class SchwabStreamClient:
         self._active_symbol: Optional[str] = None
         self._thread: Optional[threading.Thread] = None
         self._last_ts_ms: Optional[int] = None
+        self._last_level_one_monotonic: Optional[float] = None
+        self._connected_since_monotonic: Optional[float] = None
         self._connection_state: str = "DISCONNECTED"
         self._journal = journal
         self._state_callback = state_callback
+        self._raw_payload_callback = raw_payload_callback
+        self._level_one_symbols: set[str] = set()
         self._conn_id = 0
         self._connecting = False
         self._reconnecting = False
@@ -100,9 +105,15 @@ class SchwabStreamClient:
             self._connecting = False
 
     def subscribe_level_one(self, symbol: str) -> None:
-        """Subscribe to LEVELONE_EQUITIES for the active symbol."""
+        """Replace LEVELONE_EQUITIES subscription with one active symbol."""
         self._active_symbol = symbol
-        if not self._connected or not self._ws:
+        self.subscribe_level_one_symbols([symbol])
+
+    def subscribe_level_one_symbols(self, symbols: list[str]) -> None:
+        """Replace LEVELONE_EQUITIES subscription with the provided symbols."""
+        normalized = {str(symbol).strip().upper() for symbol in symbols if str(symbol).strip()}
+        self._level_one_symbols = normalized
+        if not self._connected or not self._ws or not normalized:
             return
         sub_msg = {
             "service": "LEVELONE_EQUITIES",
@@ -110,12 +121,17 @@ class SchwabStreamClient:
             "requestid": "2",
             "SchwabClientCustomerId": self._streamer_info["schwabClientCustomerId"],
             "SchwabClientCorrelId": self._streamer_info["schwabClientCorrelId"],
-            "parameters": {"keys": symbol, "fields": "0,1,2,3,4,5,8"},
+            "parameters": {
+                "keys": ",".join(sorted(normalized)),
+                "fields": "0,1,2,3,4,5,8,9,10,11,12,13,14,15",
+            },
         }
         self._ws.send(json.dumps(sub_msg))
 
     def unsubscribe(self, symbol: str) -> None:
-        """Unsubscribe from the active symbol stream."""
+        """Unsubscribe one symbol and keep reconnect state consistent."""
+        normalized = str(symbol).strip().upper()
+        self._level_one_symbols.discard(normalized)
         if not self._connected or not self._ws:
             return
         unsub_msg = {
@@ -184,6 +200,40 @@ class SchwabStreamClient:
         if self._last_ts_ms is None:
             return False
         return (now_ms - self._last_ts_ms) <= 5_000
+
+    def seconds_since_last_level_one(self) -> Optional[float]:
+        """Return local receive age for L1 traffic while connected."""
+        if not self._connected:
+            return None
+        reference = self._last_level_one_monotonic
+        if reference is None:
+            reference = self._connected_since_monotonic
+        if reference is None:
+            return None
+        return max(0.0, time.monotonic() - reference)
+
+    def refresh_level_one_subscription(self) -> bool:
+        """Re-send the full desired L1 subscription set on the current socket."""
+        if not self._connected or not self._ws or not self._level_one_symbols:
+            return False
+        logger.warning(
+            "Refreshing stale LEVELONE_EQUITIES subscription for %s",
+            ",".join(sorted(self._level_one_symbols)),
+        )
+        self.subscribe_level_one_symbols(sorted(self._level_one_symbols))
+        return True
+
+    def force_reconnect(self, reason: str) -> None:
+        """Close the current socket and start the normal reconnect path."""
+        logger.warning("Forcing Schwab stream reconnect: %s", reason)
+        ws = self._ws
+        if ws is not None:
+            self._cleanup_socket(ws)
+        else:
+            self._connected = False
+        self._connected_since_monotonic = None
+        self._last_level_one_monotonic = None
+        self._attempt_reconnect()
 
     def _auth_token(self) -> str:
         # Prefer streaming token from streamerInfo; fallback to OAuth token if absent.
@@ -260,6 +310,11 @@ class SchwabStreamClient:
         except json.JSONDecodeError:
             logger.warning("Malformed JSON from stream")
             return
+        if self._raw_payload_callback is not None:
+            try:
+                self._raw_payload_callback(payload)
+            except Exception:
+                logger.warning("Raw stream payload callback failed", exc_info=True)
         messages = []
         if payload.get("service"):
             messages.append(payload)
@@ -278,11 +333,15 @@ class SchwabStreamClient:
                 code = content.get("code", 0) if isinstance(content, dict) else 0
                 if command == "LOGIN" and code == 0:
                     self._connected = True
+                    self._connected_since_monotonic = time.monotonic()
+                    self._last_level_one_monotonic = None
                     self._emit_state("CONNECTED")
-                    if self._active_symbol:
+                    if self._level_one_symbols:
+                        self.subscribe_level_one_symbols(sorted(self._level_one_symbols))
+                    elif self._active_symbol:
                         self.subscribe_level_one(self._active_symbol)
-                        if self._chart_enabled:
-                            self.subscribe_chart(self._active_symbol)
+                    if self._active_symbol and self._chart_enabled:
+                        self.subscribe_chart(self._active_symbol)
                 elif command == "LOGIN" and code != 0:
                     logger.error("Stream LOGIN failed code=%s", code)
                     self._emit_state("LOGIN_FAILED")
@@ -293,12 +352,13 @@ class SchwabStreamClient:
                 if isinstance(msg.get("content"), dict):
                     # SUBS/UNSUBS responses carry dict content; ignore
                     continue
+                self._last_level_one_monotonic = time.monotonic()
                 try:
-                    event = self._cache.process_message(msg)
+                    events = self._cache.process_messages(msg)
                 except ValueError as exc:
                     logger.warning("Stream message dropped: %s", exc)
                     continue
-                if event:
+                for event in events:
                     self._last_ts_ms = event["ts_ms"]
                     self._on_quote(event)
             elif service == "CHART_EQUITY":
@@ -377,7 +437,9 @@ class SchwabStreamClient:
                     break
                 try:
                     self.connect()
-                    if self._active_symbol:
+                    if self._level_one_symbols:
+                        self.subscribe_level_one_symbols(sorted(self._level_one_symbols))
+                    elif self._active_symbol:
                         self.subscribe_level_one(self._active_symbol)
                     self._reconnecting = False
                     return

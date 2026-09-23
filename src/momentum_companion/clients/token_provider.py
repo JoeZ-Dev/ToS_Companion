@@ -38,6 +38,7 @@ class TokenProvider:
         self._refresh_listeners: List[Callable[[dict], None]] = []
         self._state_callback = state_callback
         self._auth_helper_url = os.environ.get("AUTH_HELPER_URL") or DEFAULT_AUTH_HELPER_URL
+        self._internal_auth_secret = os.environ.get("INTERNAL_AUTH_SECRET") or ""
         self._helper_cache: dict = {}
         self._client_id = os.environ.get("SCHWAB_CLIENT_ID")
         self._client_secret = os.environ.get("SCHWAB_CLIENT_SECRET")
@@ -192,7 +193,10 @@ class TokenProvider:
         try:
             start = time.time()
             self._logger.info("Auth helper fetch start url=%s", url)
-            resp = self._helper_http.get(url)
+            headers = {}
+            if self._internal_auth_secret:
+                headers["X-Internal-Auth"] = self._internal_auth_secret
+            resp = self._helper_http.get(url, headers=headers)
             latency_ms = int((time.time() - start) * 1000)
             self._logger.info("Auth helper fetch status=%s latency_ms=%s", resp.status_code, latency_ms)
             if resp.status_code == 200:

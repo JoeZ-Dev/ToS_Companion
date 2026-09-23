@@ -1,0 +1,22 @@
+[Unit]
+Description=ToS Companion browser service
+After=network-online.target companion-auth.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=joe
+Group=joe
+WorkingDirectory=/srv/apps/tos-companion
+EnvironmentFile=/srv/apps/tos-companion/.env
+ExecStart=/srv/apps/tos-companion/.venv/bin/python -m momentum_companion.web
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+
+# The web process should remain private behind the joelab reverse proxy.
+Environment=TOS_COMPANION_HOST=127.0.0.1
+Environment=TOS_COMPANION_PORT=8787
+
+[Install]
+WantedBy=multi-user.target

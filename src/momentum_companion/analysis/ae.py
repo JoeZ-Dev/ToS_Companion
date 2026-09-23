@@ -6,7 +6,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Callable
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -14,6 +14,10 @@ import statistics
 
 from momentum_companion.clients.schwab_rest import SchwabRestClient
 from momentum_companion.data.bar_aggregator import TenSecondBar
+from momentum_companion.recording.history import (
+    load_recorded_minute_candles,
+    merge_candles_prefer_primary,
+)
 
 
 ET_TZ = ZoneInfo("America/New_York")
@@ -222,7 +226,12 @@ def _cluster_swings(prices: pd.Series, lookback: int, band_pct: float, cap: int,
 class AEEngine:
     """Analysis Engine orchestrator for AE-1.0 profile and AE-1.1 snapshots."""
 
-    def __init__(self, rest_client: Optional[SchwabRestClient], db_path: Optional[Path]) -> None:
+    def __init__(
+        self,
+        rest_client: Optional[SchwabRestClient],
+        db_path: Optional[Path],
+        now_ms_provider: Optional[Callable[[], int]] = None,
+    ) -> None:
         self._rest = rest_client
         self._db_path = db_path
         self._profile_cache: dict[str, dict] = {}
@@ -233,6 +242,7 @@ class AEEngine:
         self._session_open_rth: dict[str, Optional[float]] = {}
         self._active_symbol: Optional[str] = None
         self._seeded = False
+        self._now_ms_provider = now_ms_provider
 
     def reset_intraday(self) -> None:
         self._minute_agg = MinuteBarAggregator()
@@ -241,6 +251,19 @@ class AEEngine:
         self._market_cache = None
         self._seeded = False
         self._active_symbol = None
+
+    def prepare_replay(self, symbol: str) -> None:
+        """Reset intraday state and bind deterministic replay analysis to one symbol."""
+        self.reset_intraday()
+        self._active_symbol = str(symbol or "").strip().upper()
+
+    def _now_ms(self) -> int:
+        if self._now_ms_provider is not None:
+            return int(self._now_ms_provider())
+        return int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    def _now_et(self) -> datetime:
+        return datetime.fromtimestamp(self._now_ms() / 1000, tz=timezone.utc).astimezone(ET_TZ)
 
     def record_quote_ts(self, ts_ms: int) -> None:
         self._last_quote_ms = ts_ms
@@ -313,8 +336,24 @@ class AEEngine:
             candles = resp.get("candles") or []
             if not candles:
                 return None
-            candle = sorted(candles, key=lambda c: c.get("datetime", 0))[0]
-            return float(candle.get("open")) if candle.get("open") is not None else None
+
+            # Schwab may return a broader intraday set than the explicit
+            # start/end range requested. Select the actual 09:30 ET candle
+            # instead of assuming the first returned candle is the RTH open.
+            target = None
+            for candle in sorted(candles, key=lambda c: c.get("datetime", 0)):
+                ts = candle.get("datetime")
+                if ts is None:
+                    continue
+                candle_et = datetime.fromtimestamp(
+                    int(ts) / 1000, tz=timezone.utc
+                ).astimezone(ET_TZ)
+                if candle_et.hour == 9 and candle_et.minute == 30:
+                    target = candle
+                    break
+            if target is None:
+                return None
+            return float(target.get("open")) if target.get("open") is not None else None
         except Exception:
             return None
 
@@ -346,7 +385,16 @@ class AEEngine:
             start_ms = int(start_et.timestamp() * 1000)
             end_ms = int(now_et.timestamp() * 1000)
             resp = self._rest.fetch_price_history(symbol, start_ms, end_ms, "1m")
-            candles = resp.get("candles") or []
+            schwab_candles = resp.get("candles") or []
+            recorded_candles = load_recorded_minute_candles(
+                symbol,
+                start_ms,
+                end_ms,
+            )
+            candles = merge_candles_prefer_primary(
+                schwab_candles,
+                recorded_candles,
+            )
             seeded = 0
             last_seed_ts = None
             for c in sorted(candles, key=lambda x: x.get("datetime", 0)):
@@ -425,7 +473,7 @@ class AEEngine:
         resolved_symbol = self._resolve_symbol(symbol)
         profile = self._profile_cache.get(resolved_symbol) if resolved_symbol else None
 
-        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        now_ms = self._now_ms()
         quote_age = None
         if self._last_quote_ms is not None:
             quote_age = now_ms - self._last_quote_ms
@@ -518,7 +566,7 @@ class AEEngine:
         snapshot = {
             "symbol": snapshot_symbol,
             "as_of_ts_ms": now_ms,
-            "as_of_et": datetime.now(ET_TZ).isoformat(),
+            "as_of_et": self._now_et().isoformat(),
             "status": status,
             "data_quality": data_quality,
             "has_4h_data": has_4h,
@@ -693,14 +741,14 @@ class AEEngine:
         return snapshot
 
     def _market_state(self) -> tuple[bool, Optional[bool]]:
-        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        now_ms = self._now_ms()
         if self._market_cache and (now_ms - self._market_cache[0] < 60_000):
             return self._market_cache[1], self._market_cache[2]
         if not self._rest:
             return False, None
         has_market = False
         is_green = None
-        now_et = datetime.now(ET_TZ)
+        now_et = self._now_et()
         try:
             for proxy in [MARKET_PROXY_SYMBOL, "QQQ"]:
                 resp = self._rest.fetch_price_history(proxy, None, None, "1d")
@@ -716,9 +764,24 @@ class AEEngine:
                 open_start = datetime(now_et.year, now_et.month, now_et.day, 9, 30, tzinfo=ET_TZ)
                 open_end = open_start + timedelta(minutes=1)
                 if now_et.time() >= open_start.time():
-                    bar_resp = self._rest.fetch_price_history(proxy, int(open_start.timestamp() * 1000), int(open_end.timestamp() * 1000), "1m")
+                    bar_resp = self._rest.fetch_price_history(
+                        proxy,
+                        int(open_start.timestamp() * 1000),
+                        int(open_end.timestamp() * 1000),
+                        "1m",
+                    )
                     bar_candles = bar_resp.get("candles") or []
-                    open_bar = sorted(bar_candles, key=lambda c: c.get("datetime", 0))[0] if bar_candles else None
+                    open_bar = None
+                    for candle in sorted(bar_candles, key=lambda c: c.get("datetime", 0)):
+                        ts = candle.get("datetime")
+                        if ts is None:
+                            continue
+                        candle_et = datetime.fromtimestamp(
+                            int(ts) / 1000, tz=timezone.utc
+                        ).astimezone(ET_TZ)
+                        if candle_et.hour == 9 and candle_et.minute == 30:
+                            open_bar = candle
+                            break
                     if open_bar and open_bar.get("open") is not None:
                         baseline = float(open_bar.get("open"))
                 if baseline <= 0:

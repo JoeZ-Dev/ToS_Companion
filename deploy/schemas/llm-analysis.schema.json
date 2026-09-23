@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ToS Companion LLM Analysis",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "validity",
+    "reason_codes",
+    "stock_bias",
+    "summary",
+    "setups"
+  ],
+  "properties": {
+    "validity": {
+      "type": "string",
+      "enum": [
+        "VALID_FOR_TRADING",
+        "NOT_VALID_FOR_TRADING"
+      ]
+    },
+    "reason_codes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "FAILED_BREAKOUT",
+          "LOWER_HIGHS",
+          "NO_CLEAR_LEVEL",
+          "VWAP_TEST",
+          "VWAP_REJECT",
+          "VWAP_RECLAIM",
+          "VOLUME_FADE",
+          "WEAK_VOLUME_ON_EXTENSION",
+          "STRONG_VOLUME_CONTINUATION",
+          "BUYERS_WEAK",
+          "HEAVY_SELL_PRESSURE",
+          "HOD_BREAKOUT_HOLDING",
+          "HOD_REJECT",
+          "SPREAD_WIDENING",
+          "THIN_LIQUIDITY",
+          "RR_BELOW_MINIMUM",
+          "DATA_STALE",
+          "ENTRY_APPROACHING",
+          "STOP_THREAT",
+          "HALT_OR_REJECT",
+          "DISCONNECT",
+          "EXECUTION_FILL",
+          "RISK_BREACH"
+        ]
+      },
+      "maxItems": 12
+    },
+    "stock_bias": {
+      "type": "string",
+      "enum": [
+        "HAS_POTENTIAL",
+        "NO_EDGE"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1200
+    },
+    "setups": {
+      "type": "array",
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "setup_state",
+          "trigger_condition",
+          "entry_trigger_price",
+          "stop_price",
+          "target_price",
+          "rr_to_target1",
+          "move_pct_to_target1",
+          "setup_rating",
+          "confirmation_requirements",
+          "target1_label",
+          "extension_trigger",
+          "extension_target",
+          "extension_notes",
+          "tape_warning"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "setup_state": {
+            "type": "string",
+            "enum": [
+              "READY",
+              "WATCH"
+            ]
+          },
+          "trigger_condition": {
+            "type": "string",
+            "minLength": 1
+          },
+          "entry_trigger_price": {
+            "type": "number"
+          },
+          "stop_price": {
+            "type": "number"
+          },
+          "target_price": {
+            "type": "number"
+          },
+          "rr_to_target1": {
+            "type": "number"
+          },
+          "move_pct_to_target1": {
+            "type": "number"
+          },
+          "setup_rating": {
+            "type": "string",
+            "enum": [
+              "A+",
+              "A",
+              "A-",
+              "B+",
+              "B",
+              "B-",
+              "C+",
+              "C",
+              "C-",
+              "D"
+            ]
+          },
+          "confirmation_requirements": {
+            "type": "string"
+          },
+          "target1_label": {
+            "type": "string",
+            "enum": [
+              "nearest_resistance",
+              "micro_resistance_15m",
+              "opening_range_high",
+              "premarket_high",
+              "swing_high",
+              "resistance_cluster"
+            ]
+          },
+          "extension_trigger": {
+            "type": "string"
+          },
+          "extension_target": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "extension_notes": {
+            "type": "string"
+          },
+          "tape_warning": {
+            "type": "string",
+            "enum": [
+              "NONE",
+              "SPIKEY_PULLBACKS"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

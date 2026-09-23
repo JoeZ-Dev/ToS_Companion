@@ -17,6 +17,7 @@ dependencies = [
     "numpy>=1.26,<2",
     "platformdirs>=4.2,<5",
     "typing-extensions>=4.10,<5",
+    "cryptography>=42",
 ]
 
 [tool.setuptools.package-dir]
@@ -25,3 +26,14 @@ dependencies = [
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
+
+
+[project.optional-dependencies]
+web = [
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.32,<1",
+]
+
+[tool.setuptools.package-data]
+"momentum_companion.web" = ["static/*"]
+"momentum_companion.ui" = ["assets/lightweight-charts.standalone.production.js"]

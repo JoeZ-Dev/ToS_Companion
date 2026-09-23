@@ -15,6 +15,7 @@ from momentum_companion.ui.controller import UIController
 from momentum_companion.llm.service import LLMService
 from momentum_companion.llm.coach import LLMCoach
 from momentum_companion.analysis.ae import AEEngine
+from momentum_companion.session import CompanionSession
 
 
 def main(instance_id: str) -> None:
@@ -39,6 +40,7 @@ def main(instance_id: str) -> None:
     trig = SyntheticTriggerEngine(None)
     executor = TradeExecutor(rest, emm, trig, journal, state_callback=state_cb)
     llm_service = LLMService(LLMCoach(), journal=journal, state_callback=state_cb, flash_callback=None)
+    companion_session = CompanionSession()
     controller = UIController(
         window,
         llm_service,
@@ -48,6 +50,7 @@ def main(instance_id: str) -> None:
         db_path=str(db_path),
         ae_engine=ae_engine,
         app_state=app_state,
+        companion_session=companion_session,
     )
     # wire flash callback
     llm_service._flash_callback = controller.handle_flash  # type: ignore[attr-defined]

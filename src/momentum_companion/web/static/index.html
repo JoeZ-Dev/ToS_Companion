@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ToS Companion</title>
+  <link rel="stylesheet" href="/styles-20260922-5.css">
+  <script src="/vendor/lightweight-charts-20260922.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">ToS Companion</div>
+    <form id="symbol-form" class="symbol-form">
+      <input id="symbol-input" autocomplete="off" maxlength="10" placeholder="SYMBOL">
+      <button type="submit">Load</button>
+    </form>
+    <div id="connection-state" class="status">DISCONNECTED</div>
+  </header>
+
+  <main>
+    <section class="quote-strip">
+      <div><span>Symbol</span><strong id="symbol">--</strong></div>
+      <div><span>Bid</span><strong id="bid">--</strong></div>
+      <div><span>Ask</span><strong id="ask">--</strong></div>
+      <div><span>Last</span><strong id="last">--</strong></div>
+      <div><span>Volume</span><strong id="volume">--</strong></div>
+      <div><span>Data</span><strong id="quote-freshness" class="freshness no-data">NO DATA</strong></div>
+    </section>
+
+    <section class="workspace">
+      <div class="chart-card">
+        <div class="chart-legend" aria-label="Chart overlays">
+          <span class="legend-vwap">VWAP</span>
+          <span class="legend-ema9">EMA9</span>
+          <span class="legend-ema20">EMA20</span>
+          <span>PMH/PML</span>
+          <span>ORH/ORL</span>
+          <span>R/S</span>
+        </div>
+        <div id="chart"></div>
+      </div>
+
+      <aside class="analysis-shell">
+        <div class="analysis-toolbar">
+          <div class="tabs" role="tablist" aria-label="Analysis views">
+            <button class="tab-button active" type="button" data-tab="analysis">Analysis</button>
+            <button class="tab-button" type="button" data-tab="setups">Setups</button>
+            <button class="tab-button" type="button" data-tab="recording">Recording</button>
+            <button class="tab-button" type="button" data-tab="replay">Replay</button>
+            <button class="tab-button" type="button" data-tab="raw">Raw</button>
+          </div>
+          <button id="llm-run" class="run-llm" type="button">Run LLM</button>
+        </div>
+
+        <section id="tab-analysis" class="tab-panel active">
+          <section class="analysis-card">
+            <div class="section-title">Market State</div>
+            <div id="market-state" class="chip-grid">
+              <span class="muted-copy">No analysis snapshot yet.</span>
+            </div>
+          </section>
+
+          <section class="analysis-card">
+            <div class="section-title">Key Metrics</div>
+            <div id="key-metrics" class="metric-grid"></div>
+          </section>
+
+          <section class="analysis-card">
+            <div class="section-title">Key Levels</div>
+            <div class="level-table-wrap">
+              <table class="level-table">
+                <thead>
+                  <tr><th>Level</th><th>Price</th><th>Distance</th></tr>
+                </thead>
+                <tbody id="key-levels"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="analysis-card">
+            <div class="section-heading-row">
+              <div class="section-title">Patterns</div>
+              <div id="pattern-count" class="count-badge">0</div>
+            </div>
+            <div id="pattern-list" class="pattern-list">
+              <div class="muted-copy">Waiting for completed live bars.</div>
+            </div>
+          </section>
+
+          <section class="analysis-card">
+            <div class="section-title">LLM Summary</div>
+            <div id="llm-summary" class="summary-copy">Not run.</div>
+          </section>
+
+          <section class="analysis-card">
+            <div class="section-heading-row">
+              <div class="section-title">Trade Setups</div>
+              <button id="view-all-setups" class="text-button" type="button">View all</button>
+            </div>
+            <div id="setup-preview" class="setup-preview"></div>
+          </section>
+        </section>
+
+        <section id="tab-setups" class="tab-panel">
+          <section class="analysis-card setups-card">
+            <div class="section-heading-row">
+              <div class="section-title">Trade Setups</div>
+              <div id="setup-count" class="count-badge">0</div>
+            </div>
+            <div id="setup-list" class="setup-list">
+              <div class="muted-copy">Run LLM analysis to populate setups.</div>
+            </div>
+          </section>
+        </section>
+
+        <section id="tab-recording" class="tab-panel">
+          <section class="analysis-card recording-session-card">
+            <div class="section-heading-row">
+              <div class="section-title">Market-Day Recording</div>
+              <span id="recording-status" class="recording-status inactive">INACTIVE</span>
+            </div>
+            <div class="recording-session-actions">
+              <button id="record-start" type="button">Start Session</button>
+              <button id="record-stop" type="button" disabled>Stop Session</button>
+            </div>
+            <div class="recording-meta">
+              <span>Cutoff <strong id="recording-cutoff">3:00 PM ET</strong></span>
+              <span>Session <strong id="recording-session-dir">--</strong></span>
+            </div>
+          </section>
+
+          <section class="analysis-card">
+            <div class="section-title">Add Ticker</div>
+            <div class="recording-add-row">
+              <input id="recorder-symbol" maxlength="10" placeholder="SYMBOL">
+              <button id="record-add-symbol" type="button">Add</button>
+              <button id="record-add-active" type="button">Add Current</button>
+            </div>
+            <div id="recording-message" class="auth-note">Start a recording session, then add tickers as they appear.</div>
+          </section>
+
+          <section class="analysis-card">
+            <div class="section-heading-row">
+              <div class="section-title">Recorded Tickers</div>
+              <div id="recording-count" class="count-badge">0</div>
+            </div>
+            <div id="recording-symbol-list" class="recording-symbol-list">
+              <div class="muted-copy">No recording session active.</div>
+            </div>
+          </section>
+        </section>
+
+        <section id="tab-replay" class="tab-panel">
+          <section class="analysis-card">
+            <div class="section-heading-row">
+              <div class="section-title">Recorded Session Replay</div>
+              <span id="replay-status" class="recording-status inactive">EMPTY</span>
+            </div>
+            <div class="replay-picker">
+              <label>Session
+                <select id="replay-session"></select>
+              </label>
+              <label>Ticker
+                <select id="replay-symbol"></select>
+              </label>
+              <button id="replay-load" type="button">Load</button>
+            </div>
+            <div id="replay-message" class="auth-note">Choose a recorded session and ticker.</div>
+          </section>
+
+          <section class="analysis-card">
+            <div class="section-title">Playback</div>
+            <div class="replay-controls">
+              <button id="replay-play" type="button">Play</button>
+              <button id="replay-pause" type="button">Pause</button>
+              <button id="replay-step" type="button">Step Event</button>
+              <label>Speed
+                <select id="replay-speed">
+                  <option value="1">1×</option>
+                  <option value="5">5×</option>
+                  <option value="20">20×</option>
+                  <option value="MAX">Max</option>
+                </select>
+              </label>
+            </div>
+            <input id="replay-progress" class="replay-progress" type="range" min="0" max="0" value="0" step="1">
+            <div class="replay-meta">
+              <span>Time <strong id="replay-time">--</strong></span>
+              <span>Events <strong id="replay-events">0 / 0</strong></span>
+              <span>Progress <strong id="replay-percent">0%</strong></span>
+            </div>
+          </section>
+
+          <section class="analysis-card">
+            <div class="section-title">Evaluation Boundary</div>
+            <div class="auth-note">
+              Replay uses recorded evidence only. Missing higher-timeframe or market context remains partial rather than being fetched from the future/current market.
+            </div>
+          </section>
+        </section>
+
+        <section id="tab-raw" class="tab-panel">
+          <section class="analysis-card">
+            <div class="section-title">Analysis Engine JSON</div>
+            <pre id="analysis-raw">No analysis snapshot yet.</pre>
+          </section>
+
+          <section class="analysis-card">
+            <div class="section-title">LLM JSON</div>
+            <pre id="llm-raw">Not run.</pre>
+          </section>
+
+          <section class="analysis-card">
+            <div class="section-title">Pattern Engine JSON</div>
+            <pre id="pattern-raw">No pattern observations yet.</pre>
+          </section>
+
+          <section class="analysis-card">
+            <div class="section-title">Server</div>
+            <div id="server-message">Connecting...</div>
+            <div id="auth-status" class="auth-note">Schwab auth: checking companion_auth...</div>
+          </section>
+        </section>
+      </aside>
+    </section>
+  </main>
+
+  <script src="/app-20260922-11.js"></script>
+</body>
+</html>
