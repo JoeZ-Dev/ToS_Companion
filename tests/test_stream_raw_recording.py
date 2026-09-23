@@ -76,3 +76,58 @@ def test_unsubscribe_removes_symbol_from_reconnect_subscription_set():
     client.unsubscribe("AEHL")
 
     assert client._level_one_symbols == {"TOPS"}
+
+
+def test_level_one_activity_age_tracks_received_l1_payload(monkeypatch):
+    client = SchwabStreamClient(_info(), lambda event: None)
+    ws = FakeWS()
+    client._ws = ws
+    now = [100.0]
+    monkeypatch.setattr("momentum_companion.clients.schwab_stream.time.monotonic", lambda: now[0])
+
+    payload = {
+        "data": [{
+            "service": "LEVELONE_EQUITIES",
+            "timestamp": 1710000000000,
+            "content": [{"key": "AEHL", "3": 3.15}],
+        }]
+    }
+    client._on_message(ws, json.dumps(payload))
+    now[0] = 112.5
+
+    assert client.seconds_since_last_level_one() == 12.5
+
+
+def test_refresh_level_one_subscription_resends_full_symbol_set():
+    client = SchwabStreamClient(_info(), lambda event: None)
+    ws = FakeWS()
+    client._ws = ws
+    client._connected = True
+    client._level_one_symbols = {"AEHL", "TOPS"}
+
+    assert client.refresh_level_one_subscription() is True
+    assert ws.sent[-1]["command"] == "SUBS"
+    assert ws.sent[-1]["parameters"]["keys"] == "AEHL,TOPS"
+
+
+def test_force_reconnect_closes_current_socket_and_starts_recovery(monkeypatch):
+    class ClosingWS(FakeWS):
+        def __init__(self):
+            super().__init__()
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    client = SchwabStreamClient(_info(), lambda event: None)
+    ws = ClosingWS()
+    client._ws = ws
+    client._connected = True
+    called = []
+    monkeypatch.setattr(client, "_attempt_reconnect", lambda: called.append(True))
+
+    client.force_reconnect("stale_level_one")
+
+    assert ws.closed is True
+    assert client._connected is False
+    assert called == [True]
