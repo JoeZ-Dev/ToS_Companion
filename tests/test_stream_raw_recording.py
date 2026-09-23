@@ -82,6 +82,7 @@ def test_level_one_activity_age_tracks_received_l1_payload(monkeypatch):
     client = SchwabStreamClient(_info(), lambda event: None)
     ws = FakeWS()
     client._ws = ws
+    client._connected = True
     now = [100.0]
     monkeypatch.setattr("momentum_companion.clients.schwab_stream.time.monotonic", lambda: now[0])
 
