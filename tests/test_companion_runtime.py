@@ -354,3 +354,58 @@ def test_non_active_watched_symbol_is_aggregated_and_analyzed():
     assert len(runtime._ae_engines["TOPS"].bars) == 1
     assert tops["bars_10s"][-1]["close"] == 2.50
     assert tops["ae_snapshot"]["symbol"] == "TOPS"
+
+
+class FakeFreshnessStream(FakeStream):
+    def __init__(self, age):
+        super().__init__()
+        self.age = age
+        self.refresh_calls = 0
+        self.reconnect_calls = 0
+
+    def seconds_since_last_level_one(self):
+        return self.age
+
+    def refresh_level_one_subscription(self):
+        self.refresh_calls += 1
+        return True
+
+    def force_reconnect(self, reason):
+        self.reconnect_calls += 1
+
+
+def test_stale_stream_watchdog_resubscribes_before_reconnecting():
+    runtime = bare_runtime()
+    runtime._stream = FakeFreshnessStream(25.0)
+    runtime._stale_resubscribe_at = None
+    runtime.is_intraday_window = lambda: True
+
+    runtime._check_stream_freshness_once(now_monotonic=100.0)
+
+    assert runtime._stream.refresh_calls == 1
+    assert runtime._stream.reconnect_calls == 0
+    assert runtime._stale_resubscribe_at == 100.0
+
+
+def test_stale_stream_watchdog_reconnects_if_resubscribe_does_not_recover():
+    runtime = bare_runtime()
+    runtime._stream = FakeFreshnessStream(45.0)
+    runtime._stale_resubscribe_at = 100.0
+    runtime.is_intraday_window = lambda: True
+
+    runtime._check_stream_freshness_once(now_monotonic=125.0)
+
+    assert runtime._stream.reconnect_calls == 1
+    assert runtime._stale_resubscribe_at is None
+
+
+def test_stream_watchdog_does_nothing_outside_intraday_window():
+    runtime = bare_runtime()
+    runtime._stream = FakeFreshnessStream(999.0)
+    runtime._stale_resubscribe_at = None
+    runtime.is_intraday_window = lambda: False
+
+    runtime._check_stream_freshness_once(now_monotonic=100.0)
+
+    assert runtime._stream.refresh_calls == 0
+    assert runtime._stream.reconnect_calls == 0
