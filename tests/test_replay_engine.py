@@ -113,3 +113,41 @@ def test_replay_seek_rebuilds_state_from_start_without_future_leakage(tmp_path):
     assert state["replay"]["status"] == "PAUSED"
     assert state["session"]["symbols"]["TOPS"]["quote"]["last"] == 0.705
     assert state["session"]["symbols"]["TOPS"]["bars_10s"] == []
+
+
+def test_replay_analysis_uses_replay_clock_not_wall_clock(tmp_path):
+    session = tmp_path / "2026-09-23_070000_session"
+    session.mkdir(parents=True)
+    (session / "manifest.json").write_text(json.dumps({
+        "schema_version": 1,
+        "kind": "market_day_recording",
+        "symbols": ["TOPS"],
+        "services": ["LEVELONE_EQUITIES"],
+        "started_at_et": "2026-09-23T07:00:00-04:00",
+        "ended_at_et": "2026-09-23T15:00:00-04:00",
+        "counts": {"TOPS": {"LEVELONE_EQUITIES": 8}},
+    }))
+    base = 1790161200000
+    with (session / "TOPS.jsonl").open("w", encoding="utf-8") as handle:
+        for index in range(8):
+            raw = {"key": "TOPS", "3": 0.70 + index * 0.01, "8": 1000 + index * 100}
+            if index == 0:
+                raw.update({"1": 0.69, "2": 0.71})
+            handle.write(json.dumps({
+                "schema_version": 1,
+                "kind": "market_event",
+                "service": "LEVELONE_EQUITIES",
+                "symbol": "TOPS",
+                "stream_ts_ms": base + index * 10_000,
+                "received_at": "2026-09-23T11:00:00Z",
+                "raw": raw,
+            }) + "\n")
+
+    engine = ReplayEngine(recordings_root=tmp_path)
+    engine.load(session.name, "TOPS")
+    engine.step(8)
+    snapshot = engine.snapshot()["session"]["symbols"]["TOPS"]["ae_snapshot"]
+
+    assert snapshot is not None
+    assert snapshot["symbol"] == "TOPS"
+    assert snapshot["as_of_ts_ms"] == base + 70_000
