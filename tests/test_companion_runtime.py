@@ -2,7 +2,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import threading
 
-from momentum_companion.data.bar_aggregator import TenSecondBar
+from momentum_companion.data.bar_aggregator import BarAggregator10s, TenSecondBar
 from momentum_companion.runtime import CompanionRuntime
 from momentum_companion.session import CompanionSession
 
@@ -86,6 +86,9 @@ def bare_runtime():
     runtime.session = CompanionSession()
     runtime._lock = threading.RLock()
     runtime._active_symbol = "AEHL"
+    runtime._analysis_symbols = {"AEHL"}
+    runtime._aggregators = {"AEHL": BarAggregator10s()}
+    runtime._ae_engines = {}
     runtime._recording_symbols = {"TOPS", "DDC"}
     runtime._stream = FakeStream()
     runtime._recorder = None
@@ -232,6 +235,7 @@ def test_completed_bar_updates_patterns_and_preserves_ae_processing():
     runtime = bare_runtime()
     runtime.pattern_service = FakePatternService()
     runtime.ae_engine = FakeAEEngineForPatterns()
+    runtime._ae_engines = {"AEHL": runtime.ae_engine}
     bar = TenSecondBar(
         ts=10,
         open=3.0,
@@ -267,3 +271,141 @@ def test_runtime_add_remove_recording_symbol_refreshes_stream_union(monkeypatch)
     assert removed["active_symbols"] == []
     assert runtime._stream.unsubscribed[-1] == "TOPS"
     assert runtime._stream.symbol_sets[-1] == ["AEHL"]
+
+
+class FakePerSymbolAggregator:
+    def __init__(self, symbol):
+        self.symbol = symbol
+        self.updates = []
+
+    def ingest_price(self, update):
+        self.updates.append(update)
+        return TenSecondBar(
+            ts=update.timestamp,
+            open=update.price,
+            high=update.price,
+            low=update.price,
+            close=update.price,
+            volume=float(update.size or 0),
+            is_extended=True,
+        )
+
+
+class FakePerSymbolAE:
+    def __init__(self, symbol):
+        self.symbol = symbol
+        self.quote_timestamps = []
+        self.bars = []
+
+    def record_quote_ts(self, ts_ms):
+        self.quote_timestamps.append(ts_ms)
+
+    def ingest_10s_bar(self, bar):
+        self.bars.append(bar)
+        return {"status": "ok", "symbol": self.symbol}
+
+
+def test_watched_symbols_remain_on_shared_stream_when_not_recording():
+    runtime = bare_runtime()
+    runtime._recording_symbols = set()
+    runtime._analysis_symbols = {"AEHL", "TOPS"}
+    runtime.session.add_symbol("AEHL", make_active=True)
+    runtime.session.add_symbol("TOPS")
+
+    runtime._refresh_stream_subscription()
+
+    assert runtime._stream.symbol_sets[-1] == ["AEHL", "TOPS"]
+
+
+def test_non_active_watched_symbol_is_aggregated_and_analyzed():
+    runtime = bare_runtime()
+    runtime._recording_symbols = set()
+    runtime.session.add_symbol("AEHL", make_active=True)
+    runtime.session.add_symbol("TOPS")
+    runtime._analysis_symbols = {"AEHL", "TOPS"}
+    runtime.pattern_service = FakePatternService()
+    runtime._aggregators = {
+        "AEHL": FakePerSymbolAggregator("AEHL"),
+        "TOPS": FakePerSymbolAggregator("TOPS"),
+    }
+    runtime._ae_engines = {
+        "AEHL": FakePerSymbolAE("AEHL"),
+        "TOPS": FakePerSymbolAE("TOPS"),
+    }
+
+    runtime._handle_quote(
+        {
+            "ts_ms": 1_700_000_010_000,
+            "symbol": "TOPS",
+            "bid": 2.49,
+            "ask": 2.51,
+            "last": 2.50,
+            "bid_size": 100,
+            "ask_size": 100,
+            "last_size": 40,
+            "volume": 25_000,
+            "source_ts_type": "TRADE_TS",
+            "raw_source": "SCHWAB_STREAM",
+        }
+    )
+
+    tops = runtime.session.snapshot()["symbols"]["TOPS"]
+    assert len(runtime._aggregators["TOPS"].updates) == 1
+    assert len(runtime._ae_engines["TOPS"].bars) == 1
+    assert tops["bars_10s"][-1]["close"] == 2.50
+    assert tops["ae_snapshot"]["symbol"] == "TOPS"
+
+
+class FakeFreshnessStream(FakeStream):
+    def __init__(self, age):
+        super().__init__()
+        self.age = age
+        self.refresh_calls = 0
+        self.reconnect_calls = 0
+
+    def seconds_since_last_level_one(self):
+        return self.age
+
+    def refresh_level_one_subscription(self):
+        self.refresh_calls += 1
+        return True
+
+    def force_reconnect(self, reason):
+        self.reconnect_calls += 1
+
+
+def test_stale_stream_watchdog_resubscribes_before_reconnecting():
+    runtime = bare_runtime()
+    runtime._stream = FakeFreshnessStream(25.0)
+    runtime._stale_resubscribe_at = None
+    runtime.is_intraday_window = lambda: True
+
+    runtime._check_stream_freshness_once(now_monotonic=100.0)
+
+    assert runtime._stream.refresh_calls == 1
+    assert runtime._stream.reconnect_calls == 0
+    assert runtime._stale_resubscribe_at == 100.0
+
+
+def test_stale_stream_watchdog_reconnects_if_resubscribe_does_not_recover():
+    runtime = bare_runtime()
+    runtime._stream = FakeFreshnessStream(45.0)
+    runtime._stale_resubscribe_at = 100.0
+    runtime.is_intraday_window = lambda: True
+
+    runtime._check_stream_freshness_once(now_monotonic=125.0)
+
+    assert runtime._stream.reconnect_calls == 1
+    assert runtime._stale_resubscribe_at is None
+
+
+def test_stream_watchdog_does_nothing_outside_intraday_window():
+    runtime = bare_runtime()
+    runtime._stream = FakeFreshnessStream(999.0)
+    runtime._stale_resubscribe_at = None
+    runtime.is_intraday_window = lambda: False
+
+    runtime._check_stream_freshness_once(now_monotonic=100.0)
+
+    assert runtime._stream.refresh_calls == 0
+    assert runtime._stream.reconnect_calls == 0

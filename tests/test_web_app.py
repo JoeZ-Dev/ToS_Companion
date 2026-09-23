@@ -229,3 +229,152 @@ def test_browser_recording_symbols_can_be_added_and_removed_without_restart():
     assert added.json()["active_symbols"] == ["AEHL"]
     assert removed.json()["active_symbols"] == []
     assert removed.json()["symbols"] == ["AEHL"]
+
+
+def test_browser_surfaces_quote_freshness_indicator():
+    runtime = FakeRuntime()
+    with TestClient(create_app(runtime)) as client:
+        index = client.get("/").text
+        app_js = client.get("/app.js").text
+
+    assert 'id="quote-freshness"' in index
+    assert "received_at_ms" in app_js
+    assert "DELAYED" in app_js
+    assert "STALE" in app_js
+    assert "NO DATA" in app_js
+    assert "ageMs < 1000" in app_js
+    assert "ageMs < 3000" in app_js
+
+
+class FakeReplayEngine:
+    def __init__(self):
+        self.calls = []
+        self.value = {
+            "replay": {
+                "status": "PAUSED",
+                "session_id": "2026-09-23_070000_session",
+                "symbol": "TOPS",
+                "cursor": 0,
+                "total_events": 100,
+                "current_ts_ms": 1790161200000,
+                "progress": 0.0,
+                "speed": 1,
+            },
+            "session": CompanionSession().snapshot(),
+        }
+
+    class Catalog:
+        def list_sessions(self):
+            return [{
+                "session_id": "2026-09-23_070000_session",
+                "started_at_et": "2026-09-23T07:00:00-04:00",
+                "ended_at_et": "2026-09-23T15:00:00-04:00",
+                "symbols": ["TOPS"],
+                "counts": {"TOPS": {"LEVELONE_EQUITIES": 100}},
+                "stop_reason": "3pm_cutoff",
+            }]
+
+    catalog = Catalog()
+
+    def snapshot(self):
+        return self.value
+
+    def load(self, session_id, symbol):
+        self.calls.append(("load", session_id, symbol))
+        return self.value["replay"]
+
+    def play(self, speed):
+        self.calls.append(("play", speed))
+        self.value["replay"]["status"] = "PLAYING"
+        return self.value["replay"]
+
+    def pause(self):
+        self.calls.append(("pause",))
+        self.value["replay"]["status"] = "PAUSED"
+        return self.value["replay"]
+
+    def step(self, count=1):
+        self.calls.append(("step", count))
+        return self.value["replay"]
+
+    def seek(self, cursor):
+        self.calls.append(("seek", cursor))
+        return self.value["replay"]
+
+
+def test_replay_api_is_separate_from_live_runtime():
+    runtime = FakeRuntime()
+    replay = FakeReplayEngine()
+
+    with TestClient(create_app(runtime, replay_engine=replay)) as client:
+        sessions = client.get("/api/replay/sessions")
+        loaded = client.post(
+            "/api/replay/load",
+            json={"session_id": "2026-09-23_070000_session", "symbol": "TOPS"},
+        )
+        played = client.post("/api/replay/play", json={"speed": "MAX"})
+        paused = client.post("/api/replay/pause")
+        stepped = client.post("/api/replay/step", json={"count": 1})
+        sought = client.post("/api/replay/seek", json={"cursor": 50})
+
+    assert sessions.status_code == 200
+    assert sessions.json()[0]["symbols"] == ["TOPS"]
+    assert loaded.status_code == 200
+    assert played.status_code == 200
+    assert paused.status_code == 200
+    assert stepped.status_code == 200
+    assert sought.status_code == 200
+    assert replay.calls == [
+        ("load", "2026-09-23_070000_session", "TOPS"),
+        ("play", "MAX"),
+        ("pause",),
+        ("step", 1),
+        ("seek", 50),
+    ]
+
+
+def test_browser_exposes_replay_workspace():
+    runtime = FakeRuntime()
+    replay = FakeReplayEngine()
+
+    with TestClient(create_app(runtime, replay_engine=replay)) as client:
+        index = client.get("/").text
+        app_js = client.get("/app.js").text
+
+    assert 'data-tab="replay"' in index
+    assert 'id="replay-session"' in index
+    assert 'id="replay-symbol"' in index
+    assert 'id="replay-progress"' in index
+    assert "/api/replay/sessions" in app_js
+    assert "/api/replay/play" in app_js
+    assert "/api/replay/seek" in app_js
+
+
+def test_stateless_replay_inspection_does_not_mutate_shared_replay(tmp_path, monkeypatch):
+    from momentum_companion.replay.engine import ReplayEngine
+
+    session = tmp_path / "2026-09-23_070000_session"
+    session.mkdir(parents=True)
+    (session / "manifest.json").write_text('{"kind":"market_day_recording","symbols":["TOPS"],"services":["LEVELONE_EQUITIES"],"counts":{"TOPS":{"LEVELONE_EQUITIES":2}}}')
+    rows = [
+        {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"TOPS","stream_ts_ms":1000,"raw":{"key":"TOPS","1":1.0,"2":1.1,"3":1.05,"8":100}},
+        {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"TOPS","stream_ts_ms":2000,"raw":{"key":"TOPS","3":1.06,"8":120}},
+    ]
+    with (session / "TOPS.jsonl").open("w") as handle:
+        for row in rows:
+            handle.write(__import__("json").dumps(row) + "\n")
+
+    runtime = FakeRuntime()
+    shared = ReplayEngine(recordings_root=tmp_path)
+
+    with TestClient(create_app(runtime, replay_engine=shared)) as client:
+        response = client.post(
+            "/api/replay/inspect",
+            json={"session_id": session.name, "symbol": "TOPS", "cursor": 2},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["replay"]["cursor"] == 2
+    assert payload["session"]["symbols"]["TOPS"]["quote"]["last"] == 1.06
+    assert shared.snapshot()["replay"]["status"] == "EMPTY"

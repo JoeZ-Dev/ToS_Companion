@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from momentum_companion.replay import ReplayEngine
 from momentum_companion.runtime import CompanionRuntime
 
 
@@ -22,6 +23,30 @@ class RecordingSymbolRequest(BaseModel):
     symbol: str
 
 
+class ReplayLoadRequest(BaseModel):
+    session_id: str
+    symbol: str
+
+
+class ReplayPlayRequest(BaseModel):
+    speed: int | str = 1
+
+
+class ReplayStepRequest(BaseModel):
+    count: int = 1
+
+
+class ReplaySeekRequest(BaseModel):
+    cursor: int
+
+
+class ReplayInspectRequest(BaseModel):
+    session_id: str
+    symbol: str
+    cursor: int | None = None
+    timestamp_ms: int | None = None
+
+
 LIGHTWEIGHT_CHARTS_JS = (
     Path(__file__).resolve().parents[1]
     / "ui"
@@ -30,8 +55,15 @@ LIGHTWEIGHT_CHARTS_JS = (
 )
 
 
-def create_app(runtime: CompanionRuntime | None = None) -> FastAPI:
+def create_app(
+    runtime: CompanionRuntime | None = None,
+    *,
+    replay_engine: ReplayEngine | None = None,
+) -> FastAPI:
     companion = runtime or CompanionRuntime()
+    replay = replay_engine or ReplayEngine(
+        recordings_root=Path.home() / ".tos_companion" / "recordings"
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -151,6 +183,64 @@ def create_app(runtime: CompanionRuntime | None = None) -> FastAPI:
     @app.post("/api/recording/stop")
     def stop_recording() -> dict[str, Any]:
         return companion.stop_recording(reason="browser_stop")
+
+    @app.get("/api/replay/sessions")
+    def replay_sessions() -> list[dict[str, Any]]:
+        return replay.catalog.list_sessions()
+
+    @app.get("/api/replay/state")
+    def replay_state() -> dict[str, Any]:
+        return replay.snapshot()
+
+    @app.post("/api/replay/inspect")
+    def replay_inspect(request: ReplayInspectRequest) -> dict[str, Any]:
+        try:
+            isolated = ReplayEngine(recordings_root=replay.catalog.root)
+            isolated.load(request.session_id, request.symbol)
+            if request.timestamp_ms is not None:
+                isolated.seek(isolated.cursor_for_timestamp(request.timestamp_ms))
+            elif request.cursor is not None:
+                isolated.seek(request.cursor)
+            return isolated.snapshot()
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/replay/load")
+    def replay_load(request: ReplayLoadRequest) -> dict[str, Any]:
+        try:
+            replay.load(request.session_id, request.symbol)
+            return replay.snapshot()
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/replay/play")
+    def replay_play(request: ReplayPlayRequest) -> dict[str, Any]:
+        try:
+            replay.play(request.speed)
+            return replay.snapshot()
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/replay/pause")
+    def replay_pause() -> dict[str, Any]:
+        replay.pause()
+        return replay.snapshot()
+
+    @app.post("/api/replay/step")
+    def replay_step(request: ReplayStepRequest) -> dict[str, Any]:
+        try:
+            replay.step(request.count)
+            return replay.snapshot()
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/replay/seek")
+    def replay_seek(request: ReplaySeekRequest) -> dict[str, Any]:
+        try:
+            replay.seek(request.cursor)
+            return replay.snapshot()
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/llm/run/{symbol}", status_code=202)
     def run_llm(symbol: str) -> dict[str, Any]:

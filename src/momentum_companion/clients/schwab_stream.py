@@ -44,6 +44,8 @@ class SchwabStreamClient:
         self._active_symbol: Optional[str] = None
         self._thread: Optional[threading.Thread] = None
         self._last_ts_ms: Optional[int] = None
+        self._last_level_one_monotonic: Optional[float] = None
+        self._connected_since_monotonic: Optional[float] = None
         self._connection_state: str = "DISCONNECTED"
         self._journal = journal
         self._state_callback = state_callback
@@ -199,6 +201,40 @@ class SchwabStreamClient:
             return False
         return (now_ms - self._last_ts_ms) <= 5_000
 
+    def seconds_since_last_level_one(self) -> Optional[float]:
+        """Return local receive age for L1 traffic while connected."""
+        if not self._connected:
+            return None
+        reference = self._last_level_one_monotonic
+        if reference is None:
+            reference = self._connected_since_monotonic
+        if reference is None:
+            return None
+        return max(0.0, time.monotonic() - reference)
+
+    def refresh_level_one_subscription(self) -> bool:
+        """Re-send the full desired L1 subscription set on the current socket."""
+        if not self._connected or not self._ws or not self._level_one_symbols:
+            return False
+        logger.warning(
+            "Refreshing stale LEVELONE_EQUITIES subscription for %s",
+            ",".join(sorted(self._level_one_symbols)),
+        )
+        self.subscribe_level_one_symbols(sorted(self._level_one_symbols))
+        return True
+
+    def force_reconnect(self, reason: str) -> None:
+        """Close the current socket and start the normal reconnect path."""
+        logger.warning("Forcing Schwab stream reconnect: %s", reason)
+        ws = self._ws
+        if ws is not None:
+            self._cleanup_socket(ws)
+        else:
+            self._connected = False
+        self._connected_since_monotonic = None
+        self._last_level_one_monotonic = None
+        self._attempt_reconnect()
+
     def _auth_token(self) -> str:
         # Prefer streaming token from streamerInfo; fallback to OAuth token if absent.
         # Safe fallback: prefer streamer token if ever provided, but accept OAuth bearer for LOGIN.
@@ -297,6 +333,8 @@ class SchwabStreamClient:
                 code = content.get("code", 0) if isinstance(content, dict) else 0
                 if command == "LOGIN" and code == 0:
                     self._connected = True
+                    self._connected_since_monotonic = time.monotonic()
+                    self._last_level_one_monotonic = None
                     self._emit_state("CONNECTED")
                     if self._level_one_symbols:
                         self.subscribe_level_one_symbols(sorted(self._level_one_symbols))
@@ -314,12 +352,13 @@ class SchwabStreamClient:
                 if isinstance(msg.get("content"), dict):
                     # SUBS/UNSUBS responses carry dict content; ignore
                     continue
+                self._last_level_one_monotonic = time.monotonic()
                 try:
-                    event = self._cache.process_message(msg)
+                    events = self._cache.process_messages(msg)
                 except ValueError as exc:
                     logger.warning("Stream message dropped: %s", exc)
                     continue
-                if event:
+                for event in events:
                     self._last_ts_ms = event["ts_ms"]
                     self._on_quote(event)
             elif service == "CHART_EQUITY":
