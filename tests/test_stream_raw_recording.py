@@ -132,3 +132,28 @@ def test_force_reconnect_closes_current_socket_and_starts_recovery(monkeypatch):
     assert ws.closed is True
     assert client._connected is False
     assert called == [True]
+
+
+def test_multi_symbol_level_one_payload_emits_every_symbol():
+    quotes = []
+    client = SchwabStreamClient(_info(), quotes.append)
+    ws = FakeWS()
+    client._ws = ws
+    client._connected = True
+
+    payload = {
+        "data": [{
+            "service": "LEVELONE_EQUITIES",
+            "timestamp": 1710000000000,
+            "content": [
+                {"key": "AEHL", "1": 3.10, "2": 3.12, "3": 3.11, "8": 10000},
+                {"key": "TOPS", "1": 0.71, "2": 0.72, "3": 0.715, "8": 20000},
+                {"key": "BENF", "1": 2.17, "2": 2.19, "3": 2.18, "8": 30000},
+            ],
+        }]
+    }
+
+    client._on_message(ws, json.dumps(payload))
+
+    assert [quote["symbol"] for quote in quotes] == ["AEHL", "TOPS", "BENF"]
+    assert [quote["last"] for quote in quotes] == [3.11, 0.715, 2.18]
