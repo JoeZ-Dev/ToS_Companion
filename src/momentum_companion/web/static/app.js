@@ -587,7 +587,7 @@
   function renderFreshness(symbolState) {
     const host = byId("quote-freshness");
     const freshness = quoteFreshness(symbolState);
-    host.classList.remove("live", "delayed", "stale", "no-data");
+    host.classList.remove("live", "delayed", "stale", "no-data", "replay");
     if (freshness.status === "LIVE") {
       host.classList.add("live");
       host.textContent = "LIVE";
