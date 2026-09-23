@@ -757,3 +757,72 @@ pre {
   font-size: 13px;
   font-weight: 800;
 }
+
+
+button, input, select {
+  font: inherit;
+}
+
+select {
+  background: #11161c;
+  color: #e1e6eb;
+  border: 1px solid #303841;
+  border-radius: 4px;
+  padding: 7px 9px;
+}
+
+.replay-picker {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.6fr) minmax(90px, .6fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.replay-picker label,
+.replay-controls label {
+  display: grid;
+  gap: 4px;
+  color: #778492;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.replay-controls {
+  display: flex;
+  align-items: end;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.replay-progress {
+  width: 100%;
+  margin: 12px 0 8px;
+  padding: 0;
+}
+
+.replay-meta {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  color: #778492;
+  font-size: 10px;
+}
+
+.replay-meta strong {
+  color: #b9c4ce;
+  font-variant-numeric: tabular-nums;
+}
+
+.freshness.replay {
+  color: #7faaf2;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+@media (max-width: 900px) {
+  .replay-picker {
+    grid-template-columns: 1fr;
+  }
+}
