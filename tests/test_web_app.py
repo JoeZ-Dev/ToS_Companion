@@ -229,3 +229,15 @@ def test_browser_recording_symbols_can_be_added_and_removed_without_restart():
     assert added.json()["active_symbols"] == ["AEHL"]
     assert removed.json()["active_symbols"] == []
     assert removed.json()["symbols"] == ["AEHL"]
+
+
+def test_browser_surfaces_quote_freshness_indicator():
+    runtime = FakeRuntime()
+    with TestClient(create_app(runtime)) as client:
+        index = client.get("/").text
+        app_js = client.get("/app.js").text
+
+    assert 'id="quote-freshness"' in index
+    assert "received_at_ms" in app_js
+    assert "STALE" in app_js
+    assert "NO DATA" in app_js
