@@ -151,3 +151,34 @@ def test_replay_analysis_uses_replay_clock_not_wall_clock(tmp_path):
     assert snapshot is not None
     assert snapshot["symbol"] == "TOPS"
     assert snapshot["as_of_ts_ms"] == base + 70_000
+
+
+def test_replay_max_speed_runs_to_completion(tmp_path):
+    session = _write_session(tmp_path)
+    engine = ReplayEngine(recordings_root=tmp_path)
+    engine.load(session.name, "TOPS")
+
+    state = engine.play("MAX")
+    assert state["status"] in {"PLAYING", "COMPLETE"}
+
+    import time
+    deadline = time.time() + 2
+    while time.time() < deadline and engine.snapshot()["replay"]["status"] != "COMPLETE":
+        time.sleep(0.01)
+
+    final = engine.snapshot()["replay"]
+    assert final["status"] == "COMPLETE"
+    assert final["cursor"] == final["total_events"]
+
+
+def test_replay_rejects_unsupported_speed(tmp_path):
+    session = _write_session(tmp_path)
+    engine = ReplayEngine(recordings_root=tmp_path)
+    engine.load(session.name, "TOPS")
+
+    try:
+        engine.play(7)
+    except ValueError as exc:
+        assert "speed" in str(exc)
+    else:
+        raise AssertionError("unsupported replay speed must fail")
