@@ -46,6 +46,7 @@
             <button class="tab-button active" type="button" data-tab="analysis">Analysis</button>
             <button class="tab-button" type="button" data-tab="setups">Setups</button>
             <button class="tab-button" type="button" data-tab="recording">Recording</button>
+            <button class="tab-button" type="button" data-tab="replay">Replay</button>
             <button class="tab-button" type="button" data-tab="raw">Raw</button>
           </div>
           <button id="llm-run" class="run-llm" type="button">Run LLM</button>
@@ -145,6 +146,55 @@
             </div>
             <div id="recording-symbol-list" class="recording-symbol-list">
               <div class="muted-copy">No recording session active.</div>
+            </div>
+          </section>
+        </section>
+
+        <section id="tab-replay" class="tab-panel">
+          <section class="analysis-card">
+            <div class="section-heading-row">
+              <div class="section-title">Recorded Session Replay</div>
+              <span id="replay-status" class="recording-status inactive">EMPTY</span>
+            </div>
+            <div class="replay-picker">
+              <label>Session
+                <select id="replay-session"></select>
+              </label>
+              <label>Ticker
+                <select id="replay-symbol"></select>
+              </label>
+              <button id="replay-load" type="button">Load</button>
+            </div>
+            <div id="replay-message" class="auth-note">Choose a recorded session and ticker.</div>
+          </section>
+
+          <section class="analysis-card">
+            <div class="section-title">Playback</div>
+            <div class="replay-controls">
+              <button id="replay-play" type="button">Play</button>
+              <button id="replay-pause" type="button">Pause</button>
+              <button id="replay-step" type="button">Step Event</button>
+              <label>Speed
+                <select id="replay-speed">
+                  <option value="1">1×</option>
+                  <option value="5">5×</option>
+                  <option value="20">20×</option>
+                  <option value="MAX">Max</option>
+                </select>
+              </label>
+            </div>
+            <input id="replay-progress" class="replay-progress" type="range" min="0" max="0" value="0" step="1">
+            <div class="replay-meta">
+              <span>Time <strong id="replay-time">--</strong></span>
+              <span>Events <strong id="replay-events">0 / 0</strong></span>
+              <span>Progress <strong id="replay-percent">0%</strong></span>
+            </div>
+          </section>
+
+          <section class="analysis-card">
+            <div class="section-title">Evaluation Boundary</div>
+            <div class="auth-note">
+              Replay uses recorded evidence only. Missing higher-timeframe or market context remains partial rather than being fetched from the future/current market.
             </div>
           </section>
         </section>
