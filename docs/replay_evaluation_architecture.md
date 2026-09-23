@@ -192,3 +192,54 @@ When a symbol is first added to recording, persist a context bundle beside the r
 - schema/version identifiers
 
 This makes future recordings self-contained replay fixtures and removes dependence on later Schwab REST availability.
+
+
+## Codex / machine inspection API
+
+The browser is not required for strategy research. The joelab service exposes replay state directly.
+
+Available endpoints:
+
+- GET /api/replay/sessions
+  - list recorded sessions, symbols, counts, and recording metadata
+- GET /api/replay/state
+  - read the current interactive replay instance
+- POST /api/replay/load
+  - load a session/ticker into the interactive replay instance
+- POST /api/replay/play
+- POST /api/replay/pause
+- POST /api/replay/step
+- POST /api/replay/seek
+  - interactive replay controls
+- POST /api/replay/inspect
+  - stateless machine inspection for Codex/batch tooling
+
+The inspect request accepts:
+
+    {
+      "session_id": "2026-09-23_070000_session",
+      "symbol": "TOPS",
+      "cursor": 12500
+    }
+
+or:
+
+    {
+      "session_id": "2026-09-23_070000_session",
+      "symbol": "TOPS",
+      "timestamp_ms": 1790165800000
+    }
+
+Each inspect call creates an isolated ReplayEngine, rebuilds deterministically to the requested point, and returns the full replay/session snapshot. It does not mutate the browser replay instance or live CompanionRuntime.
+
+The returned machine state includes the same underlying information used by the UI:
+
+- current reconstructed quote
+- completed 10-second bars
+- AE snapshot
+- pattern observations
+- replay timestamp/cursor/progress
+
+This is the preferred interface for Codex-driven chart/setup review and later batch simulation. Codex should use the API rather than scraping rendered browser output.
+
+Chart screenshots/reference images may still be supplied separately for human/vision labeling, but the software-side truth should be matched back to session_id + symbol + replay timestamp/cursor through this API.
