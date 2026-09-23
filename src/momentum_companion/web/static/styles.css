@@ -68,7 +68,7 @@ button:disabled {
 
 .quote-strip {
   display: grid;
-  grid-template-columns: repeat(5, minmax(110px, 1fr));
+  grid-template-columns: repeat(6, minmax(100px, 1fr));
   gap: 1px;
   background: #20252c;
   border-bottom: 1px solid #20252c;
@@ -727,3 +727,8 @@ pre {
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+
+.freshness.live { color: #58d68d; }
+.freshness.stale { color: #ffb347; }
+.freshness.no-data { color: #ff6b6b; }
