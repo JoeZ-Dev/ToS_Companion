@@ -135,3 +135,37 @@ def test_pattern_observations_are_exposed_and_emitted_for_browser_clients():
     assert patterns[0]["evidence"]["duration_sec"] == 40
     assert events[-1]["type"] == "pattern_update"
     assert events[-1]["payload"]["patterns"][0]["state"] == "TURNING"
+
+
+def test_quote_snapshot_exposes_server_receive_freshness(monkeypatch):
+    import momentum_companion.session.companion_session as session_module
+
+    monkeypatch.setattr(session_module.time, "time", lambda: 1_700_000_001.0)
+    session = CompanionSession()
+    session.ingest_quote(quote())
+
+    symbol = session.snapshot()["symbols"]["AEHL"]
+    assert symbol["quote"]["received_at_ms"] == 1_700_000_001_000
+    assert symbol["freshness"]["status"] == "LIVE"
+    assert symbol["freshness"]["age_ms"] == 0
+
+
+def test_quote_snapshot_marks_old_received_quote_stale(monkeypatch):
+    import momentum_companion.session.companion_session as session_module
+
+    times = iter([1_700_000_000.0, 1_700_000_007.0])
+    monkeypatch.setattr(session_module.time, "time", lambda: next(times))
+    session = CompanionSession()
+    session.ingest_quote(quote())
+
+    freshness = session.snapshot()["symbols"]["AEHL"]["freshness"]
+    assert freshness["status"] == "STALE"
+    assert freshness["age_ms"] == 7000
+
+
+def test_symbol_without_quote_reports_no_data():
+    session = CompanionSession()
+    session.add_symbol("AEHL")
+
+    freshness = session.snapshot()["symbols"]["AEHL"]["freshness"]
+    assert freshness == {"status": "NO_DATA", "age_ms": None}
