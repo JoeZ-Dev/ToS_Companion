@@ -354,11 +354,11 @@ class SchwabStreamClient:
                     continue
                 self._last_level_one_monotonic = time.monotonic()
                 try:
-                    event = self._cache.process_message(msg)
+                    events = self._cache.process_messages(msg)
                 except ValueError as exc:
                     logger.warning("Stream message dropped: %s", exc)
                     continue
-                if event:
+                for event in events:
                     self._last_ts_ms = event["ts_ms"]
                     self._on_quote(event)
             elif service == "CHART_EQUITY":
