@@ -182,3 +182,14 @@ def test_replay_rejects_unsupported_speed(tmp_path):
         assert "speed" in str(exc)
     else:
         raise AssertionError("unsupported replay speed must fail")
+
+
+def test_replay_resolves_cursor_at_or_before_timestamp(tmp_path):
+    session = _write_session(tmp_path)
+    engine = ReplayEngine(recordings_root=tmp_path)
+    engine.load(session.name, "TOPS")
+
+    assert engine.cursor_for_timestamp(1790161200000) == 1
+    assert engine.cursor_for_timestamp(1790161207500) == 2
+    assert engine.cursor_for_timestamp(1790161199000) == 0
+    assert engine.cursor_for_timestamp(1790169999999) == 3
