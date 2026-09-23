@@ -267,8 +267,12 @@ class CompanionSession:
                         else {
                             "status": (
                                 "LIVE"
-                                if max(0, now_ms - int(state.quote["received_at_ms"])) <= 5_000
-                                else "STALE"
+                                if max(0, now_ms - int(state.quote["received_at_ms"])) < 1_000
+                                else (
+                                    "DELAYED"
+                                    if max(0, now_ms - int(state.quote["received_at_ms"])) < 3_000
+                                    else "STALE"
+                                )
                             ),
                             "age_ms": max(0, now_ms - int(state.quote["received_at_ms"])),
                         }
