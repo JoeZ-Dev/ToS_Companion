@@ -77,6 +77,18 @@ class ReplayEngine:
             self._status = "COMPLETE" if self._cursor >= len(self._events) else "PAUSED"
             return self._replay_state()
 
+    def cursor_for_timestamp(self, timestamp_ms: int) -> int:
+        """Return the event cursor at or before the requested replay timestamp."""
+        target = int(timestamp_ms)
+        with self._lock:
+            cursor = 0
+            for index, event in enumerate(self._events, start=1):
+                if int(event["stream_ts_ms"]) <= target:
+                    cursor = index
+                else:
+                    break
+            return cursor
+
     def seek(self, cursor: int) -> dict[str, Any]:
         self.pause()
         with self._lock:
