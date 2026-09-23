@@ -153,10 +153,11 @@ def test_quote_snapshot_exposes_server_receive_freshness(monkeypatch):
 def test_quote_snapshot_marks_old_received_quote_stale(monkeypatch):
     import momentum_companion.session.companion_session as session_module
 
-    times = iter([1_700_000_000.0, 1_700_000_007.0])
-    monkeypatch.setattr(session_module.time, "time", lambda: next(times))
+    now = [1_700_000_000.0]
+    monkeypatch.setattr(session_module.time, "time", lambda: now[0])
     session = CompanionSession()
     session.ingest_quote(quote())
+    now[0] = 1_700_000_007.0
 
     freshness = session.snapshot()["symbols"]["AEHL"]["freshness"]
     assert freshness["status"] == "STALE"
