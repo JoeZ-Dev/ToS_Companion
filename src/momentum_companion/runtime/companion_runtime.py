@@ -94,6 +94,9 @@ class CompanionRuntime:
         self._recording_symbols: set[str] = set()
         self._recorder_cutoff_thread: threading.Thread | None = None
         self._last_recorder_state_emit = 0.0
+        self._stream_watchdog_stop = threading.Event()
+        self._stream_watchdog_thread: threading.Thread | None = None
+        self._stale_resubscribe_at: float | None = None
 
     @property
     def active_symbol(self) -> str | None:
@@ -109,6 +112,8 @@ class CompanionRuntime:
             if self._started:
                 return
             self._started = True
+        self._stream_watchdog_stop.clear()
+        self._start_stream_watchdog()
         self.session.update_connection_state("READY")
 
     def stop(self) -> None:
@@ -116,6 +121,7 @@ class CompanionRuntime:
             stream = self._stream
             self._stream = None
             self._started = False
+        self._stream_watchdog_stop.set()
         self.stop_recording(reason="runtime_stopped")
         if stream is not None:
             try:
@@ -123,6 +129,64 @@ class CompanionRuntime:
             except Exception:
                 logger.warning("Failed to disconnect Schwab stream", exc_info=True)
         self.session.update_connection_state("DISCONNECTED")
+
+    def _start_stream_watchdog(self) -> None:
+        if self._stream_watchdog_thread and self._stream_watchdog_thread.is_alive():
+            return
+
+        def worker() -> None:
+            while not self._stream_watchdog_stop.wait(5.0):
+                try:
+                    self._check_stream_freshness_once()
+                except Exception:
+                    logger.warning("Stream freshness watchdog failed", exc_info=True)
+
+        thread = threading.Thread(
+            target=worker,
+            daemon=True,
+            name="tos-stream-freshness-watchdog",
+        )
+        self._stream_watchdog_thread = thread
+        thread.start()
+
+    def _check_stream_freshness_once(
+        self,
+        *,
+        now_monotonic: float | None = None,
+    ) -> None:
+        if not self.is_intraday_window():
+            self._stale_resubscribe_at = None
+            return
+
+        with self._lock:
+            stream = self._stream
+            has_symbols = bool(self._analysis_symbols or self._recording_symbols)
+        if stream is None or not has_symbols:
+            self._stale_resubscribe_at = None
+            return
+
+        age = stream.seconds_since_last_level_one()
+        if age is None or age <= 20.0:
+            self._stale_resubscribe_at = None
+            return
+
+        now_value = time.monotonic() if now_monotonic is None else now_monotonic
+        if self._stale_resubscribe_at is None:
+            if stream.refresh_level_one_subscription():
+                self._stale_resubscribe_at = now_value
+                logger.warning(
+                    "Schwab L1 stale for %.1fs; subscription refresh sent",
+                    age,
+                )
+            return
+
+        if now_value - self._stale_resubscribe_at >= 20.0:
+            logger.error(
+                "Schwab L1 still stale for %.1fs after subscription refresh; reconnecting",
+                age,
+            )
+            self._stale_resubscribe_at = None
+            stream.force_reconnect("stale_level_one")
 
     def select_symbol(self, symbol: str) -> dict[str, Any]:
         """Select a symbol, seed history/AE state, and subscribe live data."""
