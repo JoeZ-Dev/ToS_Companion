@@ -1098,6 +1098,73 @@
     void addRecordingSymbol(state.activeSymbol);
   });
 
+  byId("replay-session").addEventListener("change", populateReplaySymbols);
+
+  byId("replay-load").addEventListener("click", async () => {
+    const sessionId = byId("replay-session").value;
+    const symbol = byId("replay-symbol").value;
+    if (!sessionId || !symbol) {
+      byId("replay-message").textContent = "Choose a recorded session and ticker first.";
+      return;
+    }
+    try {
+      const payload = await replayPost("/api/replay/load", {
+        session_id: sessionId,
+        symbol,
+      });
+      byId("replay-message").textContent =
+        `Loaded ${symbol}: ${Number(payload?.replay?.total_events || 0).toLocaleString()} recorded events.`;
+      byId("replay-message").classList.remove("error");
+    } catch (error) {
+      byId("replay-message").textContent = error.message;
+      byId("replay-message").classList.add("error");
+    }
+  });
+
+  byId("replay-play").addEventListener("click", async () => {
+    try {
+      await replayPost("/api/replay/play", { speed: byId("replay-speed").value });
+      byId("replay-message").textContent = "Replay running.";
+      byId("replay-message").classList.remove("error");
+    } catch (error) {
+      byId("replay-message").textContent = error.message;
+      byId("replay-message").classList.add("error");
+    }
+  });
+
+  byId("replay-pause").addEventListener("click", async () => {
+    try {
+      await replayPost("/api/replay/pause");
+      byId("replay-message").textContent = "Replay paused.";
+    } catch (error) {
+      byId("replay-message").textContent = error.message;
+      byId("replay-message").classList.add("error");
+    }
+  });
+
+  byId("replay-step").addEventListener("click", async () => {
+    try {
+      await replayPost("/api/replay/step", { count: 1 });
+      byId("replay-message").textContent = "Advanced one recorded event.";
+    } catch (error) {
+      byId("replay-message").textContent = error.message;
+      byId("replay-message").classList.add("error");
+    }
+  });
+
+  byId("replay-progress").addEventListener("change", async (event) => {
+    try {
+      const cursor = Number(event.target.value || 0);
+      byId("replay-message").textContent = "Rebuilding replay state to selected point...";
+      await replayPost("/api/replay/seek", { cursor });
+      byId("replay-message").textContent = "Replay position rebuilt deterministically.";
+      byId("replay-message").classList.remove("error");
+    } catch (error) {
+      byId("replay-message").textContent = error.message;
+      byId("replay-message").classList.add("error");
+    }
+  });
+
   byId("symbol-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const input = byId("symbol-input");
@@ -1130,10 +1197,17 @@
   byId("view-all-setups").addEventListener("click", () => setTab("setups"));
 
   setInterval(() => {
-    const symbolState = state.activeSymbol ? state.symbols[state.activeSymbol] : null;
-    renderFreshness(symbolState);
+    if (!state.replayView) {
+      const symbolState = state.activeSymbol ? state.symbols[state.activeSymbol] : null;
+      renderFreshness(symbolState);
+    }
   }, 1000);
 
+  setInterval(() => {
+    if (state.replayView) void refreshReplayState();
+  }, 250);
+
+  loadReplaySessions();
   refreshAuthStatus();
   connect();
 })();
