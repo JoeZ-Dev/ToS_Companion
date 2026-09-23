@@ -198,14 +198,7 @@ def create_app(
             isolated = ReplayEngine(recordings_root=replay.catalog.root)
             isolated.load(request.session_id, request.symbol)
             if request.timestamp_ms is not None:
-                events = isolated._events
-                target = 0
-                for index, event in enumerate(events, start=1):
-                    if int(event["stream_ts_ms"]) <= int(request.timestamp_ms):
-                        target = index
-                    else:
-                        break
-                isolated.seek(target)
+                isolated.seek(isolated.cursor_for_timestamp(request.timestamp_ms))
             elif request.cursor is not None:
                 isolated.seek(request.cursor)
             return isolated.snapshot()
