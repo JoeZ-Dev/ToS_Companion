@@ -566,7 +566,7 @@
     }
     const ageMs = Math.max(0, Date.now() - receivedAt);
     return {
-      status: ageMs <= 5000 ? "LIVE" : "STALE",
+      status: ageMs < 1000 ? "LIVE" : (ageMs < 3000 ? "DELAYED" : "STALE"),
       ageSeconds: ageMs / 1000,
     };
   }
@@ -574,15 +574,16 @@
   function renderFreshness(symbolState) {
     const host = byId("quote-freshness");
     const freshness = quoteFreshness(symbolState);
-    host.classList.remove("live", "stale", "no-data");
+    host.classList.remove("live", "delayed", "stale", "no-data");
     if (freshness.status === "LIVE") {
       host.classList.add("live");
-      host.textContent = freshness.ageSeconds === null
-        ? "LIVE"
-        : `LIVE ${freshness.ageSeconds.toFixed(1)}s`;
+      host.textContent = "LIVE";
+    } else if (freshness.status === "DELAYED") {
+      host.classList.add("delayed");
+      host.textContent = `DELAY ${freshness.ageSeconds.toFixed(1)}s`;
     } else if (freshness.status === "STALE") {
       host.classList.add("stale");
-      host.textContent = `STALE ${Math.round(freshness.ageSeconds)}s`;
+      host.textContent = `STALE ${freshness.ageSeconds.toFixed(1)}s`;
     } else {
       host.classList.add("no-data");
       host.textContent = "NO DATA";
