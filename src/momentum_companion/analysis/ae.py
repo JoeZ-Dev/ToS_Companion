@@ -6,7 +6,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Callable
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -226,7 +226,12 @@ def _cluster_swings(prices: pd.Series, lookback: int, band_pct: float, cap: int,
 class AEEngine:
     """Analysis Engine orchestrator for AE-1.0 profile and AE-1.1 snapshots."""
 
-    def __init__(self, rest_client: Optional[SchwabRestClient], db_path: Optional[Path]) -> None:
+    def __init__(
+        self,
+        rest_client: Optional[SchwabRestClient],
+        db_path: Optional[Path],
+        now_ms_provider: Optional[Callable[[], int]] = None,
+    ) -> None:
         self._rest = rest_client
         self._db_path = db_path
         self._profile_cache: dict[str, dict] = {}
@@ -237,6 +242,7 @@ class AEEngine:
         self._session_open_rth: dict[str, Optional[float]] = {}
         self._active_symbol: Optional[str] = None
         self._seeded = False
+        self._now_ms_provider = now_ms_provider
 
     def reset_intraday(self) -> None:
         self._minute_agg = MinuteBarAggregator()
@@ -245,6 +251,19 @@ class AEEngine:
         self._market_cache = None
         self._seeded = False
         self._active_symbol = None
+
+    def prepare_replay(self, symbol: str) -> None:
+        """Reset intraday state and bind deterministic replay analysis to one symbol."""
+        self.reset_intraday()
+        self._active_symbol = str(symbol or "").strip().upper()
+
+    def _now_ms(self) -> int:
+        if self._now_ms_provider is not None:
+            return int(self._now_ms_provider())
+        return int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    def _now_et(self) -> datetime:
+        return datetime.fromtimestamp(self._now_ms() / 1000, tz=timezone.utc).astimezone(ET_TZ)
 
     def record_quote_ts(self, ts_ms: int) -> None:
         self._last_quote_ms = ts_ms
@@ -454,7 +473,7 @@ class AEEngine:
         resolved_symbol = self._resolve_symbol(symbol)
         profile = self._profile_cache.get(resolved_symbol) if resolved_symbol else None
 
-        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        now_ms = self._now_ms()
         quote_age = None
         if self._last_quote_ms is not None:
             quote_age = now_ms - self._last_quote_ms
@@ -547,7 +566,7 @@ class AEEngine:
         snapshot = {
             "symbol": snapshot_symbol,
             "as_of_ts_ms": now_ms,
-            "as_of_et": datetime.now(ET_TZ).isoformat(),
+            "as_of_et": self._now_et().isoformat(),
             "status": status,
             "data_quality": data_quality,
             "has_4h_data": has_4h,
@@ -722,14 +741,14 @@ class AEEngine:
         return snapshot
 
     def _market_state(self) -> tuple[bool, Optional[bool]]:
-        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        now_ms = self._now_ms()
         if self._market_cache and (now_ms - self._market_cache[0] < 60_000):
             return self._market_cache[1], self._market_cache[2]
         if not self._rest:
             return False, None
         has_market = False
         is_green = None
-        now_et = datetime.now(ET_TZ)
+        now_et = self._now_et()
         try:
             for proxy in [MARKET_PROXY_SYMBOL, "QQQ"]:
                 resp = self._rest.fetch_price_history(proxy, None, None, "1d")
