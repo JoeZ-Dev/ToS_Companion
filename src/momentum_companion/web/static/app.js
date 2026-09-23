@@ -13,6 +13,9 @@
     chartSymbol: null,
     chartRevision: null,
     chartFitSymbol: null,
+    replayView: false,
+    replaySnapshot: null,
+    replaySessions: [],
   };
 
   const EASTERN_TZ = "America/New_York";
@@ -235,12 +238,22 @@
   }
 
   function setTab(name) {
+    const wasReplay = state.replayView;
+    state.replayView = name === "replay";
     document.querySelectorAll(".tab-button").forEach((button) => {
       button.classList.toggle("active", button.dataset.tab === name);
     });
     document.querySelectorAll(".tab-panel").forEach((panel) => {
       panel.classList.toggle("active", panel.id === `tab-${name}`);
     });
+    if (state.replayView) {
+      void refreshReplayState();
+    } else if (wasReplay) {
+      state.chartSymbol = null;
+      state.chartRevision = null;
+      state.chartFitSymbol = null;
+      renderActive({ chartChanged: true });
+    }
   }
 
   function recordingEventCount(counts) {
@@ -662,7 +675,7 @@
     state.symbols = snapshot.symbols || {};
     byId("connection-state").textContent = snapshot.connection_state || "UNKNOWN";
     renderRecorderState(snapshot.recorder_state || {});
-    renderActive({ chartChanged: true });
+    if (!state.replayView) renderActive({ chartChanged: true });
   }
 
   function applyEvent(event) {
@@ -682,7 +695,7 @@
         state.chartFitSymbol = null;
       }
       state.activeSymbol = nextSymbol;
-      renderActive();
+      if (!state.replayView) renderActive();
       return;
     }
 
@@ -733,7 +746,155 @@
       renderRecorderState(event.payload || {});
     }
 
-    if (!symbol || symbol === state.activeSymbol) renderActive({ chartChanged });
+    if (!state.replayView && (!symbol || symbol === state.activeSymbol)) {
+      renderActive({ chartChanged });
+    }
+  }
+
+  function renderReplayView() {
+    const payload = state.replaySnapshot;
+    const replay = payload?.replay || {};
+    const replaySession = payload?.session || {};
+    const symbol = replay.symbol || null;
+    const symbolState = symbol ? replaySession.symbols?.[symbol] : null;
+    const quote = symbolState?.quote || {};
+
+    byId("symbol").textContent = symbol || "--";
+    byId("bid").textContent = fmtPrice(quote.bid);
+    byId("ask").textContent = fmtPrice(quote.ask);
+    byId("last").textContent = fmtPrice(quote.last);
+    byId("volume").textContent = fmtVolume(quote.volume);
+
+    const freshness = byId("quote-freshness");
+    freshness.classList.remove("live", "delayed", "stale", "no-data");
+    freshness.classList.add("replay");
+    freshness.textContent = "REPLAY";
+
+    renderAnalysisView(symbolState);
+    if (!symbolState) {
+      candleSeries.setData([]);
+      volumeSeries.setData([]);
+      vwapSeries.setData([]);
+      ema9Series.setData([]);
+      ema20Series.setData([]);
+      setStructuralLines(null);
+      state.chartSymbol = null;
+      state.chartRevision = null;
+      return;
+    }
+
+    const bars = mergedBars(symbolState);
+    const chartKey = `REPLAY:${replay.session_id || ""}:${symbol}`;
+    const revision = `${chartKey}:${symbolState.bars_10s?.length || 0}`;
+    if (state.chartSymbol !== chartKey || state.chartRevision !== revision) {
+      candleSeries.setData(bars);
+      volumeSeries.setData(
+        bars.map((bar) => ({
+          time: bar.time,
+          value: Number.isFinite(bar.volume) ? Math.max(0, bar.volume) : 0,
+        }))
+      );
+      vwapSeries.setData(vwapPoints(bars));
+      ema9Series.setData(emaPoints(bars, 9));
+      ema20Series.setData(emaPoints(bars, 20));
+      setStructuralLines(symbolState.ae_snapshot);
+      state.chartSymbol = chartKey;
+      state.chartRevision = revision;
+      if (bars.length > 0 && state.chartFitSymbol !== chartKey) {
+        chart.timeScale().fitContent();
+        state.chartFitSymbol = chartKey;
+      }
+    }
+  }
+
+  function renderReplayState(payload) {
+    state.replaySnapshot = payload;
+    const replay = payload?.replay || {};
+    const status = String(replay.status || "EMPTY");
+    const total = Number(replay.total_events || 0);
+    const cursor = Number(replay.cursor || 0);
+    const progress = Number(replay.progress || 0);
+
+    byId("replay-status").textContent = status;
+    byId("replay-status").classList.toggle("active", status === "PLAYING");
+    byId("replay-status").classList.toggle("inactive", status !== "PLAYING");
+    byId("replay-events").textContent = `${cursor.toLocaleString()} / ${total.toLocaleString()}`;
+    byId("replay-percent").textContent = `${(progress * 100).toFixed(1)}%`;
+    byId("replay-time").textContent = replay.current_ts_ms
+      ? formatEasternTime(Number(replay.current_ts_ms) / 1000)
+      : "--";
+
+    const slider = byId("replay-progress");
+    slider.max = String(total);
+    slider.value = String(Math.min(cursor, total));
+    slider.disabled = total === 0;
+
+    byId("replay-play").disabled = total === 0 || status === "PLAYING" || status === "COMPLETE";
+    byId("replay-pause").disabled = status !== "PLAYING";
+    byId("replay-step").disabled = total === 0 || status === "PLAYING" || status === "COMPLETE";
+
+    if (state.replayView) renderReplayView();
+  }
+
+  function populateReplaySymbols() {
+    const sessionId = byId("replay-session").value;
+    const selected = state.replaySessions.find((item) => item.session_id === sessionId);
+    const select = byId("replay-symbol");
+    select.replaceChildren();
+    for (const symbol of selected?.symbols || []) {
+      const option = document.createElement("option");
+      option.value = symbol;
+      option.textContent = symbol;
+      select.appendChild(option);
+    }
+  }
+
+  async function loadReplaySessions() {
+    try {
+      const response = await fetch("/api/replay/sessions", { cache: "no-store" });
+      const sessions = await parseResponse(response);
+      if (!response.ok) throw new Error("Unable to load replay sessions");
+      state.replaySessions = Array.isArray(sessions) ? sessions : [];
+      const select = byId("replay-session");
+      select.replaceChildren();
+      for (const session of state.replaySessions) {
+        const option = document.createElement("option");
+        option.value = session.session_id;
+        const start = session.started_at_et ? new Date(session.started_at_et).toLocaleDateString() : session.session_id;
+        option.textContent = `${start} · ${(session.symbols || []).length} tickers`;
+        select.appendChild(option);
+      }
+      populateReplaySymbols();
+      byId("replay-message").textContent = state.replaySessions.length
+        ? "Choose a session and ticker, then Load."
+        : "No recorded sessions found.";
+    } catch (error) {
+      byId("replay-message").textContent = error.message;
+      byId("replay-message").classList.add("error");
+    }
+  }
+
+  async function replayPost(path, body = null) {
+    const options = { method: "POST" };
+    if (body !== null) {
+      options.headers = { "Content-Type": "application/json" };
+      options.body = JSON.stringify(body);
+    }
+    const response = await fetch(path, options);
+    const payload = await parseResponse(response);
+    if (!response.ok) throw new Error(payload.detail || "Replay request failed");
+    renderReplayState(payload);
+    return payload;
+  }
+
+  async function refreshReplayState() {
+    try {
+      const response = await fetch("/api/replay/state", { cache: "no-store" });
+      const payload = await parseResponse(response);
+      if (response.ok) renderReplayState(payload);
+    } catch (_error) {
+      // Live operation remains independent if replay inspection fails.
+    }
   }
 
   async function refreshAuthStatus() {
