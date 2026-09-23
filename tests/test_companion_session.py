@@ -150,18 +150,32 @@ def test_quote_snapshot_exposes_server_receive_freshness(monkeypatch):
     assert symbol["freshness"]["age_ms"] == 0
 
 
-def test_quote_snapshot_marks_old_received_quote_stale(monkeypatch):
+def test_quote_snapshot_marks_one_second_old_quote_delayed(monkeypatch):
     import momentum_companion.session.companion_session as session_module
 
     now = [1_700_000_000.0]
     monkeypatch.setattr(session_module.time, "time", lambda: now[0])
     session = CompanionSession()
     session.ingest_quote(quote())
-    now[0] = 1_700_000_007.0
+    now[0] = 1_700_000_001.2
+
+    freshness = session.snapshot()["symbols"]["AEHL"]["freshness"]
+    assert freshness["status"] == "DELAYED"
+    assert freshness["age_ms"] == 1200
+
+
+def test_quote_snapshot_marks_three_second_old_quote_stale(monkeypatch):
+    import momentum_companion.session.companion_session as session_module
+
+    now = [1_700_000_000.0]
+    monkeypatch.setattr(session_module.time, "time", lambda: now[0])
+    session = CompanionSession()
+    session.ingest_quote(quote())
+    now[0] = 1_700_000_003.1
 
     freshness = session.snapshot()["symbols"]["AEHL"]["freshness"]
     assert freshness["status"] == "STALE"
-    assert freshness["age_ms"] == 7000
+    assert freshness["age_ms"] == 3100
 
 
 def test_symbol_without_quote_reports_no_data():
