@@ -559,6 +559,36 @@
     });
   }
 
+  function quoteFreshness(symbolState) {
+    const receivedAt = Number(symbolState?.quote?.received_at_ms);
+    if (!Number.isFinite(receivedAt)) {
+      return { status: "NO DATA", ageSeconds: null };
+    }
+    const ageMs = Math.max(0, Date.now() - receivedAt);
+    return {
+      status: ageMs <= 5000 ? "LIVE" : "STALE",
+      ageSeconds: ageMs / 1000,
+    };
+  }
+
+  function renderFreshness(symbolState) {
+    const host = byId("quote-freshness");
+    const freshness = quoteFreshness(symbolState);
+    host.classList.remove("live", "stale", "no-data");
+    if (freshness.status === "LIVE") {
+      host.classList.add("live");
+      host.textContent = freshness.ageSeconds === null
+        ? "LIVE"
+        : `LIVE ${freshness.ageSeconds.toFixed(1)}s`;
+    } else if (freshness.status === "STALE") {
+      host.classList.add("stale");
+      host.textContent = `STALE ${Math.round(freshness.ageSeconds)}s`;
+    } else {
+      host.classList.add("no-data");
+      host.textContent = "NO DATA";
+    }
+  }
+
   function renderAnalysisView(symbolState) {
     const snapshot = symbolState?.ae_snapshot || null;
     const output = symbolState?.llm_output || null;
@@ -588,6 +618,7 @@
     byId("ask").textContent = fmtPrice(quote.ask);
     byId("last").textContent = fmtPrice(quote.last);
     byId("volume").textContent = fmtVolume(quote.volume);
+    renderFreshness(symbolState);
     renderAnalysisView(symbolState);
     if (!symbolState) {
       candleSeries.setData([]);
@@ -935,6 +966,11 @@
   });
 
   byId("view-all-setups").addEventListener("click", () => setTab("setups"));
+
+  setInterval(() => {
+    const symbolState = state.activeSymbol ? state.symbols[state.activeSymbol] : null;
+    renderFreshness(symbolState);
+  }, 1000);
 
   refreshAuthStatus();
   connect();
