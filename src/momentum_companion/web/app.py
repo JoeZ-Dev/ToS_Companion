@@ -40,6 +40,13 @@ class ReplaySeekRequest(BaseModel):
     cursor: int
 
 
+class ReplayInspectRequest(BaseModel):
+    session_id: str
+    symbol: str
+    cursor: int | None = None
+    timestamp_ms: int | None = None
+
+
 LIGHTWEIGHT_CHARTS_JS = (
     Path(__file__).resolve().parents[1]
     / "ui"
@@ -184,6 +191,26 @@ def create_app(
     @app.get("/api/replay/state")
     def replay_state() -> dict[str, Any]:
         return replay.snapshot()
+
+    @app.post("/api/replay/inspect")
+    def replay_inspect(request: ReplayInspectRequest) -> dict[str, Any]:
+        try:
+            isolated = ReplayEngine(recordings_root=replay.catalog.root)
+            isolated.load(request.session_id, request.symbol)
+            if request.timestamp_ms is not None:
+                events = isolated._events
+                target = 0
+                for index, event in enumerate(events, start=1):
+                    if int(event["stream_ts_ms"]) <= int(request.timestamp_ms):
+                        target = index
+                    else:
+                        break
+                isolated.seek(target)
+            elif request.cursor is not None:
+                isolated.seek(request.cursor)
+            return isolated.snapshot()
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/replay/load")
     def replay_load(request: ReplayLoadRequest) -> dict[str, Any]:
