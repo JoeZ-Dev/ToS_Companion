@@ -239,5 +239,8 @@ def test_browser_surfaces_quote_freshness_indicator():
 
     assert 'id="quote-freshness"' in index
     assert "received_at_ms" in app_js
+    assert "DELAYED" in app_js
     assert "STALE" in app_js
     assert "NO DATA" in app_js
+    assert "ageMs < 1000" in app_js
+    assert "ageMs < 3000" in app_js
