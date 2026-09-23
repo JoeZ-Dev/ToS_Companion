@@ -29,6 +29,9 @@ class ReplayEngine:
         self._cursor = 0
         self._status = "EMPTY"
         self._current_ts_ms = 0
+        self._speed: int | str = 1
+        self._play_generation = 0
+        self._play_thread: threading.Thread | None = None
         self._reset_analysis()
 
     def _reset_analysis(self) -> None:
@@ -49,6 +52,7 @@ class ReplayEngine:
     def load(self, session_id: str, symbol: str) -> dict[str, Any]:
         normalized = str(symbol or "").strip().upper()
         events = self.catalog.load_events(session_id, normalized)
+        self.pause()
         with self._lock:
             self._session_id = session_id
             self._symbol = normalized
@@ -62,6 +66,7 @@ class ReplayEngine:
     def step(self, count: int = 1) -> dict[str, Any]:
         if count <= 0:
             raise ValueError("count must be positive")
+        self.pause()
         with self._lock:
             if self._symbol is None:
                 raise RuntimeError("no replay loaded")
@@ -73,6 +78,7 @@ class ReplayEngine:
             return self._replay_state()
 
     def seek(self, cursor: int) -> dict[str, Any]:
+        self.pause()
         with self._lock:
             if self._symbol is None:
                 raise RuntimeError("no replay loaded")
@@ -86,6 +92,83 @@ class ReplayEngine:
                 self._ingest_record(self._events[self._cursor])
                 self._cursor += 1
             self._status = "COMPLETE" if self._cursor >= len(self._events) else "PAUSED"
+            return self._replay_state()
+
+    def play(self, speed: int | str = 1) -> dict[str, Any]:
+        normalized_speed: int | str
+        if isinstance(speed, str):
+            upper = speed.strip().upper()
+            if upper == "MAX":
+                normalized_speed = "MAX"
+            else:
+                try:
+                    normalized_speed = int(upper)
+                except ValueError as exc:
+                    raise ValueError("speed must be 1, 5, 20, or MAX") from exc
+        else:
+            normalized_speed = int(speed)
+        if normalized_speed not in {1, 5, 20, "MAX"}:
+            raise ValueError("speed must be 1, 5, 20, or MAX")
+
+        with self._lock:
+            if self._symbol is None:
+                raise RuntimeError("no replay loaded")
+            if self._cursor >= len(self._events):
+                self._status = "COMPLETE"
+                return self._replay_state()
+            self._speed = normalized_speed
+            self._status = "PLAYING"
+            self._play_generation += 1
+            generation = self._play_generation
+
+        def worker() -> None:
+            while True:
+                with self._lock:
+                    if generation != self._play_generation or self._status != "PLAYING":
+                        return
+                    if self._cursor >= len(self._events):
+                        self._status = "COMPLETE"
+                        return
+                    record = self._events[self._cursor]
+                    current_ts = int(record["stream_ts_ms"])
+                    self._ingest_record(record)
+                    self._cursor += 1
+                    if self._cursor >= len(self._events):
+                        self._status = "COMPLETE"
+                        return
+                    next_ts = int(self._events[self._cursor]["stream_ts_ms"])
+                    speed_value = self._speed
+
+                if speed_value == "MAX":
+                    delay = 0.0
+                else:
+                    delay = max(0.0, (next_ts - current_ts) / 1000.0 / float(speed_value))
+                if delay > 0:
+                    waited = 0.0
+                    while waited < delay:
+                        chunk = min(0.05, delay - waited)
+                        threading.Event().wait(chunk)
+                        waited += chunk
+                        with self._lock:
+                            if generation != self._play_generation or self._status != "PLAYING":
+                                return
+
+        thread = threading.Thread(
+            target=worker,
+            daemon=True,
+            name="tos-replay-player",
+        )
+        with self._lock:
+            self._play_thread = thread
+            state = self._replay_state()
+        thread.start()
+        return state
+
+    def pause(self) -> dict[str, Any]:
+        with self._lock:
+            self._play_generation += 1
+            if self._status == "PLAYING":
+                self._status = "PAUSED"
             return self._replay_state()
 
     def snapshot(self) -> dict[str, Any]:
@@ -144,4 +227,5 @@ class ReplayEngine:
             "total_events": total,
             "current_ts_ms": current,
             "progress": (self._cursor / total) if total else 1.0,
+            "speed": self._speed,
         }
