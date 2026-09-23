@@ -203,7 +203,8 @@ def create_app(
 
     @app.post("/api/replay/pause")
     def replay_pause() -> dict[str, Any]:
-        return replay.pause()
+        replay.pause()
+        return replay.snapshot()
 
     @app.post("/api/replay/step")
     def replay_step(request: ReplayStepRequest) -> dict[str, Any]:
