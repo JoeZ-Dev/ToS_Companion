@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime
+from statistics import median
 import threading
 from typing import Any
 
@@ -38,6 +40,11 @@ class ReplayEngine:
         self.session = CompanionSession()
         self._cache = LevelOneCache()
         self._aggregator = BarAggregator10s()
+        self._receive_offsets_ms: list[int] = []
+        self._receive_offset_summary: dict[str, int | float | None] | None = None
+        self._last_event_ts_ms: int | None = None
+        self._significant_gap_count = 0
+        self._largest_gap_ms = 0
         self.pattern_service = PatternEvaluationService()
         self.ae_engine = AEEngine(
             None,
@@ -194,6 +201,21 @@ class ReplayEngine:
         if self._symbol is None:
             return
         self._current_ts_ms = int(record["stream_ts_ms"])
+        if self._last_event_ts_ms is not None:
+            gap_ms = self._current_ts_ms - self._last_event_ts_ms
+            if gap_ms > 60_000:
+                self._significant_gap_count += 1
+                self._largest_gap_ms = max(self._largest_gap_ms, gap_ms)
+        self._last_event_ts_ms = self._current_ts_ms
+        received_at = record.get("received_at")
+        if isinstance(received_at, str):
+            try:
+                received = datetime.fromisoformat(received_at.replace("Z", "+00:00"))
+                if received.utcoffset() is not None:
+                    self._receive_offsets_ms.append(round(received.timestamp() * 1000) - self._current_ts_ms)
+                    self._receive_offset_summary = None
+            except ValueError:
+                pass
         message = {
             "service": "LEVELONE_EQUITIES",
             "timestamp": self._current_ts_ms,
@@ -240,4 +262,31 @@ class ReplayEngine:
             "current_ts_ms": current,
             "progress": (self._cursor / total) if total else 1.0,
             "speed": self._speed,
+            "data_quality": self._data_quality(),
+        }
+
+    def _data_quality(self) -> dict[str, Any]:
+        if self._receive_offset_summary is None:
+            offsets = self._receive_offsets_ms
+            self._receive_offset_summary = {
+                "count": len(offsets),
+                "min": min(offsets) if offsets else None,
+                "max": max(offsets) if offsets else None,
+                "median": median(offsets) if offsets else None,
+            }
+        return {
+            "evidence_tier": "L1",
+            "partial_context": True,
+            "timestamp_source": "stream_ts_ms",
+            "receive_offset_ms": dict(self._receive_offset_summary),
+            "significant_gap": {
+                "threshold_ms": 60_000,
+                "count": self._significant_gap_count,
+                "largest_ms": self._largest_gap_ms,
+                "cause": "unknown",
+            },
+            "volume": {
+                "capped_total": self._aggregator.capped_volume_total,
+                "discarded_total": self._aggregator.discarded_volume_total,
+            },
         }

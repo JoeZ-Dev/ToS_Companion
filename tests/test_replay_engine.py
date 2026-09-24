@@ -193,3 +193,75 @@ def test_replay_resolves_cursor_at_or_before_timestamp(tmp_path):
     assert engine.cursor_for_timestamp(1790161207500) == 2
     assert engine.cursor_for_timestamp(1790161199000) == 0
     assert engine.cursor_for_timestamp(1790169999999) == 3
+
+
+def test_data_quality_only_summarizes_consumed_prefix_and_rebuilds_on_seek(tmp_path):
+    session = _write_session(tmp_path)
+    path = session / "TOPS.jsonl"
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    rows[0]["received_at"] = "2026-09-23T10:59:59Z"
+    rows[1]["received_at"] = "not a timestamp"
+    rows[2]["stream_ts_ms"] += 120000
+    rows[2]["received_at"] = "2026-09-23T11:02:12Z"
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+
+    engine = ReplayEngine(recordings_root=tmp_path)
+    initial = engine.load(session.name, "TOPS")
+    quality = initial["data_quality"]
+    assert quality["evidence_tier"] == "L1"
+    assert quality["partial_context"] is True
+    assert quality["timestamp_source"] == "stream_ts_ms"
+    assert quality["receive_offset_ms"] == {"count": 0, "min": None, "max": None, "median": None}
+    assert quality["significant_gap"] == {"threshold_ms": 60000, "count": 0, "largest_ms": 0, "cause": "unknown"}
+
+    first = engine.step(1)["data_quality"]
+    assert first["receive_offset_ms"] == {"count": 1, "min": -1000, "max": -1000, "median": -1000}
+    assert first["significant_gap"]["count"] == 0
+    final = engine.step(2)["data_quality"]
+    assert final["receive_offset_ms"] == {"count": 2, "min": -1000, "max": 2000, "median": 500}
+    assert final["significant_gap"]["count"] == 1
+    assert final["significant_gap"]["largest_ms"] == 125000
+    assert final["volume"] == {"capped_total": 0, "discarded_total": 0}
+
+    assert engine.seek(1)["data_quality"] == first
+    assert engine.seek(3)["data_quality"] == final
+
+
+def test_replay_missing_receive_timestamp_is_ignored(tmp_path):
+    session = _write_session(tmp_path)
+    path = session / "TOPS.jsonl"
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    rows[0].pop("received_at")
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    engine = ReplayEngine(recordings_root=tmp_path)
+    engine.load(session.name, "TOPS")
+    assert engine.step(1)["data_quality"]["receive_offset_ms"]["count"] == 0
+
+
+def test_replay_reports_volume_removed_by_cap_and_reset_without_changing_bar_volume(tmp_path):
+    session = _write_session(tmp_path)
+    base = 1790161200000
+    volumes = [1000] + [1000 + second * 100 for second in range(1, 11)] + [502000, 500000]
+    rows = [
+        {
+            "kind": "market_event",
+            "service": "LEVELONE_EQUITIES",
+            "symbol": "TOPS",
+            "stream_ts_ms": base + index * 1000,
+            "raw": {"key": "TOPS", "3": 0.7, "8": volume},
+        }
+        for index, volume in enumerate(volumes)
+    ]
+    rows[0]["raw"].update({"1": 0.69, "2": 0.71})
+    (session / "TOPS.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+
+    engine = ReplayEngine(recordings_root=tmp_path)
+    engine.load(session.name, "TOPS")
+    before_cap = engine.step(11)["data_quality"]
+    assert before_cap["volume"] == {"capped_total": 0, "discarded_total": 0}
+    capped = engine.step()["data_quality"]
+    assert capped["volume"] == {"capped_total": 250000, "discarded_total": 0}
+    reset = engine.step()["data_quality"]
+    assert reset["volume"] == {"capped_total": 250000, "discarded_total": 2000}
+    assert engine.snapshot()["session"]["symbols"]["TOPS"]["bars_10s"][0]["volume"] == 900
+    assert engine.seek(11)["data_quality"] == before_cap

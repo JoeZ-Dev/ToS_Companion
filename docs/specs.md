@@ -1,9 +1,11 @@
-# Momentum Trading Companion — Specs v1.1 (Tightened, Lossless)
+# Momentum Trading Companion — Specs v1.2 (v1.1 Tightening + Dated Amendment)
 
 > **Status:** Tightened spec format intended for one-shot agentic implementation (MVP build).\
 > **Build target:** MVP application build (live Schwab trading), not “App v1 release.”\
 > **Lineage:** Lossless tightening of **Momentum Trading Companion — Specs v1.0 (Coding-Ready)**.\
 > **Date:** 2026-02-08
+
+> **Amendment:** v1.2, 2026-09-24. The v1.1 header and preservation rules below describe the historical lossless tightening; the explicitly marked v1.2 changes in §5.4 authorize the volume behavior and additive replay diagnostics. All other v1.0/v1.1 requirements retain their authority.
 
 ## -1. Provenance, Authority, and No-Other-Docs Rule *(Clarification — Spec Factory tightening)*
 
@@ -35,6 +37,10 @@ No other documents, assumptions, or “standard practices” are allowed to over
 ### -1.3 Conflict rule
 
 If any conflict is discovered between baseline v1.0 text and a v1.1 clarification, the baseline v1.0 text wins unless the v1.1 clarification is explicitly marked as a behavioral change (none are intended in this revision).
+
+### -1.4 v1.2 amendment (2026-09-24)
+
+The marked additions in §5.4 are an authorized, versioned behavioral amendment. They clarify equal-second cumulative volume handling, prevent older events from rewinding its baseline, define the preceding 60-second cap window, and add observational replay data-quality fields. The v1.1 lossless-preservation and conflict statements apply to v1.1 clarifications, not these v1.2 additions.
 
 ---
 
@@ -325,6 +331,7 @@ Cadence rules:
 - Volume computed as sum of per-message deltas.
 - If broker provides cumulative volume: derive deltas using per-symbol baseline.
 - Reset baseline on symbol change and stream reconnect (first cumulative becomes baseline → delta=0).
+- *(v1.2 amendment — 2026-09-24)* Increasing cumulative updates with the same epoch-second timestamp contribute their increase; an unchanged cumulative value contributes zero. An older timestamp must not move the cumulative baseline backward. A lower cumulative value at a current or newer timestamp resets the baseline and contributes zero.
 
 Volume anomaly handling:
 
@@ -333,10 +340,12 @@ Volume anomaly handling:
 
 Warm-up behavior (MVP — Final):
 
-Volume anomaly capping uses the median of volume deltas observed over the last 60 seconds.
+*(v1.2 amendment — 2026-09-24)* Volume anomaly capping uses the median of preceding, nonnegative volume deltas within 60,000 ms of the current update (inclusive). The current delta does not determine its own cap. The rolling history is scoped to the aggregator and uses event time.
 
 - If fewer than 10 deltas exist in the 60s window, capping MUST be disabled (no cap applied).
 - Otherwise, compute the median over the available deltas in the 60s window.
+
+*(v1.2 amendment — 2026-09-24)* Replay snapshots include additive `replay.data_quality` diagnostics computed only from the consumed event prefix. This object contains `evidence_tier: "L1"`, `partial_context: true`, `timestamp_source: "stream_ts_ms"`, `receive_offset_ms` (`count`, `min`, `max`, `median`, with null summary values when count is zero), `significant_gap` (`threshold_ms: 60000`, `count`, `largest_ms`, `cause: "unknown"`), and `volume` (`capped_total`, `discarded_total`). Receive offsets are signed `received_at - stream_ts_ms` for parseable receive timestamps; missing or invalid timestamps are skipped. Gaps are between successive consumed stream timestamps strictly greater than the threshold; they do not establish a halt or outage. Volume totals report the aggregator's raw positive delta removed by capping and the magnitude of negative cumulative deltas discarded on a reset; they never replace the capped bar values. Seeking backward rebuilds all diagnostics from the prefix, without future events.
 
 
 ### 5.5 Studies (Final)

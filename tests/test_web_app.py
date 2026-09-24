@@ -376,5 +376,7 @@ def test_stateless_replay_inspection_does_not_mutate_shared_replay(tmp_path, mon
     assert response.status_code == 200
     payload = response.json()
     assert payload["replay"]["cursor"] == 2
+    assert payload["replay"]["data_quality"]["evidence_tier"] == "L1"
+    assert payload["replay"]["data_quality"]["volume"] == {"capped_total": 0.0, "discarded_total": 0.0}
     assert payload["session"]["symbols"]["TOPS"]["quote"]["last"] == 1.06
     assert shared.snapshot()["replay"]["status"] == "EMPTY"
