@@ -3,6 +3,53 @@ import pytest
 pd = pytest.importorskip("pandas")  # noqa: F401
 
 from momentum_companion.analysis.ae import AEEngine, OneMinuteBar, _compute_micro_metrics
+from momentum_companion.data.bar_aggregator import TenSecondBar
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+
+def _ts(day, hour, minute, second=0):
+    return int(datetime(2026, 9, day, hour, minute, second, tzinfo=ZoneInfo("America/New_York")).timestamp())
+
+
+def test_seed_and_midminute_live_volume_use_hlc3_once_and_match_chart_series():
+    engine = AEEngine(None, None)
+    minute = _ts(22, 9, 35)
+    engine.seed_intraday_from_bars("ABC", [
+        {"time": minute - 60, "open": 10, "high": 12, "low": 9, "close": 12, "volume": 100},
+        {"time": minute, "open": 20, "high": 24, "low": 18, "close": 21, "volume": 30},
+    ], end_ms=(minute + 25) * 1000)
+    agg = engine._minute_agg
+    seeded_num = 11 * 100 + 21 * 30
+    assert agg.vwap() == pytest.approx(seeded_num / 130)
+    assert agg.vwap_points[-1]["value"] == pytest.approx(agg.vwap())
+    engine.ingest_10s_bar(TenSecondBar(minute + 10, 99, 99, 99, 99, 999, False))
+    assert agg.vwap_den == 130  # Fully covered interval ending before :25
+    # The 09:35:20 interval began before the :25 REST cutoff but contains
+    # incremental live volume only after the fresh L1 baseline.
+    snapshot = engine.ingest_10s_bar(TenSecondBar(minute + 20, 30, 33, 27, 30, 10, False))
+    assert snapshot["vwap"] == pytest.approx((seeded_num + 30 * 10) / 140)
+    engine.ingest_10s_bar(TenSecondBar(minute + 30, 40, 42, 36, 39, 20, False))
+    expected = (seeded_num + 300 + 39 * 20) / 160
+    assert engine._minute_agg.vwap() == pytest.approx(expected)
+    assert engine._minute_agg.vwap_points[-1]["value"] == pytest.approx(expected)
+    engine.ingest_10s_bar(TenSecondBar(minute + 60, 50, 50, 50, 50, 5, False))
+    assert engine._minute_agg.vwap_den == 165
+    assert engine._minute_agg.bars[-1].volume == 60  # 30 seed + 10 + 20 live
+
+
+def test_vwap_resets_on_new_ny_day_and_seed_excludes_future_or_older_days():
+    engine = AEEngine(None, None)
+    ts = _ts(22, 23, 59)
+    engine.seed_intraday_from_bars("ABC", [
+        {"time": ts - 86400, "open": 5, "high": 5, "low": 5, "close": 5, "volume": 100},
+        {"time": ts, "open": 10, "high": 12, "low": 9, "close": 12, "volume": 100},
+        {"time": ts + 86400, "open": 99, "high": 99, "low": 99, "close": 99, "volume": 100},
+    ], end_ms=(ts + 20) * 1000)
+    assert engine._minute_agg.vwap() == pytest.approx(11)
+    engine.ingest_10s_bar(TenSecondBar(_ts(23, 0, 0), 20, 24, 18, 21, 10, False))
+    assert engine._minute_agg.vwap() == pytest.approx(21)
+    assert len(engine._minute_agg.vwap_points) == 1
 
 
 def _make_engine_with_profile(symbol="SYM"):

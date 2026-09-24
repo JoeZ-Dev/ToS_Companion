@@ -1,9 +1,20 @@
 import time
+from pathlib import Path
+import subprocess
 
 from fastapi.testclient import TestClient
 
 from momentum_companion.session import CompanionSession
 from momentum_companion.web import create_app
+
+
+def test_chart_vwap_uses_backend_series_after_display_window_is_trimmed():
+    script = Path(__file__).resolve().parents[1] / "src/momentum_companion/web/static/app.js"
+    source = script.read_text()
+    function = source[source.index("  function vwapPoints("):source.index("  function setStructuralLines(")]
+    js = function + "\nconsole.log(JSON.stringify(vwapPoints({vwap_points:[{time:10,value:42.25}],history_bars:[{time:10,close:99,volume:100}],bars_10s:[]})));"
+    result = subprocess.run(["node", "-e", js], text=True, capture_output=True, check=True)
+    assert result.stdout.strip() == '[{"time":10,"value":42.25}]'
 
 
 class FakeRuntime:

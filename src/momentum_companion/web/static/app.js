@@ -135,19 +135,10 @@
     });
   }
 
-  function vwapPoints(bars) {
-    let cumulativePV = 0;
-    let cumulativeVolume = 0;
-    const points = [];
-    for (const bar of bars) {
-      const volume = Number.isFinite(bar.volume) ? Math.max(0, bar.volume) : 0;
-      cumulativePV += bar.close * volume;
-      cumulativeVolume += volume;
-      if (cumulativeVolume > 0) {
-        points.push({ time: bar.time, value: cumulativePV / cumulativeVolume });
-      }
-    }
-    return points;
+  function vwapPoints(symbolState) {
+    return (symbolState?.vwap_points || []).filter(
+      (point) => Number.isFinite(point.time) && Number.isFinite(point.value)
+    );
   }
 
   function setStructuralLines(snapshot) {
@@ -653,7 +644,7 @@
           value: Number.isFinite(bar.volume) ? Math.max(0, bar.volume) : 0,
         }))
       );
-      vwapSeries.setData(vwapPoints(bars));
+      vwapSeries.setData(vwapPoints(symbolState));
       ema9Series.setData(emaPoints(bars, 9));
       ema20Series.setData(emaPoints(bars, 20));
       setStructuralLines(symbolState.ae_snapshot);
@@ -704,6 +695,7 @@
       state.symbols[symbol] = {
         quote: {},
         history_bars: [],
+        vwap_points: [],
         bars_10s: [],
         ae_snapshot: null,
         pattern_observations: [],
@@ -720,6 +712,20 @@
       state.symbols[symbol].bars_10s.push(event.payload);
       if (state.symbols[symbol].bars_10s.length > 600) {
         state.symbols[symbol].bars_10s.shift();
+      }
+      chartChanged = true;
+    } else if (event.type === "vwap_points" && symbol) {
+      if (event.payload?.point) {
+        const points = state.symbols[symbol].vwap_points || [];
+        const point = event.payload.point;
+        if (points.length && points[points.length - 1].time === point.time) {
+          points[points.length - 1] = point;
+        } else {
+          points.push(point);
+        }
+        state.symbols[symbol].vwap_points = points;
+      } else {
+        state.symbols[symbol].vwap_points = event.payload?.points || [];
       }
       chartChanged = true;
     } else if (event.type === "analysis_snapshot" && symbol) {
@@ -785,7 +791,7 @@
 
     const bars = mergedBars(symbolState);
     const chartKey = `REPLAY:${replay.session_id || ""}:${symbol}`;
-    const revision = `${chartKey}:${symbolState.bars_10s?.length || 0}`;
+    const revision = `${chartKey}:${replay.cursor || 0}`;
     if (state.chartSymbol !== chartKey || state.chartRevision !== revision) {
       candleSeries.setData(bars);
       volumeSeries.setData(
@@ -794,7 +800,7 @@
           value: Number.isFinite(bar.volume) ? Math.max(0, bar.volume) : 0,
         }))
       );
-      vwapSeries.setData(vwapPoints(bars));
+      vwapSeries.setData(vwapPoints(symbolState));
       ema9Series.setData(emaPoints(bars, 9));
       ema20Series.setData(emaPoints(bars, 20));
       setStructuralLines(symbolState.ae_snapshot);

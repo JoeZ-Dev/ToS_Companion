@@ -51,6 +51,7 @@ class _SymbolState:
         }
     )
     history_bars: list[dict[str, Any]] = field(default_factory=list)
+    vwap_points: list[dict[str, Any]] = field(default_factory=list)
     bars_10s: list[dict[str, Any]] = field(default_factory=list)
     ae_snapshot: dict[str, Any] | None = None
     llm_output: dict[str, Any] | None = None
@@ -215,6 +216,20 @@ class CompanionSession:
                 del bars[: len(bars) - self._max_bars_per_symbol]
         self._emit("completed_bar", symbol=normalized, payload=bar_dict)
 
+    def set_vwap_points(self, symbol: str, points: list[Mapping[str, Any]]) -> None:
+        normalized = self.add_symbol(symbol)
+        value = [dict(point) for point in points]
+        with self._lock:
+            previous = self._symbols[normalized].vwap_points
+            incremental = bool(value) and bool(previous) and (
+                (len(value) == len(previous) + 1 and value[:-1] == previous)
+                or (len(value) == len(previous) and value[:-1] == previous[:-1]
+                    and value[-1]["time"] == previous[-1]["time"])
+            )
+            self._symbols[normalized].vwap_points = value
+        payload = {"point": value[-1]} if incremental else {"points": value}
+        self._emit("vwap_points", symbol=normalized, payload=payload)
+
     def update_ae_snapshot(self, symbol: str, snapshot: Mapping[str, Any] | None) -> None:
         normalized = self.add_symbol(symbol)
         value = dict(snapshot) if snapshot is not None else None
@@ -278,6 +293,7 @@ class CompanionSession:
                         }
                     ),
                     "history_bars": [dict(bar) for bar in state.history_bars],
+                    "vwap_points": [dict(point) for point in state.vwap_points],
                     "bars_10s": [dict(bar) for bar in state.bars_10s],
                     "ae_snapshot": (
                         dict(state.ae_snapshot) if state.ae_snapshot is not None else None

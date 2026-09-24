@@ -2,6 +2,23 @@ from momentum_companion.data.bar_aggregator import TenSecondBar
 from momentum_companion.session import CompanionSession
 
 
+def test_vwap_series_emits_incremental_live_points_and_full_day_reset():
+    session = CompanionSession(max_bars_per_symbol=1)
+    events = []
+    session.subscribe(events.append)
+    session.set_vwap_points("ABC", [{"time": 10, "value": 11.0}])
+    session.set_vwap_points("ABC", [{"time": 10, "value": 11.0}, {"time": 20, "value": 12.0}])
+    session.set_vwap_points("ABC", [{"time": 10, "value": 11.0}, {"time": 20, "value": 12.5}])
+    session.set_vwap_points("ABC", [{"time": 30, "value": 30.0}])
+    assert [event["payload"] for event in events if event["type"] == "vwap_points"] == [
+        {"points": [{"time": 10, "value": 11.0}]},
+        {"point": {"time": 20, "value": 12.0}},
+        {"point": {"time": 20, "value": 12.5}},
+        {"points": [{"time": 30, "value": 30.0}]},
+    ]
+    assert session.snapshot()["symbols"]["ABC"]["vwap_points"] == [{"time": 30, "value": 30.0}]
+
+
 def quote(symbol="AEHL", last=3.21):
     return {
         "ts_ms": 1_700_000_000_000,

@@ -1,6 +1,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import threading
+import pytest
 
 from momentum_companion.data.bar_aggregator import BarAggregator10s, TenSecondBar
 from momentum_companion.runtime import CompanionRuntime
@@ -180,7 +181,8 @@ class FakeHistoryRest:
         }
 
 
-def test_chart_history_requests_one_minute_intraday_window(monkeypatch):
+@pytest.mark.parametrize("month,day", [(1, 15), (7, 15)])
+def test_chart_history_requests_one_minute_ny_calendar_day(monkeypatch, month, day):
     runtime = bare_runtime()
     runtime.rest = FakeHistoryRest()
     runtime._et_tz = ZoneInfo("America/New_York")
@@ -188,7 +190,7 @@ def test_chart_history_requests_one_minute_intraday_window(monkeypatch):
     class FixedDateTime(datetime):
         @classmethod
         def now(cls, tz=None):
-            value = cls(2026, 9, 22, 5, 30, tzinfo=ZoneInfo("America/New_York"))
+            value = cls(2026, month, day, 5, 30, tzinfo=ZoneInfo("America/New_York"))
             return value if tz else value.replace(tzinfo=None)
 
     import momentum_companion.runtime.companion_runtime as runtime_module
@@ -200,7 +202,8 @@ def test_chart_history_requests_one_minute_intraday_window(monkeypatch):
     start_et = datetime.fromtimestamp(start_ms / 1000, tz=ZoneInfo("America/New_York"))
     assert symbol == "IMCC"
     assert freq == "1m"
-    assert (start_et.hour, start_et.minute) == (4, 0)
+    assert (start_et.hour, start_et.minute) == (0, 0)
+    assert (start_et.year, start_et.month, start_et.day) == (2026, month, day)
     assert end_ms > start_ms
     assert runtime.session.snapshot()["symbols"]["IMCC"]["history_bars"]
 
