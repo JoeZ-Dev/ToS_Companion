@@ -113,6 +113,14 @@ def test_replay_seek_rebuilds_state_from_start_without_future_leakage(tmp_path):
     assert state["replay"]["status"] == "PAUSED"
     assert state["session"]["symbols"]["TOPS"]["quote"]["last"] == 0.705
     assert state["session"]["symbols"]["TOPS"]["bars_10s"] == []
+    assert state["session"]["symbols"]["TOPS"]["vwap_points"] == []
+
+    engine.seek(3)
+    completed = engine.snapshot()["session"]["symbols"]["TOPS"]
+    assert len(completed["vwap_points"]) == 1
+    assert completed["ae_snapshot"]["vwap"] == completed["vwap_points"][-1]["value"]
+    assert completed["history_bars"] == []
+    assert engine.snapshot()["replay"]["data_quality"]["partial_context"] is True
 
 
 def test_replay_analysis_uses_replay_clock_not_wall_clock(tmp_path):

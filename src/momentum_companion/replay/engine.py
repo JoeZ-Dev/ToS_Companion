@@ -243,6 +243,7 @@ class ReplayEngine:
         patterns = self.pattern_service.ingest_completed_bar(self._symbol, bar)
         self.session.update_pattern_observations(self._symbol, patterns)
         snapshot = self.ae_engine.ingest_10s_bar(bar)
+        self.session.set_vwap_points(self._symbol, self.ae_engine.vwap_points)
         if snapshot is not None:
             self.session.update_ae_snapshot(self._symbol, snapshot)
 

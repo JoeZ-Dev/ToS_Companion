@@ -4,7 +4,7 @@ import json
 import math
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Callable
 from zoneinfo import ZoneInfo
@@ -26,8 +26,6 @@ RTH_START = timedelta(hours=9, minutes=30)
 RTH_END = timedelta(hours=16)
 AFTERHOURS_END = timedelta(hours=20)
 OPENING_RANGE_MINUTES = 10
-VWAP_ANCHOR_START = PREMARKET_START
-VWAP_ANCHOR_END = AFTERHOURS_END
 MACD_FAST = 12
 MACD_SLOW = 26
 MACD_SIGNAL = 9
@@ -74,6 +72,9 @@ class MinuteBarAggregator:
         self.session_low: Optional[float] = None
         self.vwap_num: float = 0.0
         self.vwap_den: float = 0.0
+        self.vwap_points: list[dict[str, float | int]] = []
+        self._vwap_date: Optional[date] = None
+        self._seed_cutoff_ms: Optional[int] = None
         self.premarket_high: Optional[float] = None
         self.premarket_low: Optional[float] = None
         self.or_high: Optional[float] = None
@@ -85,6 +86,8 @@ class MinuteBarAggregator:
         return list(self._bars)
 
     def ingest_10s(self, bar: TenSecondBar) -> Optional[OneMinuteBar]:
+        if self._seed_cutoff_ms is not None and (bar.ts + 10) * 1000 <= self._seed_cutoff_ms:
+            return None
         ts_minute = (bar.ts // 60) * 60
         completed: Optional[OneMinuteBar] = None
         if self._current is None or ts_minute > self._current.ts:
@@ -113,8 +116,13 @@ class MinuteBarAggregator:
     def _store_completed_minute(self, bar: OneMinuteBar) -> None:
         replaced = False
         if self.last_seeded_minute_ts is not None and bar.ts == self.last_seeded_minute_ts:
-            self._remove_seeded_minute_from_vwap(bar.ts)
             if self._bars and self._bars[-1].ts == bar.ts:
+                seed = self._bars[-1]
+                bar = OneMinuteBar(
+                    bar.ts, seed.open, max(seed.high, bar.high),
+                    min(seed.low, bar.low), bar.close,
+                    seed.volume + bar.volume, seed.is_extended or bar.is_extended,
+                )
                 self._bars[-1] = bar
                 if self._volumes:
                     self._volumes[-1] = bar.volume
@@ -124,6 +132,11 @@ class MinuteBarAggregator:
             else:
                 for idx, existing in enumerate(self._bars):
                     if existing.ts == bar.ts:
+                        bar = OneMinuteBar(
+                            bar.ts, existing.open, max(existing.high, bar.high),
+                            min(existing.low, bar.low), bar.close,
+                            existing.volume + bar.volume, existing.is_extended or bar.is_extended,
+                        )
                         self._bars[idx] = bar
                         if idx < len(self._volumes):
                             self._volumes[idx] = bar.volume
@@ -138,20 +151,25 @@ class MinuteBarAggregator:
         if len(self._volumes) > 300:
             self._volumes = self._volumes[-300:]
 
-    def _remove_seeded_minute_from_vwap(self, ts: int) -> None:
-        target_bar: Optional[OneMinuteBar] = None
-        for b in reversed(self._bars):
-            if b.ts == ts:
-                target_bar = b
-                break
-        if target_bar is None:
+    def _add_vwap_bar(self, bar: OneMinuteBar | TenSecondBar) -> None:
+        day = datetime.fromtimestamp(bar.ts, tz=ET_TZ).date()
+        if self._vwap_date is not None and day < self._vwap_date:
             return
-        ts_et = datetime.fromtimestamp(target_bar.ts, tz=timezone.utc).astimezone(ET_TZ)
-        tod = timedelta(hours=ts_et.hour, minutes=ts_et.minute, seconds=ts_et.second)
-        if tod < VWAP_ANCHOR_START or tod > VWAP_ANCHOR_END:
-            return
-        self.vwap_num = max(0.0, self.vwap_num - target_bar.close * target_bar.volume)
-        self.vwap_den = max(0.0, self.vwap_den - target_bar.volume)
+        if day != self._vwap_date:
+            self._vwap_date = day
+            self.vwap_num = self.vwap_den = 0.0
+            self.vwap_points = []
+            self._seed_cutoff_ms = None
+        volume = max(0.0, bar.volume)
+        self.vwap_num += ((bar.high + bar.low + bar.close) / 3) * volume
+        self.vwap_den += volume
+        value = self.vwap()
+        if value is not None:
+            point: dict[str, float | int] = {"time": bar.ts, "value": value}
+            if self.vwap_points and self.vwap_points[-1]["time"] == bar.ts:
+                self.vwap_points[-1] = point
+            else:
+                self.vwap_points.append(point)
 
     def _update_session_stats(self, bar: TenSecondBar) -> None:
         ts_et = datetime.fromtimestamp(bar.ts, tz=timezone.utc).astimezone(ET_TZ)
@@ -169,9 +187,7 @@ class MinuteBarAggregator:
                 self.or_low = price_low if self.or_low is None else min(self.or_low, price_low)
         self.session_high = price_high if self.session_high is None else max(self.session_high, price_high)
         self.session_low = price_low if self.session_low is None else min(self.session_low, price_low)
-        if tod >= VWAP_ANCHOR_START and tod <= VWAP_ANCHOR_END:
-            self.vwap_num += bar.close * bar.volume
-            self.vwap_den += bar.volume
+        self._add_vwap_bar(bar)
 
     def vwap(self) -> Optional[float]:
         if self.vwap_den == 0:
@@ -358,30 +374,23 @@ class AEEngine:
             return None
 
     def ingest_10s_bar(self, bar: TenSecondBar) -> Optional[dict]:
-        completed_minute = self._minute_agg.ingest_10s(bar)
-        if completed_minute is None:
-            return None
+        self._minute_agg.ingest_10s(bar)
         return self._build_snapshot()
+
+    @property
+    def vwap_points(self) -> list[dict[str, float | int]]:
+        return list(self._minute_agg.vwap_points)
 
     def seed_intraday_from_history(self, symbol: str) -> Optional[dict]:
         """
-        Seed minute aggregator from REST 1m history (preferred: today 04:00 ET → now).
+        Seed minute aggregator from REST 1m history (today's NY calendar date).
         Returns initial snapshot if successful.
         """
         if not self._rest:
             return None
         try:
-            self._active_symbol = symbol
-            self._minute_agg.premarket_high = None
-            self._minute_agg.premarket_low = None
-            self._minute_agg.or_high = None
-            self._minute_agg.or_low = None
-            self._minute_agg.session_open = None
-            self._minute_agg.session_high = None
-            self._minute_agg.session_low = None
-            self._minute_agg.last_seeded_minute_ts = None
             now_et = datetime.now(ET_TZ)
-            start_et = datetime(now_et.year, now_et.month, now_et.day, 4, 0, tzinfo=ET_TZ)
+            start_et = datetime(now_et.year, now_et.month, now_et.day, tzinfo=ET_TZ)
             start_ms = int(start_et.timestamp() * 1000)
             end_ms = int(now_et.timestamp() * 1000)
             resp = self._rest.fetch_price_history(symbol, start_ms, end_ms, "1m")
@@ -395,14 +404,31 @@ class AEEngine:
                 schwab_candles,
                 recorded_candles,
             )
+            bars = [
+                {
+                    "time": int(c["datetime"] // 1000),
+                    **{key: c.get(key) for key in ("open", "high", "low", "close", "volume")},
+                }
+                for c in candles if c.get("datetime") is not None
+            ]
+            return self.seed_intraday_from_bars(symbol, bars, end_ms=end_ms)
+        except Exception:
+            return None
+
+    def seed_intraday_from_bars(self, symbol: str, bars: list[dict], *, end_ms: int) -> Optional[dict]:
+        """Use the same normalized REST/recorded history snapshot as the chart."""
+        self.reset_intraday()
+        self._active_symbol = symbol
+        target_day = datetime.fromtimestamp(end_ms / 1000, tz=ET_TZ).date()
+        try:
             seeded = 0
             last_seed_ts = None
-            for c in sorted(candles, key=lambda x: x.get("datetime", 0)):
-                ts = c.get("datetime")
-                if ts is None:
+            for c in sorted(bars, key=lambda x: x.get("time", 0)):
+                ts = c.get("time")
+                if ts is None or datetime.fromtimestamp(ts, tz=ET_TZ).date() != target_day or ts * 1000 > end_ms:
                     continue
                 b = OneMinuteBar(
-                    ts=int(ts // 1000),
+                    ts=int(ts),
                     open=c.get("open"),
                     high=c.get("high"),
                     low=c.get("low"),
@@ -412,22 +438,13 @@ class AEEngine:
                 )
                 self._minute_agg._bars.append(b)
                 self._minute_agg._volumes.append(b.volume)
+                self._minute_agg._add_vwap_bar(b)
                 seeded += 1
                 last_seed_ts = b.ts
             if seeded == 0:
                 return None
+            self._minute_agg._seed_cutoff_ms = end_ms
             self._minute_agg.last_seeded_minute_ts = last_seed_ts
-            # Compute VWAP from seeded bars within anchor window
-            vnum = 0.0
-            vden = 0.0
-            for b in self._minute_agg._bars:
-                ts_et = datetime.fromtimestamp(b.ts, tz=timezone.utc).astimezone(ET_TZ)
-                tod = timedelta(hours=ts_et.hour, minutes=ts_et.minute, seconds=ts_et.second)
-                if tod >= VWAP_ANCHOR_START and tod <= VWAP_ANCHOR_END:
-                    vnum += b.close * b.volume
-                    vden += b.volume
-            self._minute_agg.vwap_num = vnum
-            self._minute_agg.vwap_den = vden
             self._reconstruct_session_state_from_seeded()
             self._seeded = True
             return self._build_snapshot(symbol)

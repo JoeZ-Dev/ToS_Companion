@@ -1,4 +1,4 @@
-# Momentum Trading Companion — Specs v1.2 (v1.1 Tightening + Dated Amendment)
+# Momentum Trading Companion — Specs v1.3 (v1.1 Tightening + Dated Amendments)
 
 > **Status:** Tightened spec format intended for one-shot agentic implementation (MVP build).\
 > **Build target:** MVP application build (live Schwab trading), not “App v1 release.”\
@@ -6,6 +6,8 @@
 > **Date:** 2026-02-08
 
 > **Amendment:** v1.2, 2026-09-24. The v1.1 header and preservation rules below describe the historical lossless tightening; the explicitly marked v1.2 changes in §5.4 authorize the volume behavior and additive replay diagnostics. All other v1.0/v1.1 requirements retain their authority.
+
+> **Amendment:** v1.3, 2026-09-24. The marked §5.5 changes replace the prior 04:00–20:00 ET VWAP anchor with the Momentum Monitor's NY calendar-day HLC3 session VWAP and add a backend chart-series contract. Premarket and opening-range definitions remain unchanged.
 
 ## -1. Provenance, Authority, and No-Other-Docs Rule *(Clarification — Spec Factory tightening)*
 
@@ -354,6 +356,8 @@ VWAP:
 
 - Anchored to **04:00 ET** (extended session start) for the current ET trading day
 - VWAP accumulates continuously through **20:00 ET** and **does not reset** at 09:30 ET
+
+*(v1.3 amendment — 2026-09-24)* For VWAP, the session is the latest **America/New_York calendar date** of consumed bars (midnight to the next midnight); it resets on a new NY date, not at 04:00 or 09:30. The source is explicit one-minute extended-hours price history from today's NY midnight to now, followed by consumed live ten-second bars. Each bar contributes `((high + low + close) / 3) × volume` and its volume; zero cumulative volume yields no VWAP. Chart and AE use the same backend accumulator and an additive per-symbol `vwap_points` array of `{time, value}` (epoch seconds, finite VWAP), emitted on seed and each completed ten-second bar, independently of truncated display bars. AE snapshots update on each completed ten-second bar so visible scalar VWAP agrees with the line. The final historical one-minute candle retains its volume even if still forming at the request cutoff; live incremental volume after the cutoff may contribute within that same minute, using a fresh cumulative-volume baseline at first L1 quote. Older live intervals fully covered by the history cutoff do not contribute, and completed minute storage merges rather than replaces historical volume. If history is missing, consumed live bars form only a partial day context; replay must use only its consumed recording prefix and must never fetch current REST history. Older-day and future-dated seed candles cannot contribute to today's VWAP.
 
 EMA:
 

@@ -205,14 +205,18 @@ class CompanionRuntime:
 
         if is_new_analysis_symbol:
             self.pattern_service.reset(normalized)
-            self._load_history(normalized)
+            bars, end_ms = self._load_history(normalized)
             try:
                 engine.compute_profile(normalized)
-                seeded = engine.seed_intraday_from_history(normalized)
+                seeded = engine.seed_intraday_from_bars(normalized, bars, end_ms=end_ms)
                 if seeded:
                     self.session.update_ae_snapshot(normalized, seeded)
+                    self.session.set_vwap_points(normalized, engine.vwap_points)
             except Exception:
                 logger.warning("AE seed failed for %s", normalized, exc_info=True)
+        with self._lock:
+            if self._pending_symbol == normalized:
+                self._pending_symbol = None
 
         self._ensure_stream()
         self._refresh_stream_subscription()
@@ -298,24 +302,17 @@ class CompanionRuntime:
         self.session.update_llm_output(selected, result)
         return result
 
-    def _load_history(self, symbol: str) -> None:
+    def _load_history(self, symbol: str) -> tuple[list[dict[str, Any]], int]:
+        now_ms = int(datetime.now(self._et_tz).timestamp() * 1000)
         try:
-            now_et = datetime.now(self._et_tz)
+            now_et = datetime.fromtimestamp(now_ms / 1000, tz=self._et_tz)
             start_et = datetime(
                 now_et.year,
                 now_et.month,
                 now_et.day,
-                4,
-                0,
                 tzinfo=self._et_tz,
             )
-            # Before 4 AM ET, fall back to a one-hour window rather than
-            # constructing an invalid future start.
-            if now_et < start_et:
-                start_et = now_et.replace(minute=0, second=0, microsecond=0)
-                start_et = start_et.replace(hour=max(0, start_et.hour - 1))
             start_ms = int(start_et.timestamp() * 1000)
-            now_ms = int(now_et.timestamp() * 1000)
             response = self.rest.fetch_price_history(symbol, start_ms, now_ms, "1m")
             schwab_candles = response.get("candles") or []
             recorded_candles = load_recorded_minute_candles(
@@ -345,11 +342,14 @@ class CompanionRuntime:
                 }
                 for c in candles
                 if c.get("datetime") is not None
+                and start_ms <= c["datetime"] <= now_ms
             ]
             self.session.set_history(symbol, bars)
+            return bars, now_ms
         except Exception:
             logger.warning("History load failed for %s", symbol, exc_info=True)
             self.session.set_history(symbol, [])
+            return [], now_ms
 
     def _ensure_stream(self) -> None:
         with self._lock:
@@ -399,7 +399,7 @@ class CompanionRuntime:
         )
 
         with self._lock:
-            if symbol not in self._analysis_symbols:
+            if symbol not in self._analysis_symbols or symbol == getattr(self, "_pending_symbol", None):
                 return
             aggregator = self._aggregators.get(symbol)
             engine = self._ae_engines.get(symbol)
@@ -429,6 +429,9 @@ class CompanionRuntime:
             if engine is None:
                 engine = self._ensure_symbol_analysis(symbol)
             snapshot = engine.ingest_10s_bar(bar)
+            points = getattr(engine, "vwap_points", None)
+            if points is not None:
+                self.session.set_vwap_points(symbol, points)
             if snapshot:
                 self.session.update_ae_snapshot(symbol, snapshot)
         except Exception:
