@@ -102,6 +102,14 @@ class SchwabRestClient:
 
         params: Dict[str, Any] = {"symbol": symbol}
         params.update(self._freq_params(freq, include_period=not explicit_range))
+        # Match the known-good Momentum Monitor request shape for explicit
+        # intraday minute history: startDate/endDate + frequency only.
+        # Schwab accepts periodType=day for period-based requests, but the
+        # live-tested midnight backfill path intentionally omits periodType
+        # (and period) when an explicit 1m range is supplied.
+        if explicit_range and freq == "1m":
+            params.pop("periodType", None)
+            params.pop("period", None)
 
         if explicit_range:
             end = clamp_target if end_ms is None else min(int(end_ms), clamp_target)
@@ -128,12 +136,17 @@ class SchwabRestClient:
         params["needExtendedHoursData"] = "true"
         resp = self._request("GET", f"{self._md_base_url}/pricehistory", params=params)
         body = resp.json()
+        candles = body.get("candles") or []
+        first_ms = candles[0].get("datetime") if candles else None
+        last_ms = candles[-1].get("datetime") if candles else None
         logger.info(
-            "pricehistory result symbol=%s freq=%s candles=%d empty=%s",
+            "pricehistory result symbol=%s freq=%s candles=%d empty=%s first_ms=%s last_ms=%s",
             symbol,
             freq,
-            len(body.get("candles") or []),
+            len(candles),
             body.get("empty"),
+            first_ms,
+            last_ms,
         )
         return body
 
