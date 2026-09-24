@@ -41,7 +41,9 @@ class BarAggregator10s:
         self._last_quote_ts_ms: Optional[int] = None
         self._last_cum_volume: Optional[float] = None
         self._last_volume_ts_ms: Optional[int] = None
-        self._volume_history: List[float] = []
+        self._volume_history: List[tuple[int, float]] = []
+        self.capped_volume_total = 0.0
+        self.discarded_volume_total = 0.0
 
     def ingest_price(self, update: PriceUpdate) -> Optional[TenSecondBar]:
         """Consume a price update and return a completed bar when the window rolls."""
@@ -133,32 +135,35 @@ class BarAggregator10s:
             vol = update.size
             if vol is None:
                 return 0.0
-            if self._last_cum_volume is None or update.timestamp * 1000 <= (self._last_volume_ts_ms or 0):
+            ts_ms = update.timestamp * 1000
+            if self._last_cum_volume is None:
                 self._last_cum_volume = vol
-                self._last_volume_ts_ms = update.timestamp * 1000
+                self._last_volume_ts_ms = ts_ms
+                return 0.0
+            if self._last_volume_ts_ms is not None and ts_ms < self._last_volume_ts_ms:
                 return 0.0
             delta = vol - self._last_cum_volume
             self._last_cum_volume = vol
-            self._last_volume_ts_ms = update.timestamp * 1000
+            self._last_volume_ts_ms = ts_ms
         if delta < 0:
+            self.discarded_volume_total -= delta
             return 0.0
-        self._add_volume_history(delta, update.timestamp * 1000)
+        ts_ms = update.timestamp * 1000
+        self._volume_history = [
+            (seen_ms, seen_delta)
+            for seen_ms, seen_delta in self._volume_history
+            if 0 <= ts_ms - seen_ms <= VOLUME_MEDIAN_LOOKBACK_MS
+        ]
         cap = max(VOLUME_ANOMALY_CAP_DEFAULT, 10 * self._median_volume())
-        if len(self._volume_history) < 10:
-            return delta
-        if delta > cap:
-            return cap
-        return delta
-
-    def _add_volume_history(self, delta: float, ts_ms: int) -> None:
-        self._volume_history.append(delta)
-        if len(self._volume_history) > 600:
-            self._volume_history = self._volume_history[-600:]
+        capped = min(delta, cap) if len(self._volume_history) >= 10 else delta
+        self.capped_volume_total += delta - capped
+        self._volume_history.append((ts_ms, delta))
+        return capped
 
     def _median_volume(self) -> float:
         if not self._volume_history:
             return 0.0
-        sorted_vols = sorted(self._volume_history)
+        sorted_vols = sorted(delta for _, delta in self._volume_history)
         mid = len(sorted_vols) // 2
         if len(sorted_vols) % 2 == 0:
             return (sorted_vols[mid - 1] + sorted_vols[mid]) / 2

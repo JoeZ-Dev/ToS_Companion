@@ -44,3 +44,32 @@ def test_volume_delta_resets_on_symbol_change_or_restart():
     bar = agg.close_out()
     # Volume delta should be 50 on this bar
     assert bar.volume == 50
+
+
+def test_same_second_increases_count_once_and_older_event_cannot_rewind_baseline():
+    agg = BarAggregator10s()
+    for ts, volume in [(100, 1000), (100, 1025), (100, 1025), (99, 900), (101, 1040)]:
+        agg.ingest_price(make_update(ts, 10.0, volume))
+    assert agg.forming_bar().volume == 40
+    assert agg.capped_volume_total == 0
+    assert agg.discarded_volume_total == 0
+
+
+def test_lower_cumulative_value_resets_baseline_without_inventing_volume():
+    agg = BarAggregator10s()
+    for ts, volume in [(100, 1000), (100, 990), (100, 995), (101, 1010)]:
+        agg.ingest_price(make_update(ts, 10.0, volume))
+    assert agg.forming_bar().volume == 20
+    assert agg.discarded_volume_total == 10
+
+
+def test_anomaly_cap_uses_preceding_sixty_seconds_and_expires():
+    agg = BarAggregator10s()
+    agg.ingest_price(make_update(0, 10.0, 1000))
+    for second in range(1, 11):
+        agg.ingest_price(make_update(second, 10.0, 1000 + second * 100))
+    agg.ingest_price(make_update(11, 10.0, 502000))
+    assert agg.capped_volume_total == 250000
+    agg.ingest_price(make_update(72, 10.0, 1002000))
+    assert agg.capped_volume_total == 250000
+    assert agg.forming_bar().volume == 500000

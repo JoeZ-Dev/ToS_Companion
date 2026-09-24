@@ -13,6 +13,7 @@ Recorded market evidence is replayed through the same bar aggregation, Analysis 
 3. Same analysis path. L1 deltas feed LevelOneCache, BarAggregator10s, AEEngine, and PatternEvaluationService.
 4. Replay clock owns time. Analysis timestamps and time-sensitive calculations use the replay event timestamp.
 5. Seek means rebuild. Rewinding discards replay analysis state and deterministically replays from the beginning to the target cursor.
+   This includes replay data-quality diagnostics; snapshots summarize consumed events only.
 6. Live remains live. Replay uses a separate CompanionSession; live WebSocket/Schwab processing continues independently.
 7. Training is evaluation first. Replay may measure and label strategy behavior, but it must never silently tune live parameters.
 
@@ -239,6 +240,7 @@ The returned machine state includes the same underlying information used by the 
 - AE snapshot
 - pattern observations
 - replay timestamp/cursor/progress
+- `replay.data_quality`: L1 evidence tier and partial-context flag, authoritative `stream_ts_ms` clock, signed receive-minus-stream offset count/min/max/median from valid `received_at`, event gaps greater than 60 seconds (count/largest, unknown cause), and aggregator capped/discarded volume totals. Missing or malformed receive timestamps contribute no offset sample. These observations do not shift timestamps, fill bars, or assert an exchange halt or provider outage.
 
 This is the preferred interface for Codex-driven chart/setup review and later batch simulation. Codex should use the API rather than scraping rendered browser output.
 
