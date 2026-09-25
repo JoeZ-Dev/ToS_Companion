@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
+from momentum_companion.setup_engine.confirmation import evaluate_price_confirmation
 from momentum_companion.setup_engine.pattern_contracts import (
     PatternLine,
     PatternObservation,
@@ -27,6 +28,10 @@ class MicroPullbackConfig:
     min_retracement_pct: float = 0.08
     max_retracement_pct: float = 0.50
     continuation_buffer_pct: float = 0.001
+    confirmation_min_sec: float = 3.0
+    confirmation_max_sec: float = 15.0
+    confirmation_formation_fraction: float = 0.04
+    confirmation_max_gap_sec: float = 20.0
 
 
 @dataclass(frozen=True)
@@ -64,8 +69,18 @@ def detect_micro_pullback(symbol: str, bars, config: MicroPullbackConfig | None 
     last = pullback_bars[-1]
     prior = pullback_bars[-2] if len(pullback_bars) > 1 else window[impulse.end_index]
     continuation_level = impulse.end_price * (1 + cfg.continuation_buffer_pct)
+    confirmation = evaluate_price_confirmation(
+        normalized,
+        trigger_price=continuation_level,
+        pattern_started_at=impulse.start_time,
+        direction="above",
+        min_seconds=cfg.confirmation_min_sec,
+        max_seconds=cfg.confirmation_max_sec,
+        formation_fraction=cfg.confirmation_formation_fraction,
+        max_gap_seconds=cfg.confirmation_max_gap_sec,
+    )
     state = (
-        PatternState.CONTINUATION if last.close >= continuation_level
+        PatternState.CONTINUATION if confirmation.confirmed
         else PatternState.TURNING if last.close > prior.close and last.close > retracement.low_price
         else PatternState.PULLBACK
     )
@@ -94,6 +109,7 @@ def detect_micro_pullback(symbol: str, bars, config: MicroPullbackConfig | None 
             "duration_sec": retracement.duration_sec,
             "retracement_pct": retracement.depth_pct,
             "continuation_level": continuation_level,
+            "confirmation": confirmation.to_dict(),
         },
         points=points,
         lines=lines,
