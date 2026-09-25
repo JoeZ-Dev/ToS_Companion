@@ -55,6 +55,8 @@ class LevelOneCache:
                 "ask_size": fields.get("5"),
                 "last_size": fields.get("9"),
                 "volume": fields.get("8"),
+                "net_percentage_change": fields.get("42"),
+                "regular_market_percentage_change": fields.get("43"),
                 "hard_to_borrow_quantity": fields.get("46"),
                 "hard_to_borrow_rate": fields.get("47"),
             }
@@ -82,6 +84,8 @@ class LevelOneCache:
                     ask_size=sym_cache.get("ask_size"),
                     last_size=sym_cache.get("last_size"),
                     volume=sym_cache.get("volume"),
+                    net_percentage_change=sym_cache.get("net_percentage_change"),
+                    regular_market_percentage_change=sym_cache.get("regular_market_percentage_change"),
                     security_status=sym_cache.get("security_status"),
                     hard_to_borrow_quantity=sym_cache.get("hard_to_borrow_quantity"),
                     hard_to_borrow_rate=sym_cache.get("hard_to_borrow_rate"),
