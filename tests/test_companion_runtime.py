@@ -25,6 +25,7 @@ class FakeRecorder:
         self.payloads = []
         self.symbols = []
         self._active = []
+        self.pre7_seeds = {}
 
     def record_payload(self, payload):
         self.payloads.append(payload)
@@ -41,11 +42,22 @@ class FakeRecorder:
             self._active.remove(symbol)
         return True
 
+    def set_pre7_seed(self, symbol, *, vwap, volume):
+        if symbol not in self.symbols:
+            raise ValueError("symbol not in recording")
+        self.pre7_seeds[symbol] = {"vwap": float(vwap), "volume": float(volume)}
+        return dict(self.pre7_seeds[symbol])
+
     def active_symbols(self):
         return list(self._active)
 
     def state(self):
-        return {"active": True, "symbols": list(self.symbols), "active_symbols": list(self._active)}
+        return {
+            "active": True,
+            "symbols": list(self.symbols),
+            "active_symbols": list(self._active),
+            "pre7_seeds": dict(self.pre7_seeds),
+        }
 
 
 class FakeAppState:
@@ -412,3 +424,40 @@ def test_stream_watchdog_does_nothing_outside_intraday_window():
 
     assert runtime._stream.refresh_calls == 0
     assert runtime._stream.reconnect_calls == 0
+
+
+def test_apply_recording_pre7_seed_rebuilds_live_vwap_from_7am_history(monkeypatch):
+    runtime = bare_runtime()
+    recorder = FakeRecorder()
+    recorder.add_symbol("GCTK")
+    runtime._recorder = recorder
+    runtime._recording_symbols = {"GCTK"}
+    runtime.rest = FakeHistoryRest()
+    runtime._analysis_symbols = set()
+    runtime._ae_engines = {}
+    runtime._aggregators = {}
+
+    import momentum_companion.runtime.companion_runtime as runtime_module
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = cls(2026, 9, 24, 10, 0, tzinfo=ZoneInfo("America/New_York"))
+            return value if tz else value.replace(tzinfo=None)
+
+    monkeypatch.setattr(runtime_module, "datetime", FixedDateTime)
+
+    state = runtime.apply_recording_pre7_seed(
+        "GCTK",
+        pre7_vwap=4.4233,
+        pre7_volume=10570235,
+    )
+
+    assert state["pre7_seeds"]["GCTK"] == {
+        "vwap": 4.4233,
+        "volume": 10570235.0,
+    }
+    symbol_state = runtime.session.snapshot()["symbols"]["GCTK"]
+    assert symbol_state["vwap_points"]
+    assert symbol_state["ae_snapshot"]["vwap"] is not None
+    assert "GCTK" in runtime._analysis_symbols
