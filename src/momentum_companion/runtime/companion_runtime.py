@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 from momentum_companion.analysis.ae import AEEngine
 from momentum_companion.analysis.relative_strength import RelativeStrengthTracker
 from momentum_companion.bootstrap import bootstrap
+from momentum_companion.clients.massive_fundamentals_client import MassiveFundamentalsClient
 from momentum_companion.clients.schwab_rest import SchwabRestClient
 from momentum_companion.clients.schwab_stream import SchwabStreamClient
 from momentum_companion.clients.token_provider import TokenProvider
@@ -78,6 +79,17 @@ class CompanionRuntime:
         self._ae_engines: dict[str, AEEngine] = {}
         self._aggregators: dict[str, BarAggregator10s] = {}
         self._analysis_symbols: set[str] = set()
+        massive_api_key = os.getenv("MASSIVE_API_KEY", "").strip()
+        self.fundamentals_client = (
+            MassiveFundamentalsClient(
+                massive_api_key,
+                Path.home() / ".tos_companion" / "cache",
+                logger,
+            )
+            if massive_api_key
+            else None
+        )
+        self._fundamentals_inflight: set[str] = set()
         setattr(self.token_provider, "rest_client", self.rest)
 
         self.llm_coach = LLMCoach()
@@ -288,6 +300,7 @@ class CompanionRuntime:
 
         if is_new_analysis_symbol:
             self.pattern_service.reset(normalized)
+            self._refresh_fundamentals_async(normalized)
             bars, end_ms = self._load_history(normalized)
             try:
                 engine.compute_profile(normalized)
@@ -502,6 +515,42 @@ class CompanionRuntime:
         if completed is not None:
             self._handle_completed_bar(symbol, completed)
 
+    def _refresh_fundamentals_async(self, symbol: str) -> None:
+        client = getattr(self, "fundamentals_client", None)
+        if client is None:
+            return
+        normalized = self.session.normalize_symbol(symbol)
+        if not normalized:
+            return
+        with self._lock:
+            inflight = getattr(self, "_fundamentals_inflight", set())
+            if normalized in inflight:
+                return
+            inflight.add(normalized)
+            self._fundamentals_inflight = inflight
+
+        def worker() -> None:
+            try:
+                today = datetime.now(self._et_tz).date().isoformat()
+                payload = {
+                    "source": "MASSIVE_OPTIONAL",
+                    "float": client.fetch_float(normalized),
+                    "short_interest": client.fetch_short_interest(normalized),
+                    "short_volume_pct": client.fetch_short_volume_pct(normalized, today),
+                }
+                self.session.update_fundamentals(normalized, payload)
+            except Exception:
+                logger.warning("Optional fundamentals refresh failed for %s", normalized, exc_info=True)
+            finally:
+                with self._lock:
+                    self._fundamentals_inflight.discard(normalized)
+
+        threading.Thread(
+            target=worker,
+            daemon=True,
+            name=f"tos-fundamentals-{normalized}",
+        ).start()
+
     def _update_relative_strength(self, event: QuoteEvent) -> None:
         symbol = self.session.normalize_symbol(str(event.get("symbol") or ""))
         ts_ms = event.get("ts_ms")
@@ -539,6 +588,7 @@ class CompanionRuntime:
                 snapshot = dict(snapshot)
                 symbol_state = self.session.snapshot().get("symbols", {}).get(symbol, {})
                 snapshot["relative_strength"] = dict(symbol_state.get("relative_strength") or {})
+                snapshot["fundamentals"] = dict(symbol_state.get("fundamentals") or {})
                 quote_context = symbol_state.get("quote") or {}
                 snapshot["market_microstructure"] = {
                     "security_status": quote_context.get("security_status"),
@@ -629,6 +679,7 @@ class CompanionRuntime:
                 raise RuntimeError("no recording session is active")
             recorder.add_symbol(normalized)
             self._recording_symbols = set(recorder.active_symbols())
+        self._refresh_fundamentals_async(normalized)
         self._ensure_stream()
         self._refresh_stream_subscription()
         if pre7_vwap is not None or pre7_volume is not None:
