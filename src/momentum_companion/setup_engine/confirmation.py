@@ -143,3 +143,29 @@ def evaluate_adaptive_confirmation(
         gap_reset_seconds=gap_reset,
         gap_detected=gap_detected,
     )
+
+
+
+def contiguous_tail(
+    bars: Iterable,
+    *,
+    gap_multiplier: float = 2.5,
+    minimum_gap_seconds: float = 20.0,
+) -> list[NormalizedBar]:
+    """Return only the newest contiguous segment after the last large gap.
+
+    This is deliberately conservative. A trading halt, network outage, or
+    other multi-cadence discontinuity breaks pattern continuity instead of
+    allowing pre-gap geometry to combine with post-gap bars.
+    """
+
+    normalized = normalize_bars(bars)
+    if len(normalized) < 2:
+        return normalized
+    cadence = _cadence_seconds(normalized)
+    gap_reset = max(float(minimum_gap_seconds), cadence * float(gap_multiplier))
+    cut = 0
+    for index, (a, b) in enumerate(zip(normalized, normalized[1:]), start=1):
+        if float(b.time - a.time) > gap_reset:
+            cut = index
+    return normalized[cut:]
