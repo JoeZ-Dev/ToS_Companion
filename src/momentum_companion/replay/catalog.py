@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from momentum_companion.recording.backfill import load_backfill_candles
+
 
 class RecordingCatalog:
     """Read-only discovery and loading for persisted market-day recordings."""
@@ -34,6 +36,7 @@ class RecordingCatalog:
                     ],
                     "counts": manifest.get("counts") or {},
                     "stop_reason": manifest.get("stop_reason"),
+                    "historical_backfill": manifest.get("historical_backfill") or {},
                 }
             )
         return sessions
@@ -90,6 +93,31 @@ class RecordingCatalog:
 
         events.sort(key=lambda item: (int(item[1]["stream_ts_ms"]), item[0]))
         return [record for _, record in events]
+
+    def load_history(
+        self,
+        session_id: str,
+        symbol: str,
+        *,
+        through_ms: int | None = None,
+    ) -> list[dict[str, Any]]:
+        normalized = str(symbol or "").strip().upper()
+        if not normalized:
+            raise ValueError("symbol is required")
+        session_dir = self._session_dir(session_id)
+        manifest = self.load_manifest(session_id)
+        symbols = {
+            str(value).strip().upper()
+            for value in manifest.get("symbols") or []
+            if str(value).strip()
+        }
+        if normalized not in symbols:
+            raise ValueError(f"{normalized} is not recorded in session {session_id}")
+        return load_backfill_candles(
+            session_dir,
+            normalized,
+            through_ms=through_ms,
+        )
 
     def _session_dir(self, session_id: str) -> Path:
         value = str(session_id or "").strip()
