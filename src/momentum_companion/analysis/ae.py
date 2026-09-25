@@ -455,6 +455,10 @@ class AEEngine:
                 ts = c.get("time")
                 if ts is None or datetime.fromtimestamp(ts, tz=ET_TZ).date() != target_day or ts * 1000 > end_ms:
                     continue
+                if pre7_vwap is not None:
+                    ts_et = datetime.fromtimestamp(ts, tz=ET_TZ)
+                    if (ts_et.hour, ts_et.minute, ts_et.second) < (7, 0, 0):
+                        continue
                 b = OneMinuteBar(
                     ts=int(ts),
                     open=c.get("open"),
