@@ -266,6 +266,12 @@ class ReplayEngine:
         }
         for quote in self._cache.process_messages(message):
             self.session.ingest_quote(quote)
+            if quote.get("security_status") is not None:
+                self.pattern_service.update_security_status(
+                    self._symbol,
+                    str(quote.get("security_status")),
+                    self._current_ts_ms,
+                )
             last = quote.get("last")
             if last is None:
                 continue
