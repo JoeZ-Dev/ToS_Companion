@@ -101,3 +101,23 @@ def test_symbols_are_isolated_and_resettable():
 
     service.reset()
     assert service.observations("BBB") == []
+
+
+
+def test_halt_and_resume_context_is_attached_to_pattern_evidence():
+    detector = RecordingDetector()
+    engine = PatternEngine()
+    engine.register(detector)
+    service = PatternEvaluationService(engine=engine)
+
+    service.update_security_status("AAA", "Halted", 1000)
+    service.update_security_status("AAA", "Normal", 5000)
+    service.ingest_completed_bar("AAA", bar(0, 1.0))
+    service.ingest_completed_bar("AAA", bar(10, 1.1))
+    observations = service.ingest_completed_bar("AAA", bar(20, 1.2))
+
+    halt = observations[0]["evidence"]["halt_context"]
+    assert observations[0]["evidence"]["trading_status"] == "NORMAL"
+    assert halt["last_halt_start_ms"] == 1000
+    assert halt["last_resume_ms"] == 5000
+    assert halt["halted_since_ms"] is None

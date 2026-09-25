@@ -201,3 +201,43 @@ def test_symbol_without_quote_reports_no_data():
 
     freshness = session.snapshot()["symbols"]["AEHL"]["freshness"]
     assert freshness == {"status": "NO_DATA", "age_ms": None}
+
+
+
+def test_session_ranks_cross_watchlist_relative_strength_from_previous_close():
+    session = CompanionSession()
+    first = quote("AAA", 12.0)
+    first["previous_close"] = 10.0
+    second = quote("BBB", 10.5)
+    second["previous_close"] = 10.0
+
+    session.ingest_quote(first)
+    session.ingest_quote(second)
+
+    snap = session.snapshot()["symbols"]
+    assert snap["AAA"]["relative_strength"]["rank"] == 1
+    assert round(snap["AAA"]["relative_strength"]["change_pct"], 2) == 20.0
+    assert snap["BBB"]["relative_strength"]["rank"] == 2
+    assert round(snap["BBB"]["relative_strength"]["change_pct"], 2) == 5.0
+    assert snap["BBB"]["relative_strength"]["leader_symbol"] == "AAA"
+
+
+def test_session_surfaces_security_and_borrow_context():
+    session = CompanionSession()
+    value = quote("HALT", 5.0)
+    value.update({
+        "previous_close": 4.0,
+        "security_status": "Halted",
+        "hard_to_borrow": True,
+        "shortable": False,
+        "htb_rate": 22.5,
+        "htb_quantity": 1200,
+    })
+
+    session.ingest_quote(value)
+    stored = session.snapshot()["symbols"]["HALT"]["quote"]
+
+    assert stored["security_status"] == "Halted"
+    assert stored["hard_to_borrow"] is True
+    assert stored["shortable"] is False
+    assert stored["htb_rate"] == 22.5

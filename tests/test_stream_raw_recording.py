@@ -90,7 +90,7 @@ def test_level_one_activity_age_tracks_received_l1_payload(monkeypatch):
         "data": [{
             "service": "LEVELONE_EQUITIES",
             "timestamp": 1710000000000,
-            "content": [{"key": "AEHL", "3": 3.15}],
+            "content": [{"key": "AEHL", "1": 3.14, "2": 3.16, "3": 3.15}],
         }]
     }
     client._on_message(ws, json.dumps(payload))
@@ -202,7 +202,7 @@ def test_level_one_telemetry_tracks_server_lag_interval_and_callback(monkeypatch
         "data": [{
             "service": "LEVELONE_EQUITIES",
             "timestamp": 1710000000000,
-            "content": [{"key": "AEHL", "3": 3.15}],
+            "content": [{"key": "AEHL", "1": 3.14, "2": 3.16, "3": 3.15}],
         }]
     }
     client._on_message(ws, json.dumps(payload))

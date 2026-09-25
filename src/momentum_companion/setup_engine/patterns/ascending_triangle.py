@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
+from momentum_companion.setup_engine.confirmation import evaluate_price_confirmation
 from momentum_companion.setup_engine.pattern_contracts import (
     PatternLine,
     PatternObservation,
@@ -22,6 +23,10 @@ class AscendingTriangleConfig:
     resistance_tolerance_pct: float = 0.006
     min_rising_lows: int = 2
     breakout_buffer_pct: float = 0.0015
+    confirmation_min_sec: float = 5.0
+    confirmation_max_sec: float = 30.0
+    confirmation_formation_fraction: float = 0.05
+    confirmation_max_gap_sec: float = 30.0
 
 
 @dataclass(frozen=True)
@@ -62,8 +67,18 @@ def detect_ascending_triangle(symbol: str, bars, config: AscendingTriangleConfig
 
     last = normalized[-1]
     breakout_level = level.high * (1 + cfg.breakout_buffer_pct)
+    confirmation = evaluate_price_confirmation(
+        normalized,
+        trigger_price=breakout_level,
+        pattern_started_at=min(first_touch.time, support_first.time),
+        direction="above",
+        min_seconds=cfg.confirmation_min_sec,
+        max_seconds=cfg.confirmation_max_sec,
+        formation_fraction=cfg.confirmation_formation_fraction,
+        max_gap_seconds=cfg.confirmation_max_gap_sec,
+    )
     state = (
-        PatternState.BREAKOUT if last.close >= breakout_level
+        PatternState.BREAKOUT if confirmation.confirmed
         else PatternState.TESTING if last.high >= level.low
         else PatternState.VALID
     )
@@ -96,6 +111,7 @@ def detect_ascending_triangle(symbol: str, bars, config: AscendingTriangleConfig
             "support_slope_per_sec": support_slope,
             "compression_pct": compression_pct,
             "breakout_level": breakout_level,
+            "confirmation": confirmation.to_dict(),
         },
         points=points,
         lines=lines,

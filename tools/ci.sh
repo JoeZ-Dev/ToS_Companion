@@ -31,6 +31,7 @@ pytest -q \
   tests/test_llm_validator.py \
   tests/test_market_day_recorder.py \
   tests/test_massive_fundamentals_client.py \
+  tests/test_momentum_context.py \
   tests/test_nearest_resistance_fallback_helper.py \
   tests/test_normalization_extra_fields.py \
   tests/test_pattern_engine.py \

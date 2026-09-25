@@ -269,6 +269,19 @@ def test_browser_surfaces_quote_freshness_indicator():
     assert "ageMs < 3000" in app_js
 
 
+def test_browser_surfaces_momentum_context():
+    runtime = FakeRuntime()
+    with TestClient(create_app(runtime)) as client:
+        index = client.get("/").text
+        app_js = client.get("/app.js").text
+
+    assert 'id="security-status"' in index
+    assert 'id="borrow-status"' in index
+    assert 'id="relative-strength"' in index
+    assert "hard_to_borrow" in app_js
+    assert "relative_strength" in app_js
+
+
 class FakeReplayEngine:
     def __init__(self):
         self.calls = []
