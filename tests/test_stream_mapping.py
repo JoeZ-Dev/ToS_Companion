@@ -42,3 +42,35 @@ def test_stream_mapping_raises_on_wrong_service():
         assert False, "Expected ValueError"
     except ValueError:
         pass
+
+
+
+def test_stream_mapping_carries_halt_and_borrow_context():
+    cache = LevelOneCache()
+    event = cache.process_message({
+        "service": "LEVELONE_EQUITIES",
+        "timestamp": 1710000000000,
+        "content": [{
+            "key": "HALT",
+            "1": 5.00,
+            "2": 5.05,
+            "3": 5.02,
+            "8": 100000,
+            "9": 200,
+            "12": 4.00,
+            "32": "Halted",
+            "46": 2500,
+            "47": 18.75,
+            "48": 1,
+            "49": 0,
+        }],
+    })
+
+    assert event is not None
+    assert event["last_size"] == 200
+    assert event["previous_close"] == 4.00
+    assert event["security_status"] == "Halted"
+    assert event["hard_to_borrow"] is True
+    assert event["shortable"] is False
+    assert event["htb_quantity"] == 2500
+    assert event["htb_rate"] == 18.75
