@@ -437,3 +437,17 @@ def test_recording_page_exposes_pre7_inputs():
     assert 'id="recorder-pre7-volume"' in index
     assert "pre7_vwap" in app_js
     assert "PRE7 not set" in app_js
+
+
+def test_browser_surfaces_momentum_context_fields():
+    runtime = FakeRuntime()
+    with TestClient(create_app(runtime)) as client:
+        index = client.get("/").text
+        app_js = client.get("/app.js").text
+
+    assert 'id="security-status"' in index
+    assert 'id="htb-status"' in index
+    assert 'id="relative-strength"' in index
+    assert "market_context" in app_js
+    assert "shares_outstanding" in app_js
+    assert "short_interest_to_float" in app_js
