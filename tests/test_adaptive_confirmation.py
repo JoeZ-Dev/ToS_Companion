@@ -67,5 +67,5 @@ def test_adaptive_confirmation_does_not_bridge_large_gap_or_halt():
 
     assert result.gap_detected is True
     assert result.consecutive_bars == 1
-    assert result.elapsed_seconds == 55
-    assert result.confirmed is True
+    assert result.elapsed_seconds == 10
+    assert result.confirmed is False
