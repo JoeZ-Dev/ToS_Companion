@@ -21,6 +21,7 @@ from momentum_companion.data.price_update import PriceUpdate
 from momentum_companion.llm.codex_bridge_client import CodexBridgeClient
 from momentum_companion.llm.coach import LLMCoach
 from momentum_companion.llm.service import LLMService
+from momentum_companion.recording.backfill import HistoricalBackfillManager, seconds_until_next_backfill
 from momentum_companion.recording.history import (
     load_recorded_minute_candles,
     merge_candles_prefer_primary,
@@ -97,6 +98,9 @@ class CompanionRuntime:
         self._stream_watchdog_stop = threading.Event()
         self._stream_watchdog_thread: threading.Thread | None = None
         self._stale_resubscribe_at: float | None = None
+        self._backfill_stop = threading.Event()
+        self._backfill_thread: threading.Thread | None = None
+        self._backfill_manager = HistoricalBackfillManager(self.rest)
 
     @property
     def active_symbol(self) -> str | None:
@@ -114,6 +118,8 @@ class CompanionRuntime:
             self._started = True
         self._stream_watchdog_stop.clear()
         self._start_stream_watchdog()
+        self._backfill_stop.clear()
+        self._start_history_backfill_scheduler()
         self.session.update_connection_state("READY")
 
     def stop(self) -> None:
@@ -122,6 +128,7 @@ class CompanionRuntime:
             self._stream = None
             self._started = False
         self._stream_watchdog_stop.set()
+        self._backfill_stop.set()
         self.stop_recording(reason="runtime_stopped")
         if stream is not None:
             try:
@@ -147,6 +154,38 @@ class CompanionRuntime:
             name="tos-stream-freshness-watchdog",
         )
         self._stream_watchdog_thread = thread
+        thread.start()
+
+    def _start_history_backfill_scheduler(self) -> None:
+        if self._backfill_thread and self._backfill_thread.is_alive():
+            return
+
+        def worker() -> None:
+            # If the service starts after 07:00 ET, catch up immediately.
+            now_et = datetime.now(self._et_tz)
+            if now_et.time() >= dtime(hour=7):
+                try:
+                    summary = self._backfill_manager.run_pending()
+                    logger.info("recording history backfill summary=%s", summary)
+                except Exception:
+                    logger.warning("Recording history backfill failed", exc_info=True)
+
+            while not self._backfill_stop.is_set():
+                delay = seconds_until_next_backfill()
+                if self._backfill_stop.wait(delay):
+                    return
+                try:
+                    summary = self._backfill_manager.run_pending()
+                    logger.info("recording history backfill summary=%s", summary)
+                except Exception:
+                    logger.warning("Recording history backfill failed", exc_info=True)
+
+        thread = threading.Thread(
+            target=worker,
+            daemon=True,
+            name="tos-recording-history-backfill",
+        )
+        self._backfill_thread = thread
         thread.start()
 
     def _check_stream_freshness_once(
