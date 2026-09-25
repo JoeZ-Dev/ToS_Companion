@@ -74,6 +74,9 @@ class SchwabStreamClient:
         self._telemetry_intervals_ms: list[float] = []
         self._telemetry_server_lag_ms: list[float] = []
         self._telemetry_callback_ms: list[float] = []
+        self._symbol_last_receive_monotonic: dict[str, float] = {}
+        self._symbol_intervals_ms: dict[str, list[float]] = {}
+        self._symbol_message_counts: dict[str, int] = {}
 
     def connect(self) -> None:
         """Open WebSocket and authenticate."""
@@ -402,6 +405,15 @@ class SchwabStreamClient:
                     logger.warning("Stream message dropped: %s", exc)
                     continue
                 for event in events:
+                    symbol = str(event.get("symbol") or "").strip().upper()
+                    if symbol:
+                        previous_symbol_receive = self._symbol_last_receive_monotonic.get(symbol)
+                        if previous_symbol_receive is not None:
+                            self._symbol_intervals_ms.setdefault(symbol, []).append(
+                                (receive_monotonic - previous_symbol_receive) * 1000.0
+                            )
+                        self._symbol_last_receive_monotonic[symbol] = receive_monotonic
+                        self._symbol_message_counts[symbol] = self._symbol_message_counts.get(symbol, 0) + 1
                     self._last_ts_ms = event["ts_ms"]
                     self._on_quote(event)
                 self._telemetry_callback_ms.append((time.perf_counter() - callback_started) * 1000.0)
@@ -455,11 +467,22 @@ class SchwabStreamClient:
             f"{sum(callbacks) / len(callbacks):.1f}" if callbacks else "n/a",
             f"{max(callbacks):.1f}" if callbacks else "n/a",
         )
+        for symbol in sorted(self._symbol_message_counts):
+            symbol_intervals = self._symbol_intervals_ms.get(symbol) or []
+            logger.info(
+                "STREAM_SYMBOL_TELEMETRY symbol=%s messages=%d interval_avg_ms=%s interval_max_ms=%s",
+                symbol,
+                self._symbol_message_counts[symbol],
+                f"{sum(symbol_intervals) / len(symbol_intervals):.1f}" if symbol_intervals else "n/a",
+                f"{max(symbol_intervals):.1f}" if symbol_intervals else "n/a",
+            )
         self._telemetry_window_started = now_monotonic
         self._telemetry_l1_count = 0
         self._telemetry_intervals_ms.clear()
         self._telemetry_server_lag_ms.clear()
         self._telemetry_callback_ms.clear()
+        self._symbol_intervals_ms.clear()
+        self._symbol_message_counts.clear()
 
     def _on_error(self, ws: websocket.WebSocketApp, error: Exception) -> None:
         if ws is not self._ws:
