@@ -164,6 +164,7 @@ def test_manual_pre7_seed_is_included_before_post7_hlc3_bars():
     engine = AEEngine(None, None)
     minute = _ts(24, 7, 0)
     bars = [
+        {"time": _ts(24, 6, 59), "open": 99.0, "high": 99.0, "low": 99.0, "close": 99.0, "volume": 999999},
         {"time": minute, "open": 3.0, "high": 3.2, "low": 2.8, "close": 3.1, "volume": 1000},
         {"time": minute + 60, "open": 3.1, "high": 3.4, "low": 3.0, "close": 3.3, "volume": 2000},
     ]
