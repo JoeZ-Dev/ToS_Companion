@@ -346,6 +346,9 @@
       return;
     }
     const rs = snapshot.relative_strength || {};
+    const fundamentals = snapshot.fundamentals || {};
+    const floatData = fundamentals.float || {};
+    const shortInterestData = fundamentals.short_interest || {};
     const rankText = Number.isFinite(Number(rs.rank_5m))
       ? `#${Number(rs.rank_5m)} / ${Number(rs.watchlist_size_ranked || 0)}`
       : "--";
@@ -358,6 +361,8 @@
       ["MACD", snapshot.regime?.macd_regime || "--"],
       ["RS 5m", Number.isFinite(Number(rs.return_5m_pct)) ? Number(rs.return_5m_pct).toFixed(2) + "%" : "--"],
       ["RS Rank", rankText],
+      ["Float", floatData.status === "OK" ? fmtVolume(floatData.value) : "--"],
+      ["Short Interest", shortInterestData.status === "OK" ? fmtVolume(shortInterestData.value) : "--"],
       ["As of", snapshot.as_of_et ? new Date(snapshot.as_of_et).toLocaleTimeString("en-US", { timeZone: EASTERN_TZ, hour: "numeric", minute: "2-digit", second: "2-digit" }) : "--"],
       ["Data Quality", snapshot.data_quality || "--"],
     ];
@@ -746,6 +751,7 @@
         ae_snapshot: null,
         pattern_observations: [],
         relative_strength: {},
+        fundamentals: {},
       };
     }
 
@@ -782,6 +788,11 @@
       state.symbols[symbol].relative_strength = event.payload || {};
       if (state.symbols[symbol].ae_snapshot) {
         state.symbols[symbol].ae_snapshot.relative_strength = event.payload || {};
+      }
+    } else if (event.type === "fundamentals" && symbol) {
+      state.symbols[symbol].fundamentals = event.payload || {};
+      if (state.symbols[symbol].ae_snapshot) {
+        state.symbols[symbol].ae_snapshot.fundamentals = event.payload || {};
       }
     } else if (event.type === "analysis_snapshot" && symbol) {
       state.symbols[symbol].ae_snapshot = event.payload?.snapshot || null;
