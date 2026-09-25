@@ -13,7 +13,7 @@ from momentum_companion.setup_engine.pattern_contracts import (
     PatternPoint,
     PatternState,
 )
-from momentum_companion.setup_engine.structure import cluster_levels, normalize_bars, swing_highs, swing_lows
+from momentum_companion.setup_engine.structure import cluster_levels, normalize_bars, score_level, swing_highs, swing_lows
 
 
 PATTERN_NAME = "ASCENDING_TRIANGLE"
@@ -71,6 +71,7 @@ def detect_ascending_triangle(symbol: str, bars, config: AscendingTriangleConfig
 
     last = normalized[-1]
     breakout_level = level.high * (1 + cfg.breakout_buffer_pct)
+    level_evidence = score_level(level, normalized)
     confirmation = evaluate_adaptive_confirmation(
         normalized,
         level=breakout_level,
@@ -113,6 +114,15 @@ def detect_ascending_triangle(symbol: str, bars, config: AscendingTriangleConfig
             "compression_pct": compression_pct,
             "breakout_level": breakout_level,
             "breakout_confirmation": confirmation.to_dict(),
+            "level_evidence": {
+                "touch_count": level_evidence.touch_count,
+                "total_touch_volume": level_evidence.total_touch_volume,
+                "last_touch_ts": level_evidence.last_touch_ts,
+                "round_number_increment": level_evidence.round_number_increment,
+                "round_number_distance_pct": level_evidence.round_number_distance_pct,
+                "round_number_bonus": level_evidence.round_number_bonus,
+                "strength_score": level_evidence.strength_score,
+            },
         },
         points=points,
         lines=lines,
