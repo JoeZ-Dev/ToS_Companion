@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, Optional, TypedDict
+from typing import Literal, NotRequired, Optional, TypedDict
 
 
 class QuoteEvent(TypedDict):
@@ -17,3 +17,10 @@ class QuoteEvent(TypedDict):
     volume: Optional[float]
     source_ts_type: Literal["TRADE_TS", "QUOTE_TS", "LOCAL_INGEST_TS"]
     raw_source: Literal["SCHWAB_STREAM"]
+    security_status: NotRequired[Optional[str]]
+    hard_to_borrow_quantity: NotRequired[Optional[float]]
+    hard_to_borrow_rate: NotRequired[Optional[float]]
+    hard_to_borrow: NotRequired[Optional[bool]]
+    shortable: NotRequired[Optional[bool]]
+    quote_time_ms: NotRequired[Optional[int]]
+    trade_time_ms: NotRequired[Optional[int]]
