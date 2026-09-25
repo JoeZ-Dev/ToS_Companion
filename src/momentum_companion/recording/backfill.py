@@ -121,7 +121,9 @@ class HistoricalBackfillManager:
         return summary
 
     def _fetch_target_day(self, symbol: str, target_date) -> list[dict]:
-        previous = target_date - timedelta(days=1)
+        # Use a wide enough window that the target is not the first trading
+        # day returned, including Mondays and holiday-adjacent sessions.
+        previous = target_date - timedelta(days=7)
         start = datetime(previous.year, previous.month, previous.day, tzinfo=ET)
         end = datetime(target_date.year, target_date.month, target_date.day, 23, 59, 59, tzinfo=ET)
         response = self.rest.fetch_price_history(
