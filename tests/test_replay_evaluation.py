@@ -1,3 +1,4 @@
+import pytest
 from momentum_companion.data.bar_aggregator import TenSecondBar
 from momentum_companion.replay.evaluation import ReplayExcursionEvaluator
 
@@ -33,9 +34,9 @@ def test_excursion_starts_after_confirmation_bar_without_lookahead():
     signal = evaluator.snapshot()["signals"][0]
 
     assert signal["closed"] is True
-    assert signal["mae_pct"] == -1.999999999999993
-    assert signal["mfe_pct"] == 10.0
-    assert signal["return_pct"] == 8.000000000000007
+    assert signal["mae_pct"] == pytest.approx(-2.0)
+    assert signal["mfe_pct"] == pytest.approx(10.0)
+    assert signal["return_pct"] == pytest.approx(8.0)
 
 
 def test_excursion_opens_only_on_first_transition_to_entry_state():
