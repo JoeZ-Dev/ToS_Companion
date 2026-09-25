@@ -47,6 +47,13 @@ class _SymbolState:
             "volume": None,
             "source_ts_type": None,
             "raw_source": None,
+            "security_status": None,
+            "hard_to_borrow_quantity": None,
+            "hard_to_borrow_rate": None,
+            "hard_to_borrow": None,
+            "shortable": None,
+            "quote_time_ms": None,
+            "trade_time_ms": None,
             "received_at_ms": None,
         }
     )
@@ -184,6 +191,13 @@ class CompanionSession:
             "volume": quote.get("volume"),
             "source_ts_type": quote.get("source_ts_type"),
             "raw_source": quote.get("raw_source"),
+            "security_status": quote.get("security_status"),
+            "hard_to_borrow_quantity": quote.get("hard_to_borrow_quantity"),
+            "hard_to_borrow_rate": quote.get("hard_to_borrow_rate"),
+            "hard_to_borrow": quote.get("hard_to_borrow"),
+            "shortable": quote.get("shortable"),
+            "quote_time_ms": quote.get("quote_time_ms"),
+            "trade_time_ms": quote.get("trade_time_ms"),
             "received_at_ms": received_at_ms,
         }
         with self._lock:
