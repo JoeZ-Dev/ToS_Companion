@@ -78,7 +78,9 @@ class ReplayEngine:
         candles = self.catalog.load_history(
             self._session_id,
             self._symbol,
-            through_ms=first_event_ms,
+            # Never seed the first recorded minute: a completed historical
+            # candle would contain information from after the first replay tick.
+            through_ms=first_event_ms - 1,
         )
         if not candles:
             return
