@@ -65,6 +65,7 @@ class _SymbolState:
     trade_state: dict[str, Any] | None = None
     pattern_observations: list[dict[str, Any]] = field(default_factory=list)
     relative_strength: dict[str, Any] = field(default_factory=dict)
+    fundamentals: dict[str, Any] = field(default_factory=dict)
 
 
 class CompanionSession:
@@ -288,6 +289,17 @@ class CompanionSession:
             self._symbols[normalized].relative_strength = value
         self._emit("relative_strength", symbol=normalized, payload=value)
 
+    def update_fundamentals(
+        self,
+        symbol: str,
+        fundamentals: Mapping[str, Any],
+    ) -> None:
+        normalized = self.add_symbol(symbol)
+        value = dict(fundamentals)
+        with self._lock:
+            self._symbols[normalized].fundamentals = value
+        self._emit("fundamentals", symbol=normalized, payload=value)
+
     def update_recorder_state(self, state: Mapping[str, Any]) -> None:
         value = dict(state)
         with self._lock:
@@ -334,6 +346,7 @@ class CompanionSession:
                         dict(observation) for observation in state.pattern_observations
                     ],
                     "relative_strength": dict(state.relative_strength),
+                    "fundamentals": dict(state.fundamentals),
                 }
                 for symbol, state in self._symbols.items()
             }
