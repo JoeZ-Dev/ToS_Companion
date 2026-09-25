@@ -119,6 +119,7 @@ class MarketDayRecorder:
         self._counts: dict[str, dict[str, int]] = {
             sym: {service: 0 for service in sorted(self.services)} for sym in self.symbols
         }
+        self._pre7_seeds: dict[str, dict[str, float]] = {}
         started_iso = self.started_at.isoformat()
         self._symbol_lifecycle: dict[str, dict] = {
             sym: {"active": True, "periods": [{"started_at_et": started_iso, "ended_at_et": None}]}
@@ -216,6 +217,28 @@ class MarketDayRecorder:
             self._write_manifest(ended_at=None, stop_reason=None)
             return True
 
+    def set_pre7_seed(self, symbol: str, *, vwap: float, volume: float) -> dict[str, float]:
+        normalized = str(symbol or "").strip().upper()
+        if not normalized:
+            raise ValueError("symbol is required")
+        vwap_value = float(vwap)
+        volume_value = float(volume)
+        if vwap_value <= 0:
+            raise ValueError("pre7 VWAP must be greater than 0")
+        if volume_value < 0:
+            raise ValueError("pre7 volume must be 0 or greater")
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("Recorder is closed")
+            if normalized not in self._symbol_set:
+                raise ValueError(f"{normalized} is not part of this recording session")
+            self._pre7_seeds[normalized] = {
+                "vwap": vwap_value,
+                "volume": volume_value,
+            }
+            self._write_manifest(ended_at=None, stop_reason=None)
+            return dict(self._pre7_seeds[normalized])
+
     def active_symbols(self) -> list[str]:
         with self._lock:
             return [symbol for symbol in self.symbols if symbol in self._active_symbols]
@@ -230,6 +253,9 @@ class MarketDayRecorder:
                 "cutoff_et": "15:00:00",
                 "counts": {
                     symbol: dict(counts) for symbol, counts in self._counts.items()
+                },
+                "pre7_seeds": {
+                    symbol: dict(seed) for symbol, seed in self._pre7_seeds.items()
                 },
                 "symbol_lifecycle": {
                     symbol: {
@@ -276,6 +302,7 @@ class MarketDayRecorder:
             "ended_at_et": ended_at,
             "stop_reason": stop_reason,
             "counts": self._counts,
+            "pre7_seeds": self._pre7_seeds,
         }
         (self.session_dir / "manifest.json").write_text(
             json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"

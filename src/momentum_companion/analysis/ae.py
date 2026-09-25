@@ -81,6 +81,18 @@ class MinuteBarAggregator:
         self.or_low: Optional[float] = None
         self.session_open: Optional[float] = None
 
+    def set_vwap_seed(self, *, day: date, vwap: float, volume: float) -> None:
+        vwap_value = float(vwap)
+        volume_value = float(volume)
+        if vwap_value <= 0:
+            raise ValueError("VWAP seed must be greater than 0")
+        if volume_value < 0:
+            raise ValueError("VWAP seed volume must be 0 or greater")
+        self._vwap_date = day
+        self.vwap_num = vwap_value * volume_value
+        self.vwap_den = volume_value
+        self.vwap_points = []
+
     @property
     def bars(self) -> list[OneMinuteBar]:
         return list(self._bars)
@@ -415,18 +427,38 @@ class AEEngine:
         except Exception:
             return None
 
-    def seed_intraday_from_bars(self, symbol: str, bars: list[dict], *, end_ms: int) -> Optional[dict]:
-        """Use the same normalized REST/recorded history snapshot as the chart."""
+    def seed_intraday_from_bars(
+        self,
+        symbol: str,
+        bars: list[dict],
+        *,
+        end_ms: int,
+        pre7_vwap: float | None = None,
+        pre7_volume: float | None = None,
+    ) -> Optional[dict]:
+        """Use normalized intraday bars, optionally preceded by a manual pre-7 VWAP seed."""
         self.reset_intraday()
         self._active_symbol = symbol
         target_day = datetime.fromtimestamp(end_ms / 1000, tz=ET_TZ).date()
         try:
+            if pre7_vwap is not None or pre7_volume is not None:
+                if pre7_vwap is None or pre7_volume is None:
+                    raise ValueError("pre7_vwap and pre7_volume must be provided together")
+                self._minute_agg.set_vwap_seed(
+                    day=target_day,
+                    vwap=float(pre7_vwap),
+                    volume=float(pre7_volume),
+                )
             seeded = 0
             last_seed_ts = None
             for c in sorted(bars, key=lambda x: x.get("time", 0)):
                 ts = c.get("time")
                 if ts is None or datetime.fromtimestamp(ts, tz=ET_TZ).date() != target_day or ts * 1000 > end_ms:
                     continue
+                if pre7_vwap is not None:
+                    ts_et = datetime.fromtimestamp(ts, tz=ET_TZ)
+                    if (ts_et.hour, ts_et.minute, ts_et.second) < (7, 0, 0):
+                        continue
                 b = OneMinuteBar(
                     ts=int(ts),
                     open=c.get("open"),

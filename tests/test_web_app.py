@@ -63,7 +63,7 @@ class FakeRuntime:
         self.session.update_recorder_state(state)
         return state
 
-    def add_recording_symbol(self, symbol):
+    def add_recording_symbol(self, symbol, *, pre7_vwap=None, pre7_volume=None):
         state = dict(self.session.snapshot()["recorder_state"])
         symbols = list(state.get("symbols") or [])
         active_symbols = list(state.get("active_symbols") or symbols)
@@ -73,8 +73,19 @@ class FakeRuntime:
         if normalized not in active_symbols:
             active_symbols.append(normalized)
         state.update({"active": True, "symbols": symbols, "active_symbols": active_symbols})
+        if pre7_vwap is not None and pre7_volume is not None:
+            seeds = dict(state.get("pre7_seeds") or {})
+            seeds[normalized] = {"vwap": pre7_vwap, "volume": pre7_volume}
+            state["pre7_seeds"] = seeds
         self.session.update_recorder_state(state)
         return state
+
+    def apply_recording_pre7_seed(self, symbol, *, pre7_vwap, pre7_volume):
+        return self.add_recording_symbol(
+            symbol,
+            pre7_vwap=pre7_vwap,
+            pre7_volume=pre7_volume,
+        )
 
     def remove_recording_symbol(self, symbol):
         state = dict(self.session.snapshot()["recorder_state"])
@@ -391,3 +402,37 @@ def test_stateless_replay_inspection_does_not_mutate_shared_replay(tmp_path, mon
     assert payload["replay"]["data_quality"]["volume"] == {"capped_total": 0.0, "discarded_total": 0.0}
     assert payload["session"]["symbols"]["TOPS"]["quote"]["last"] == 1.06
     assert shared.snapshot()["replay"]["status"] == "EMPTY"
+
+
+def test_recording_api_accepts_and_surfaces_pre7_seed():
+    runtime = FakeRuntime()
+
+    with TestClient(create_app(runtime)) as client:
+        client.post("/api/recording/start", json={"symbols": []})
+        response = client.post(
+            "/api/recording/symbol",
+            json={
+                "symbol": "gctk",
+                "pre7_vwap": 4.4233,
+                "pre7_volume": 10570235,
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["pre7_seeds"]["GCTK"] == {
+        "vwap": 4.4233,
+        "volume": 10570235.0,
+    }
+
+
+def test_recording_page_exposes_pre7_inputs():
+    runtime = FakeRuntime()
+
+    with TestClient(create_app(runtime)) as client:
+        index = client.get("/").text
+        app_js = client.get("/app.js").text
+
+    assert 'id="recorder-pre7-vwap"' in index
+    assert 'id="recorder-pre7-volume"' in index
+    assert "pre7_vwap" in app_js
+    assert "PRE7 not set" in app_js

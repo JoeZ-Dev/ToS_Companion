@@ -133,10 +133,12 @@
             <div class="section-title">Add Ticker</div>
             <div class="recording-add-row">
               <input id="recorder-symbol" maxlength="10" placeholder="SYMBOL">
+              <input id="recorder-pre7-vwap" inputmode="decimal" placeholder="PRE7 VWAP">
+              <input id="recorder-pre7-volume" inputmode="numeric" placeholder="PRE7 VOL">
               <button id="record-add-symbol" type="button">Add</button>
               <button id="record-add-active" type="button">Add Current</button>
             </div>
-            <div id="recording-message" class="auth-note">Start a recording session, then add tickers as they appear.</div>
+            <div id="recording-message" class="auth-note">Enter the ToS PRE7 VWAP + PRE7 VOL when available. Both are saved with the recording and applied to live VWAP.</div>
           </section>
 
           <section class="analysis-card">

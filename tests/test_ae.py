@@ -158,3 +158,27 @@ def test_levels_book_influence_scoring():
     assert top["dynamic_influence"] > top["base_strength"]
     # distance decay should keep distance small
     assert abs(top["distance_pct"]) < 5
+
+
+def test_manual_pre7_seed_is_included_before_post7_hlc3_bars():
+    engine = AEEngine(None, None)
+    minute = _ts(24, 7, 0)
+    bars = [
+        {"time": _ts(24, 6, 59), "open": 99.0, "high": 99.0, "low": 99.0, "close": 99.0, "volume": 999999},
+        {"time": minute, "open": 3.0, "high": 3.2, "low": 2.8, "close": 3.1, "volume": 1000},
+        {"time": minute + 60, "open": 3.1, "high": 3.4, "low": 3.0, "close": 3.3, "volume": 2000},
+    ]
+
+    engine.seed_intraday_from_bars(
+        "GCTK",
+        bars,
+        end_ms=(minute + 120) * 1000,
+        pre7_vwap=4.4233,
+        pre7_volume=10570235,
+    )
+
+    post7_num = ((3.2 + 2.8 + 3.1) / 3) * 1000 + ((3.4 + 3.0 + 3.3) / 3) * 2000
+    expected = (4.4233 * 10570235 + post7_num) / (10570235 + 3000)
+    assert engine._minute_agg.vwap() == pytest.approx(expected)
+    assert engine._minute_agg.vwap_den == pytest.approx(10570235 + 3000)
+    assert engine.vwap_points[-1]["value"] == pytest.approx(expected)

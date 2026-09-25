@@ -535,7 +535,13 @@ class CompanionRuntime:
         thread.start()
         return self.session.snapshot()["recorder_state"]
 
-    def add_recording_symbol(self, symbol: str) -> dict[str, Any]:
+    def add_recording_symbol(
+        self,
+        symbol: str,
+        *,
+        pre7_vwap: float | None = None,
+        pre7_volume: float | None = None,
+    ) -> dict[str, Any]:
         if reached_cutoff():
             raise ValueError("3:00 PM ET recording cutoff has already been reached")
         normalized = self.session.normalize_symbol(symbol)
@@ -547,6 +553,62 @@ class CompanionRuntime:
                 raise RuntimeError("no recording session is active")
             recorder.add_symbol(normalized)
             self._recording_symbols = set(recorder.active_symbols())
+        self._ensure_stream()
+        self._refresh_stream_subscription()
+        if pre7_vwap is not None or pre7_volume is not None:
+            return self.apply_recording_pre7_seed(
+                normalized,
+                pre7_vwap=pre7_vwap,
+                pre7_volume=pre7_volume,
+            )
+        state = recorder.state()
+        self.session.update_recorder_state(state)
+        return state
+
+    def apply_recording_pre7_seed(
+        self,
+        symbol: str,
+        *,
+        pre7_vwap: float | None,
+        pre7_volume: float | None,
+    ) -> dict[str, Any]:
+        normalized = self.session.normalize_symbol(symbol)
+        if not normalized:
+            raise ValueError("symbol is required")
+        if pre7_vwap is None or pre7_volume is None:
+            raise ValueError("PRE7 VWAP and PRE7 volume are both required")
+        vwap_value = float(pre7_vwap)
+        volume_value = float(pre7_volume)
+        if vwap_value <= 0:
+            raise ValueError("PRE7 VWAP must be greater than 0")
+        if volume_value < 0:
+            raise ValueError("PRE7 volume must be 0 or greater")
+
+        with self._lock:
+            recorder = self._recorder
+            if recorder is None:
+                raise RuntimeError("no recording session is active")
+            recorder.set_pre7_seed(
+                normalized,
+                vwap=vwap_value,
+                volume=volume_value,
+            )
+            self._analysis_symbols.add(normalized)
+
+        self.session.add_symbol(normalized, make_active=False)
+        engine = self._ensure_symbol_analysis(normalized)
+        bars, end_ms = self._load_history(normalized)
+        seeded = engine.seed_intraday_from_bars(
+            normalized,
+            bars,
+            end_ms=end_ms,
+            pre7_vwap=vwap_value,
+            pre7_volume=volume_value,
+        )
+        if seeded is not None:
+            self.session.update_ae_snapshot(normalized, seeded)
+            self.session.set_vwap_points(normalized, engine.vwap_points)
+
         self._ensure_stream()
         self._refresh_stream_subscription()
         state = recorder.state()

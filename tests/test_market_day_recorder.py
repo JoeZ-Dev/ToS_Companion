@@ -251,3 +251,16 @@ def test_recorder_can_start_empty_then_add_remove_and_resume_symbol(tmp_path: Pa
     assert manifest["counts"]["AEHL"]["LEVELONE_EQUITIES"] == 2
     assert len(manifest["symbol_lifecycle"]["AEHL"]["periods"]) == 2
     assert manifest["active_symbols"] == []
+
+
+def test_pre7_seed_is_persisted_in_state_and_manifest(tmp_path: Path):
+    import json
+
+    recorder = MarketDayRecorder(["GCTK"], output_root=tmp_path)
+    seed = recorder.set_pre7_seed("gctk", vwap=4.4233, volume=10570235)
+
+    assert seed == {"vwap": 4.4233, "volume": 10570235.0}
+    assert recorder.state()["pre7_seeds"]["GCTK"] == seed
+
+    manifest = json.loads((recorder.session_dir / "manifest.json").read_text())
+    assert manifest["pre7_seeds"]["GCTK"] == seed
