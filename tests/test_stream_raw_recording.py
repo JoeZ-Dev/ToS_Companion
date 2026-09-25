@@ -39,6 +39,11 @@ def test_multi_symbol_subscription_uses_one_l1_subs_request():
     assert request["service"] == "LEVELONE_EQUITIES"
     assert request["parameters"]["keys"] == "AEHL,TOPS"
     assert "8" in request["parameters"]["fields"]
+    assert "32" in request["parameters"]["fields"]
+    assert "46" in request["parameters"]["fields"]
+    assert "47" in request["parameters"]["fields"]
+    assert "48" in request["parameters"]["fields"]
+    assert "49" in request["parameters"]["fields"]
 
 
 def test_raw_payload_callback_sees_payload_before_mapping():
