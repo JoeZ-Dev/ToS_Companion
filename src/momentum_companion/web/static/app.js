@@ -259,6 +259,7 @@
     const activeSymbols = new Set(Array.isArray(recorder.active_symbols) ? recorder.active_symbols : []);
     const lifecycle = recorder.symbol_lifecycle || {};
     const counts = recorder.counts || {};
+    const pre7Seeds = recorder.pre7_seeds || {};
 
     byId("recording-status").textContent = active ? "ACTIVE" : "INACTIVE";
     byId("recording-status").classList.toggle("active", active);
@@ -277,6 +278,7 @@
           const periods = lifecycle[symbol]?.periods || [];
           const latest = periods[periods.length - 1] || {};
           const count = recordingEventCount(counts[symbol]);
+          const pre7 = pre7Seeds[symbol] || null;
           return `
             <div class="recording-symbol-row">
               <div class="recording-symbol-main">
@@ -286,6 +288,7 @@
               <div class="recording-symbol-detail">
                 <span>${count.toLocaleString()} events</span>
                 <span>${isActive ? "since" : "last interval"} ${escapeHtml(latest.started_at_et ? new Date(latest.started_at_et).toLocaleTimeString("en-US", {timeZone: EASTERN_TZ, hour: "numeric", minute: "2-digit"}) : "--")}</span>
+                <span>${pre7 ? `PRE7 ${Number(pre7.vwap).toFixed(4)} / ${Number(pre7.volume).toLocaleString()}` : "PRE7 not set"}</span>
               </div>
               <button class="recording-toggle" type="button" data-record-symbol="${escapeHtml(symbol)}" data-record-action="${isActive ? "remove" : "add"}" ${active ? "" : "disabled"}>
                 ${isActive ? "Remove" : "Resume"}
@@ -1030,17 +1033,46 @@
       setRecordingMessage("Enter a ticker to add.", true);
       return;
     }
+
+    const rawVwap = String(byId("recorder-pre7-vwap")?.value || "").trim();
+    const rawVolume = String(byId("recorder-pre7-volume")?.value || "").replaceAll(",", "").trim();
+    const hasVwap = rawVwap !== "";
+    const hasVolume = rawVolume !== "";
+
+    if (hasVwap !== hasVolume) {
+      setRecordingMessage("Enter both PRE7 VWAP and PRE7 VOL, or leave both blank.", true);
+      return;
+    }
+
+    const request = { symbol: normalized };
+    if (hasVwap && hasVolume) {
+      const pre7Vwap = Number(rawVwap);
+      const pre7Volume = Number(rawVolume);
+      if (!Number.isFinite(pre7Vwap) || pre7Vwap <= 0 || !Number.isFinite(pre7Volume) || pre7Volume < 0) {
+        setRecordingMessage("PRE7 VWAP must be > 0 and PRE7 VOL must be 0 or greater.", true);
+        return;
+      }
+      request.pre7_vwap = pre7Vwap;
+      request.pre7_volume = pre7Volume;
+    }
+
     try {
       const response = await fetch("/api/recording/symbol", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbol: normalized }),
+        body: JSON.stringify(request),
       });
       const payload = await parseResponse(response);
       if (!response.ok) throw new Error(payload.detail || "Unable to add ticker");
       renderRecorderState(payload);
       byId("recorder-symbol").value = "";
-      setRecordingMessage(`${normalized} is now recording.`);
+      byId("recorder-pre7-vwap").value = "";
+      byId("recorder-pre7-volume").value = "";
+      setRecordingMessage(
+        request.pre7_vwap !== undefined
+          ? `${normalized} is recording with PRE7 VWAP seed applied.`
+          : `${normalized} is now recording. PRE7 seed can be added by entering the ticker again with both values.`
+      );
     } catch (error) {
       setRecordingMessage(error.message, true);
     }
