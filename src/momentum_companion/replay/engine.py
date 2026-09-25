@@ -143,6 +143,7 @@ class ReplayEngine:
                 int(self._events[0]["stream_ts_ms"]) if self._events else 0
             )
             self._reset_analysis()
+            self._seed_backfilled_history()
             while self._cursor < target:
                 self._ingest_record(self._events[self._cursor])
                 self._cursor += 1
