@@ -25,6 +25,7 @@ class RelativeStrengthTracker:
     def __init__(self, *, retention_seconds: int = 1800) -> None:
         self.retention_ms = int(retention_seconds * 1000)
         self._points: dict[str, deque[StrengthPoint]] = {}
+        self._halted: set[str] = set()
 
     def ingest(self, symbol: str, ts_ms: int, price: float) -> None:
         key = str(symbol or "").strip().upper()
@@ -40,6 +41,15 @@ class RelativeStrengthTracker:
         cutoff = int(ts_ms) - self.retention_ms
         while len(points) > 1 and points[1].ts_ms < cutoff:
             points.popleft()
+
+    def set_halted(self, symbol: str, halted: bool) -> None:
+        key = str(symbol or "").strip().upper()
+        if not key:
+            return
+        if halted:
+            self._halted.add(key)
+        else:
+            self._halted.discard(key)
 
     @staticmethod
     def _return_pct(points: deque[StrengthPoint], now_ms: int, horizon_sec: int) -> float | None:
@@ -68,6 +78,7 @@ class RelativeStrengthTracker:
             points = self._points.get(key)
             if not points:
                 result[key] = {
+                    "halted": key in self._halted,
                     "return_1m_pct": None,
                     "return_5m_pct": None,
                     "return_15m_pct": None,
@@ -78,6 +89,7 @@ class RelativeStrengthTracker:
                 continue
             now_ms = points[-1].ts_ms
             result[key] = {
+                "halted": key in self._halted,
                 "return_1m_pct": self._return_pct(points, now_ms, 60),
                 "return_5m_pct": self._return_pct(points, now_ms, 300),
                 "return_15m_pct": self._return_pct(points, now_ms, 900),
@@ -89,7 +101,7 @@ class RelativeStrengthTracker:
         ranked = [
             (key, value["return_5m_pct"])
             for key, value in result.items()
-            if value["return_5m_pct"] is not None
+            if value["return_5m_pct"] is not None and not value.get("halted")
         ]
         ranked.sort(key=lambda item: item[1], reverse=True)
         ranked_size = len(ranked)
@@ -105,5 +117,8 @@ class RelativeStrengthTracker:
     def reset(self, symbol: str | None = None) -> None:
         if symbol is None:
             self._points.clear()
+            self._halted.clear()
             return
-        self._points.pop(str(symbol).strip().upper(), None)
+        key = str(symbol).strip().upper()
+        self._points.pop(key, None)
+        self._halted.discard(key)
