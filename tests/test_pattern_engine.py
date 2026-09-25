@@ -48,6 +48,9 @@ def test_detects_ascending_triangle_with_explainable_geometry():
     assert observation.evidence["resistance_touches"] >= 2
     assert observation.evidence["higher_lows"] >= 2
     assert observation.evidence["support_slope_per_sec"] > 0
+    assert observation.evidence["level_evidence"]["touch_count"] >= 2
+    assert observation.evidence["level_evidence"]["strength_score"] > 0
+    assert observation.evidence["breakout_confirmation"]["required_seconds"] >= 10
     assert {line.role for line in observation.lines} == {"resistance", "rising_support"}
     assert any(point.role == "resistance_touch" for point in observation.points)
     assert any(point.role == "higher_low" for point in observation.points)
