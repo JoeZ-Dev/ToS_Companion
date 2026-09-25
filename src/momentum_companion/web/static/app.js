@@ -626,6 +626,17 @@
     byId("ask").textContent = fmtPrice(quote.ask);
     byId("last").textContent = fmtPrice(quote.last);
     byId("volume").textContent = fmtVolume(quote.volume);
+    byId("security-status").textContent = quote.security_status || "--";
+    const borrowBits = [];
+    if (quote.hard_to_borrow === true) borrowBits.push("HTB");
+    else if (quote.hard_to_borrow === false) borrowBits.push("ETB");
+    if (quote.shortable === false) borrowBits.push("NOT SHORTABLE");
+    if (Number.isFinite(Number(quote.htb_rate))) borrowBits.push(`${Number(quote.htb_rate).toFixed(2)}%`);
+    byId("borrow-status").textContent = borrowBits.join(" · ") || "--";
+    const rs = symbolState?.relative_strength;
+    byId("relative-strength").textContent = rs
+      ? `#${rs.rank}/${rs.total_ranked} · ${Number(rs.change_pct).toFixed(1)}%`
+      : "--";
     renderFreshness(symbolState);
     renderAnalysisView(symbolState);
     if (!symbolState) {
@@ -760,6 +771,8 @@
           byId("server-message").classList.remove("error");
         }
       }
+    } else if (event.type === "relative_strength" && symbol) {
+      state.symbols[symbol].relative_strength = event.payload || null;
     } else if (event.type === "recorder_state") {
       renderRecorderState(event.payload || {});
     }
@@ -782,6 +795,11 @@
     byId("ask").textContent = fmtPrice(quote.ask);
     byId("last").textContent = fmtPrice(quote.last);
     byId("volume").textContent = fmtVolume(quote.volume);
+    byId("security-status").textContent = quote.security_status || "--";
+    byId("borrow-status").textContent = quote.hard_to_borrow === true ? "HTB" : (quote.hard_to_borrow === false ? "ETB" : "--");
+    byId("relative-strength").textContent = symbolState?.relative_strength
+      ? `#${symbolState.relative_strength.rank}/${symbolState.relative_strength.total_ranked}`
+      : "--";
 
     const freshness = byId("quote-freshness");
     freshness.classList.remove("live", "delayed", "stale", "no-data");
