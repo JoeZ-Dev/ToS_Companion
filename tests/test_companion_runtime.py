@@ -477,3 +477,37 @@ def test_apply_recording_pre7_seed_rebuilds_live_vwap_from_7am_history(monkeypat
     assert symbol_state["vwap_points"]
     assert symbol_state["ae_snapshot"]["vwap"] is not None
     assert "GCTK" in runtime._analysis_symbols
+
+
+def test_halted_quote_updates_context_but_does_not_create_analysis_bar():
+    runtime = bare_runtime()
+    runtime._recording_symbols = set()
+    runtime.session.add_symbol("AEHL", make_active=True)
+    runtime._analysis_symbols = {"AEHL"}
+    runtime._aggregators = {"AEHL": FakePerSymbolAggregator("AEHL")}
+    runtime._ae_engines = {"AEHL": FakePerSymbolAE("AEHL")}
+    runtime.pattern_service = FakePatternService()
+
+    runtime._handle_quote(
+        {
+            "ts_ms": 1_700_000_010_000,
+            "symbol": "AEHL",
+            "bid": 3.10,
+            "ask": 3.12,
+            "last": 3.11,
+            "bid_size": 100,
+            "ask_size": 100,
+            "last_size": 40,
+            "volume": 25_000,
+            "security_status": "Halted",
+            "hard_to_borrow": True,
+            "shortable": True,
+            "source_ts_type": "QUOTE_TS",
+            "raw_source": "SCHWAB_STREAM",
+        }
+    )
+
+    symbol_state = runtime.session.snapshot()["symbols"]["AEHL"]
+    assert symbol_state["market_context"]["halted"] is True
+    assert runtime._aggregators["AEHL"].updates == []
+    assert runtime._ae_engines["AEHL"].bars == []
