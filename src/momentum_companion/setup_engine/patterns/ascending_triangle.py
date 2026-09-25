@@ -5,6 +5,7 @@ from typing import Iterable
 
 from momentum_companion.setup_engine.confirmation import (
     AdaptiveConfirmationPolicy,
+    contiguous_tail,
     evaluate_adaptive_confirmation,
 )
 from momentum_companion.setup_engine.pattern_contracts import (
@@ -13,7 +14,7 @@ from momentum_companion.setup_engine.pattern_contracts import (
     PatternPoint,
     PatternState,
 )
-from momentum_companion.setup_engine.structure import cluster_levels, normalize_bars, score_level, swing_highs, swing_lows
+from momentum_companion.setup_engine.structure import cluster_levels, score_level, swing_highs, swing_lows
 
 
 PATTERN_NAME = "ASCENDING_TRIANGLE"
@@ -44,7 +45,7 @@ class AscendingTriangleDetector:
 
 def detect_ascending_triangle(symbol: str, bars, config: AscendingTriangleConfig | None = None) -> PatternObservation | None:
     cfg = config or AscendingTriangleConfig()
-    normalized = normalize_bars(bars)
+    normalized = contiguous_tail(bars)
     if len(normalized) < cfg.min_bars:
         return None
 
