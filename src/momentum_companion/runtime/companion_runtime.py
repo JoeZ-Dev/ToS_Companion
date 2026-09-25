@@ -468,6 +468,12 @@ class CompanionRuntime:
             return
         self.session.ingest_quote(event)
 
+        # A Schwab security-status halt is not the same thing as a quiet market.
+        # Keep the quote/context visible, but do not turn halted snapshots into
+        # synthetic price/bar evidence for indicators or pattern detection.
+        if str(event.get("security_status") or "").strip().lower() == "halted":
+            return
+
         ts_ms = event.get("ts_ms")
         last = event.get("last")
         if ts_ms is None or last is None:
