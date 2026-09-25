@@ -432,7 +432,23 @@ def test_apply_recording_pre7_seed_rebuilds_live_vwap_from_7am_history(monkeypat
     recorder.add_symbol("GCTK")
     runtime._recorder = recorder
     runtime._recording_symbols = {"GCTK"}
-    runtime.rest = FakeHistoryRest()
+    class SeedHistoryRest(FakeHistoryRest):
+        def fetch_price_history(self, symbol, start_ms, end_ms, freq):
+            self.calls.append((symbol, start_ms, end_ms, freq))
+            start_et = datetime.fromtimestamp(start_ms / 1000, tz=ZoneInfo("America/New_York"))
+            bar_et = start_et.replace(hour=7, minute=1)
+            return {
+                "candles": [{
+                    "datetime": int(bar_et.timestamp() * 1000),
+                    "open": 3.0,
+                    "high": 3.2,
+                    "low": 2.8,
+                    "close": 3.1,
+                    "volume": 1000,
+                }]
+            }
+
+    runtime.rest = SeedHistoryRest()
     runtime._analysis_symbols = set()
     runtime._ae_engines = {}
     runtime._aggregators = {}
