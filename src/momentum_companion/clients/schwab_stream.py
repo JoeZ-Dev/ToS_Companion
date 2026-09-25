@@ -67,6 +67,16 @@ class SchwabStreamClient:
                 logger.warning("Failed to register token refresh listener")
         self._chart_enabled = os.environ.get("ENABLE_CHART_STREAM", "1") != "0"
         self._chart_logged_keys = False
+        self._qos_express_enabled = os.environ.get("ENABLE_STREAM_QOS_EXPRESS", "1") != "0"
+        self._last_l1_message_monotonic: Optional[float] = None
+        self._telemetry_window_started = time.monotonic()
+        self._telemetry_l1_count = 0
+        self._telemetry_intervals_ms: list[float] = []
+        self._telemetry_server_lag_ms: list[float] = []
+        self._telemetry_callback_ms: list[float] = []
+        self._symbol_last_receive_monotonic: dict[str, float] = {}
+        self._symbol_intervals_ms: dict[str, list[float]] = {}
+        self._symbol_message_counts: dict[str, int] = {}
 
     def connect(self) -> None:
         """Open WebSocket and authenticate."""
@@ -127,6 +137,26 @@ class SchwabStreamClient:
             },
         }
         self._ws.send(json.dumps(sub_msg))
+
+    def _send_express_qos(self) -> bool:
+        """Request the fastest documented streamer QoS level (0 = 500 ms)."""
+        if not self._connected or not self._ws or not self._qos_express_enabled:
+            return False
+        qos_msg = {
+            "service": "ADMIN",
+            "command": "QOS",
+            "requestid": "6",
+            "SchwabClientCustomerId": self._streamer_info["schwabClientCustomerId"],
+            "SchwabClientCorrelId": self._streamer_info["schwabClientCorrelId"],
+            "parameters": {"qoslevel": "0"},
+        }
+        try:
+            self._ws.send(json.dumps(qos_msg))
+            logger.info("Requested Schwab stream QOS=0 (Express/500ms)")
+            return True
+        except Exception:
+            logger.warning("Failed to send Schwab stream QOS request", exc_info=True)
+            return False
 
     def unsubscribe(self, symbol: str) -> None:
         """Unsubscribe one symbol and keep reconnect state consistent."""
@@ -336,6 +366,7 @@ class SchwabStreamClient:
                     self._connected_since_monotonic = time.monotonic()
                     self._last_level_one_monotonic = None
                     self._emit_state("CONNECTED")
+                    self._send_express_qos()
                     if self._level_one_symbols:
                         self.subscribe_level_one_symbols(sorted(self._level_one_symbols))
                     elif self._active_symbol:
@@ -352,15 +383,41 @@ class SchwabStreamClient:
                 if isinstance(msg.get("content"), dict):
                     # SUBS/UNSUBS responses carry dict content; ignore
                     continue
-                self._last_level_one_monotonic = time.monotonic()
+                receive_monotonic = time.monotonic()
+                receive_wall_ms = int(time.time() * 1000)
+                callback_started = time.perf_counter()
+                self._last_level_one_monotonic = receive_monotonic
+                if self._last_l1_message_monotonic is not None:
+                    self._telemetry_intervals_ms.append(
+                        (receive_monotonic - self._last_l1_message_monotonic) * 1000.0
+                    )
+                self._last_l1_message_monotonic = receive_monotonic
+                server_ts = msg.get("timestamp")
+                if server_ts is not None:
+                    try:
+                        self._telemetry_server_lag_ms.append(float(receive_wall_ms - int(server_ts)))
+                    except (TypeError, ValueError):
+                        pass
+                self._telemetry_l1_count += 1
                 try:
                     events = self._cache.process_messages(msg)
                 except ValueError as exc:
                     logger.warning("Stream message dropped: %s", exc)
                     continue
                 for event in events:
+                    symbol = str(event.get("symbol") or "").strip().upper()
+                    if symbol:
+                        previous_symbol_receive = self._symbol_last_receive_monotonic.get(symbol)
+                        if previous_symbol_receive is not None:
+                            self._symbol_intervals_ms.setdefault(symbol, []).append(
+                                (receive_monotonic - previous_symbol_receive) * 1000.0
+                            )
+                        self._symbol_last_receive_monotonic[symbol] = receive_monotonic
+                        self._symbol_message_counts[symbol] = self._symbol_message_counts.get(symbol, 0) + 1
                     self._last_ts_ms = event["ts_ms"]
                     self._on_quote(event)
+                self._telemetry_callback_ms.append((time.perf_counter() - callback_started) * 1000.0)
+                self._maybe_log_stream_telemetry(receive_monotonic)
             elif service == "CHART_EQUITY":
                 content = msg.get("content") or []
                 if isinstance(content, list) and self._on_chart_bar:
@@ -392,6 +449,40 @@ class SchwabStreamClient:
                             self._on_chart_bar(mapped)
                         except Exception:
                             logger.debug("Failed to process CHART_EQUITY bar", exc_info=True)
+
+    def _maybe_log_stream_telemetry(self, now_monotonic: float) -> None:
+        if now_monotonic - self._telemetry_window_started < 5.0:
+            return
+        intervals = self._telemetry_intervals_ms
+        lags = self._telemetry_server_lag_ms
+        callbacks = self._telemetry_callback_ms
+        logger.info(
+            "STREAM_TELEMETRY window=5s l1_messages=%d interval_avg_ms=%s interval_max_ms=%s "
+            "server_lag_avg_ms=%s server_lag_max_ms=%s callback_avg_ms=%s callback_max_ms=%s",
+            self._telemetry_l1_count,
+            f"{sum(intervals) / len(intervals):.1f}" if intervals else "n/a",
+            f"{max(intervals):.1f}" if intervals else "n/a",
+            f"{sum(lags) / len(lags):.1f}" if lags else "n/a",
+            f"{max(lags):.1f}" if lags else "n/a",
+            f"{sum(callbacks) / len(callbacks):.1f}" if callbacks else "n/a",
+            f"{max(callbacks):.1f}" if callbacks else "n/a",
+        )
+        for symbol in sorted(self._symbol_message_counts):
+            symbol_intervals = self._symbol_intervals_ms.get(symbol) or []
+            logger.info(
+                "STREAM_SYMBOL_TELEMETRY symbol=%s messages=%d interval_avg_ms=%s interval_max_ms=%s",
+                symbol,
+                self._symbol_message_counts[symbol],
+                f"{sum(symbol_intervals) / len(symbol_intervals):.1f}" if symbol_intervals else "n/a",
+                f"{max(symbol_intervals):.1f}" if symbol_intervals else "n/a",
+            )
+        self._telemetry_window_started = now_monotonic
+        self._telemetry_l1_count = 0
+        self._telemetry_intervals_ms.clear()
+        self._telemetry_server_lag_ms.clear()
+        self._telemetry_callback_ms.clear()
+        self._symbol_intervals_ms.clear()
+        self._symbol_message_counts.clear()
 
     def _on_error(self, ws: websocket.WebSocketApp, error: Exception) -> None:
         if ws is not self._ws:

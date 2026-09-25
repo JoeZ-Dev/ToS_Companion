@@ -79,13 +79,20 @@ class RecordingCatalog:
                         record = json.loads(line)
                     except json.JSONDecodeError:
                         continue
-                    if record.get("kind") != "market_event":
-                        continue
+                    kind = record.get("kind")
                     if str(record.get("symbol") or "").strip().upper() != normalized:
                         continue
-                    if record.get("service") != "LEVELONE_EQUITIES":
+                    if record.get("stream_ts_ms") is None:
                         continue
-                    if record.get("stream_ts_ms") is None or not isinstance(record.get("raw"), dict):
+                    if kind == "market_event":
+                        if record.get("service") != "LEVELONE_EQUITIES":
+                            continue
+                        if not isinstance(record.get("raw"), dict):
+                            continue
+                    elif kind == "historical_candle":
+                        if not isinstance(record.get("candle"), dict):
+                            continue
+                    else:
                         continue
                     events.append((index, record))
         except FileNotFoundError as exc:

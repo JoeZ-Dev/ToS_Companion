@@ -64,7 +64,15 @@ class CompanionRuntime:
             base_url="https://api.schwabapi.com/trader/v1",
             auth_token_provider=self.token_provider,
         )
-        self.ae_engine = ae_engine or AEEngine(self.rest, self.db_path)
+        self._market_state_lock = threading.RLock()
+        self._shared_market_state: tuple[bool, bool | None] = (False, None)
+        self._market_state_stop = threading.Event()
+        self._market_state_thread: threading.Thread | None = None
+        self.ae_engine = ae_engine or AEEngine(
+            self.rest,
+            self.db_path,
+            market_state_provider=self._get_shared_market_state,
+        )
         self._ae_engines: dict[str, AEEngine] = {}
         self._aggregators: dict[str, BarAggregator10s] = {}
         self._analysis_symbols: set[str] = set()
@@ -120,6 +128,8 @@ class CompanionRuntime:
         self._start_stream_watchdog()
         self._backfill_stop.clear()
         self._start_history_backfill_scheduler()
+        self._market_state_stop.clear()
+        self._start_market_state_refresher()
         self.session.update_connection_state("READY")
 
     def stop(self) -> None:
@@ -129,6 +139,7 @@ class CompanionRuntime:
             self._started = False
         self._stream_watchdog_stop.set()
         self._backfill_stop.set()
+        self._market_state_stop.set()
         self.stop_recording(reason="runtime_stopped")
         if stream is not None:
             try:
@@ -136,6 +147,37 @@ class CompanionRuntime:
             except Exception:
                 logger.warning("Failed to disconnect Schwab stream", exc_info=True)
         self.session.update_connection_state("DISCONNECTED")
+
+    def _get_shared_market_state(self) -> tuple[bool, bool | None]:
+        lock = getattr(self, "_market_state_lock", None)
+        if lock is None:
+            return getattr(self, "_shared_market_state", (False, None))
+        with lock:
+            return getattr(self, "_shared_market_state", (False, None))
+
+    def _start_market_state_refresher(self) -> None:
+        if self._market_state_thread and self._market_state_thread.is_alive():
+            return
+
+        def worker() -> None:
+            probe = AEEngine(self.rest, None)
+            while not self._market_state_stop.is_set():
+                try:
+                    value = probe._market_state()
+                    with self._market_state_lock:
+                        self._shared_market_state = value
+                except Exception:
+                    logger.warning("Market-state refresh failed", exc_info=True)
+                if self._market_state_stop.wait(30.0):
+                    return
+
+        thread = threading.Thread(
+            target=worker,
+            daemon=True,
+            name="tos-market-state-refresh",
+        )
+        self._market_state_thread = thread
+        thread.start()
 
     def _start_stream_watchdog(self) -> None:
         if self._stream_watchdog_thread and self._stream_watchdog_thread.is_alive():
@@ -272,7 +314,11 @@ class CompanionRuntime:
                 if not self._ae_engines:
                     engine = self.ae_engine
                 else:
-                    engine = AEEngine(self.rest, self.db_path)
+                    engine = AEEngine(
+                        self.rest,
+                        self.db_path,
+                        market_state_provider=self._get_shared_market_state,
+                    )
                 self._ae_engines[symbol] = engine
             if symbol == self._active_symbol:
                 # Backward-compatible alias for code that still inspects the

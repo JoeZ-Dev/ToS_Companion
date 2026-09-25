@@ -125,6 +125,32 @@ class MinuteBarAggregator:
         self._update_session_stats(bar)
         return completed
 
+    def ingest_external_minute(self, bar: OneMinuteBar) -> None:
+        """Append a trustworthy external 1m candle without fabricating 10s detail."""
+        if self._current is not None and self._current.ts < bar.ts:
+            self._store_completed_minute(self._current)
+            self._current = None
+        if self._bars and self._bars[-1].ts == bar.ts:
+            return
+        self._bars.append(bar)
+        self._volumes.append(bar.volume)
+        if len(self._volumes) > 300:
+            self._volumes = self._volumes[-300:]
+        ts_et = datetime.fromtimestamp(bar.ts, tz=timezone.utc).astimezone(ET_TZ)
+        tod = timedelta(hours=ts_et.hour, minutes=ts_et.minute, seconds=ts_et.second)
+        if tod >= PREMARKET_START and tod < RTH_START:
+            self.premarket_high = bar.high if self.premarket_high is None else max(self.premarket_high, bar.high)
+            self.premarket_low = bar.low if self.premarket_low is None else min(self.premarket_low, bar.low)
+        if tod >= RTH_START:
+            if self.session_open is None:
+                self.session_open = bar.open
+            if tod < RTH_START + timedelta(minutes=OPENING_RANGE_MINUTES):
+                self.or_high = bar.high if self.or_high is None else max(self.or_high, bar.high)
+                self.or_low = bar.low if self.or_low is None else min(self.or_low, bar.low)
+        self.session_high = bar.high if self.session_high is None else max(self.session_high, bar.high)
+        self.session_low = bar.low if self.session_low is None else min(self.session_low, bar.low)
+        self._add_vwap_bar(bar)
+
     def _store_completed_minute(self, bar: OneMinuteBar) -> None:
         replaced = False
         if self.last_seeded_minute_ts is not None and bar.ts == self.last_seeded_minute_ts:
@@ -259,6 +285,7 @@ class AEEngine:
         rest_client: Optional[SchwabRestClient],
         db_path: Optional[Path],
         now_ms_provider: Optional[Callable[[], int]] = None,
+        market_state_provider: Optional[Callable[[], tuple[bool, Optional[bool]]]] = None,
     ) -> None:
         self._rest = rest_client
         self._db_path = db_path
@@ -271,6 +298,7 @@ class AEEngine:
         self._active_symbol: Optional[str] = None
         self._seeded = False
         self._now_ms_provider = now_ms_provider
+        self._market_state_provider = market_state_provider
 
     def reset_intraday(self) -> None:
         self._minute_agg = MinuteBarAggregator()
@@ -387,6 +415,11 @@ class AEEngine:
 
     def ingest_10s_bar(self, bar: TenSecondBar) -> Optional[dict]:
         self._minute_agg.ingest_10s(bar)
+        return self._build_snapshot()
+
+    def ingest_external_minute_bar(self, bar: OneMinuteBar) -> Optional[dict]:
+        """Ingest a real 1m recovery candle while preserving its lower evidence granularity."""
+        self._minute_agg.ingest_external_minute(bar)
         return self._build_snapshot()
 
     @property
@@ -790,6 +823,8 @@ class AEEngine:
         return snapshot
 
     def _market_state(self) -> tuple[bool, Optional[bool]]:
+        if self._market_state_provider is not None:
+            return self._market_state_provider()
         now_ms = self._now_ms()
         if self._market_cache and (now_ms - self._market_cache[0] < 60_000):
             return self._market_cache[1], self._market_cache[2]

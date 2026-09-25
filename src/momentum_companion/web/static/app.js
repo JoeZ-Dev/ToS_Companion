@@ -567,7 +567,7 @@
   }
 
   function quoteFreshness(symbolState) {
-    const receivedAt = Number(symbolState?.quote?.received_at_ms);
+    const receivedAt = Number(symbolState?.quote?._client_received_at_ms);
     if (!Number.isFinite(receivedAt)) {
       return { status: "NO DATA", ageSeconds: null };
     }
@@ -667,6 +667,12 @@
   function applySnapshot(snapshot) {
     state.activeSymbol = snapshot.active_symbol;
     state.symbols = snapshot.symbols || {};
+    const clientNow = Date.now();
+    Object.values(state.symbols).forEach((symbolState) => {
+      if (symbolState?.quote && symbolState.quote.received_at_ms != null) {
+        symbolState.quote._client_received_at_ms = clientNow;
+      }
+    });
     byId("connection-state").textContent = snapshot.connection_state || "UNKNOWN";
     renderRecorderState(snapshot.recorder_state || {});
     if (!state.replayView) renderActive({ chartChanged: true });
@@ -707,7 +713,10 @@
 
     let chartChanged = false;
     if (event.type === "quote" && symbol) {
-      state.symbols[symbol].quote = event.payload || {};
+      state.symbols[symbol].quote = {
+        ...(event.payload || {}),
+        _client_received_at_ms: Date.now(),
+      };
     } else if (event.type === "history" && symbol) {
       state.symbols[symbol].history_bars = event.payload?.bars || [];
       chartChanged = true;
@@ -1239,7 +1248,7 @@
       const symbolState = state.activeSymbol ? state.symbols[state.activeSymbol] : null;
       renderFreshness(symbolState);
     }
-  }, 1000);
+  }, 500);
 
   setInterval(() => {
     if (state.replayView) void refreshReplayState();

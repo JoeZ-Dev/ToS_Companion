@@ -6,7 +6,7 @@ from statistics import median
 import threading
 from typing import Any
 
-from momentum_companion.analysis.ae import AEEngine
+from momentum_companion.analysis.ae import AEEngine, OneMinuteBar
 from momentum_companion.clients.stream_mapping import LevelOneCache
 from momentum_companion.data.bar_aggregator import BarAggregator10s, TenSecondBar
 from momentum_companion.data.price_update import PriceUpdate
@@ -45,6 +45,7 @@ class ReplayEngine:
         self._last_event_ts_ms: int | None = None
         self._significant_gap_count = 0
         self._largest_gap_ms = 0
+        self._repaired_candle_count = 0
         self.pattern_service = PatternEvaluationService()
         self.ae_engine = AEEngine(
             None,
@@ -240,6 +241,9 @@ class ReplayEngine:
         if self._symbol is None:
             return
         self._current_ts_ms = int(record["stream_ts_ms"])
+        if record.get("kind") == "historical_candle":
+            self._ingest_repaired_candle(record)
+            return
         if self._last_event_ts_ms is not None:
             gap_ms = self._current_ts_ms - self._last_event_ts_ms
             if gap_ms > 60_000:
@@ -275,6 +279,46 @@ class ReplayEngine:
             self.ae_engine.record_quote_ts(self._current_ts_ms)
             if completed is not None:
                 self._handle_completed_bar(completed)
+
+    def _ingest_repaired_candle(self, record: dict[str, Any]) -> None:
+        assert self._symbol is not None
+        completed = self._aggregator.close_out()
+        if completed is not None:
+            self._handle_completed_bar(completed)
+        candle = record.get("candle") or {}
+        required = ("open", "high", "low", "close")
+        if any(candle.get(key) is None for key in required):
+            return
+        ts = int(record["stream_ts_ms"] // 1000)
+        bar = OneMinuteBar(
+            ts=ts,
+            open=float(candle["open"]),
+            high=float(candle["high"]),
+            low=float(candle["low"]),
+            close=float(candle["close"]),
+            volume=float(candle.get("volume") or 0),
+            is_extended=False,
+        )
+        self.session.ingest_bar(
+            self._symbol,
+            {
+                "ts": bar.ts,
+                "open": bar.open,
+                "high": bar.high,
+                "low": bar.low,
+                "close": bar.close,
+                "volume": bar.volume,
+                "is_extended": bar.is_extended,
+                "source": "SCHWAB_PRICEHISTORY_1M_GAP_REPAIR",
+                "interval_seconds": 60,
+            },
+        )
+        snapshot = self.ae_engine.ingest_external_minute_bar(bar)
+        self.session.set_vwap_points(self._symbol, self.ae_engine.vwap_points)
+        if snapshot is not None:
+            self.session.update_ae_snapshot(self._symbol, snapshot)
+        self._repaired_candle_count += 1
+        self._last_event_ts_ms = self._current_ts_ms
 
     def _handle_completed_bar(self, bar: TenSecondBar) -> None:
         assert self._symbol is not None
@@ -328,5 +372,10 @@ class ReplayEngine:
             "volume": {
                 "capped_total": self._aggregator.capped_volume_total,
                 "discarded_total": self._aggregator.discarded_volume_total,
+            },
+            "gap_repair": {
+                "repaired_candles_consumed": self._repaired_candle_count,
+                "source": "SCHWAB_PRICEHISTORY_1M_GAP_REPAIR" if self._repaired_candle_count else None,
+                "granularity": "1m" if self._repaired_candle_count else None,
             },
         }
