@@ -11,6 +11,7 @@ from momentum_companion.clients.stream_mapping import LevelOneCache
 from momentum_companion.data.bar_aggregator import BarAggregator10s, TenSecondBar
 from momentum_companion.data.price_update import PriceUpdate
 from momentum_companion.replay.catalog import RecordingCatalog
+from momentum_companion.replay.evaluation import ReplayExcursionEvaluator
 from momentum_companion.session import CompanionSession
 from momentum_companion.setup_engine.pattern_service import PatternEvaluationService
 
@@ -47,6 +48,7 @@ class ReplayEngine:
         self._largest_gap_ms = 0
         self._repaired_candle_count = 0
         self.pattern_service = PatternEvaluationService()
+        self.excursion_evaluator = ReplayExcursionEvaluator()
         self.ae_engine = AEEngine(
             None,
             None,
@@ -323,7 +325,16 @@ class ReplayEngine:
     def _handle_completed_bar(self, bar: TenSecondBar) -> None:
         assert self._symbol is not None
         self.session.ingest_bar(self._symbol, bar)
+        # Existing confirmed setups see this bar as FUTURE evidence. A new
+        # confirmation on this same bar only becomes knowable at its close and
+        # therefore starts excursion measurement on the next completed bar.
+        self.excursion_evaluator.advance_bar(bar)
         patterns = self.pattern_service.ingest_completed_bar(self._symbol, bar)
+        self.excursion_evaluator.observe_patterns(
+            patterns,
+            bar_ts=bar.ts,
+            close=bar.close,
+        )
         self.session.update_pattern_observations(self._symbol, patterns)
         snapshot = self.ae_engine.ingest_10s_bar(bar)
         self.session.set_vwap_points(self._symbol, self.ae_engine.vwap_points)
@@ -347,6 +358,7 @@ class ReplayEngine:
             "progress": (self._cursor / total) if total else 1.0,
             "speed": self._speed,
             "data_quality": self._data_quality(),
+            "evaluation": self.excursion_evaluator.snapshot(),
         }
 
     def _data_quality(self) -> dict[str, Any]:
