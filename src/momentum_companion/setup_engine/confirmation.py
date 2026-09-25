@@ -58,8 +58,13 @@ def evaluate_price_confirmation(
     if not materialized:
         return ConfirmationResult(False, 0.0, min_seconds, None, False)
 
-    times = [int(getattr(b, "time", b.get("time"))) for b in materialized]
-    closes = [float(getattr(b, "close", b.get("close"))) for b in materialized]
+    def value(bar, key: str):
+        if hasattr(bar, key):
+            return getattr(bar, key)
+        return bar[key]
+
+    times = [int(value(b, "time")) for b in materialized]
+    closes = [float(value(b, "close")) for b in materialized]
     intervals = [b - a for a, b in zip(times, times[1:]) if 0 < b - a <= max_gap_seconds]
     interval = float(median(intervals)) if intervals else float(default_interval_seconds)
 
