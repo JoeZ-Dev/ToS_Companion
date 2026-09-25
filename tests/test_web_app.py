@@ -260,6 +260,7 @@ def test_browser_surfaces_quote_freshness_indicator():
         app_js = client.get("/app.js").text
 
     assert 'id="quote-freshness"' in index
+    assert "_client_received_at_ms" in app_js
     assert "received_at_ms" in app_js
     assert "DELAYED" in app_js
     assert "STALE" in app_js
