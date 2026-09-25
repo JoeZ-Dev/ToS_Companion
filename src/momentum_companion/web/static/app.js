@@ -350,6 +350,9 @@
       ["VWAP", fmtMaybePrice(snapshot.vwap)],
       ["Intraday Range", fmtMaybePct(snapshot.volatility?.intraday_range_pct)],
       ["Volume Multiple", Number.isFinite(Number(snapshot.volume?.volume_multiple)) ? Number(snapshot.volume.volume_multiple).toFixed(2) + "x" : "--"],
+      ["Shares Out.", Number.isFinite(Number(snapshot.fundamentals?.shares_outstanding)) ? fmtVolume(snapshot.fundamentals.shares_outstanding) : "--"],
+      ["Float Mkt Cap", Number.isFinite(Number(snapshot.fundamentals?.market_cap_float)) ? fmtVolume(snapshot.fundamentals.market_cap_float) : "--"],
+      ["Short % Float", Number.isFinite(Number(snapshot.fundamentals?.short_interest_to_float)) ? Number(snapshot.fundamentals.short_interest_to_float).toFixed(2) + "%" : "--"],
       ["Micro State", snapshot.micro?.micro_state || "--"],
       ["MACD", snapshot.regime?.macd_regime || "--"],
       ["As of", snapshot.as_of_et ? new Date(snapshot.as_of_et).toLocaleTimeString("en-US", { timeZone: EASTERN_TZ, hour: "numeric", minute: "2-digit", second: "2-digit" }) : "--"],
@@ -626,6 +629,17 @@
     byId("ask").textContent = fmtPrice(quote.ask);
     byId("last").textContent = fmtPrice(quote.last);
     byId("volume").textContent = fmtVolume(quote.volume);
+    const context = symbolState?.market_context || {};
+    byId("security-status").textContent = context.halted ? "HALTED" : (context.security_status || "--");
+    const htbRate = Number(context.hard_to_borrow_rate);
+    byId("htb-status").textContent = context.hard_to_borrow === true
+      ? "YES" + (Number.isFinite(htbRate) ? " " + htbRate.toFixed(1) + "%" : "")
+      : context.hard_to_borrow === false ? "NO" : "--";
+    const rsRank = Number(context.relative_strength_rank);
+    const rsSize = Number(context.relative_strength_universe_size);
+    byId("relative-strength").textContent = Number.isFinite(rsRank)
+      ? "#" + rsRank + "/" + rsSize
+      : "--";
     renderFreshness(symbolState);
     renderAnalysisView(symbolState);
     if (!symbolState) {
