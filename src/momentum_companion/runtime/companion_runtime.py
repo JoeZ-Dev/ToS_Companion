@@ -469,6 +469,12 @@ class CompanionRuntime:
         self.session.ingest_quote(event)
 
         ts_ms = event.get("ts_ms")
+        security_status = event.get("security_status")
+        if security_status is not None:
+            try:
+                self.pattern_service.update_security_status(symbol, str(security_status), ts_ms)
+            except Exception:
+                logger.warning("Security-status update failed for %s", symbol, exc_info=True)
         last = event.get("last")
         if ts_ms is None or last is None:
             return
