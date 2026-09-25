@@ -149,8 +149,11 @@ class CompanionRuntime:
         self.session.update_connection_state("DISCONNECTED")
 
     def _get_shared_market_state(self) -> tuple[bool, bool | None]:
-        with self._market_state_lock:
-            return self._shared_market_state
+        lock = getattr(self, "_market_state_lock", None)
+        if lock is None:
+            return getattr(self, "_shared_market_state", (False, None))
+        with lock:
+            return getattr(self, "_shared_market_state", (False, None))
 
     def _start_market_state_refresher(self) -> None:
         if self._market_state_thread and self._market_state_thread.is_alive():
