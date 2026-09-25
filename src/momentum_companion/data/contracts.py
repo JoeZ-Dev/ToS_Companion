@@ -15,6 +15,8 @@ class QuoteEvent(TypedDict):
     ask_size: Optional[float]
     last_size: Optional[float]
     volume: Optional[float]
+    net_percentage_change: Optional[float]
+    regular_market_percentage_change: Optional[float]
     security_status: Optional[str]
     hard_to_borrow_quantity: Optional[float]
     hard_to_borrow_rate: Optional[float]
