@@ -11,6 +11,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from momentum_companion.analysis.ae import AEEngine
+from momentum_companion.analysis.relative_strength import RelativeStrengthTracker
 from momentum_companion.bootstrap import bootstrap
 from momentum_companion.clients.schwab_rest import SchwabRestClient
 from momentum_companion.clients.schwab_stream import SchwabStreamClient
@@ -56,6 +57,7 @@ class CompanionRuntime:
         self.journal = journal
         self.session = session or CompanionSession()
         self.pattern_service = PatternEvaluationService()
+        self.relative_strength = RelativeStrengthTracker()
 
         self.token_provider = token_provider or TokenProvider(
             state_callback=self._on_auth_state
@@ -467,6 +469,7 @@ class CompanionRuntime:
         if not symbol:
             return
         self.session.ingest_quote(event)
+        self._update_relative_strength(event)
 
         ts_ms = event.get("ts_ms")
         last = event.get("last")
@@ -499,6 +502,21 @@ class CompanionRuntime:
         if completed is not None:
             self._handle_completed_bar(symbol, completed)
 
+    def _update_relative_strength(self, event: QuoteEvent) -> None:
+        symbol = self.session.normalize_symbol(str(event.get("symbol") or ""))
+        ts_ms = event.get("ts_ms")
+        last = event.get("last")
+        if not symbol or ts_ms is None or not isinstance(last, (int, float)) or last <= 0:
+            return
+        tracker = getattr(self, "relative_strength", None)
+        if tracker is None:
+            tracker = RelativeStrengthTracker()
+            self.relative_strength = tracker
+        tracker.ingest(symbol, int(ts_ms), float(last))
+        watched = self.session.watched_symbols()
+        for watched_symbol, strength in tracker.snapshot(watched).items():
+            self.session.update_relative_strength(watched_symbol, strength)
+
     def _handle_completed_bar(self, symbol: str, bar: TenSecondBar) -> None:
         self.session.ingest_bar(symbol, bar)
 
@@ -518,6 +536,18 @@ class CompanionRuntime:
             if points is not None:
                 self.session.set_vwap_points(symbol, points)
             if snapshot:
+                snapshot = dict(snapshot)
+                symbol_state = self.session.snapshot().get("symbols", {}).get(symbol, {})
+                snapshot["relative_strength"] = dict(symbol_state.get("relative_strength") or {})
+                quote_context = symbol_state.get("quote") or {}
+                snapshot["market_microstructure"] = {
+                    "security_status": quote_context.get("security_status"),
+                    "halted": str(quote_context.get("security_status") or "").lower() == "halted",
+                    "hard_to_borrow": quote_context.get("hard_to_borrow"),
+                    "hard_to_borrow_quantity": quote_context.get("hard_to_borrow_quantity"),
+                    "hard_to_borrow_rate": quote_context.get("hard_to_borrow_rate"),
+                    "shortable": quote_context.get("shortable"),
+                }
                 self.session.update_ae_snapshot(symbol, snapshot)
         except Exception:
             logger.warning("AE live ingest failed for %s", symbol, exc_info=True)
