@@ -68,7 +68,43 @@ class ReplayEngine:
             self._current_ts_ms = int(events[0]["stream_ts_ms"]) if events else 0
             self._status = "PAUSED" if events else "COMPLETE"
             self._reset_analysis()
+            self._seed_backfilled_history()
             return self._replay_state()
+
+    def _seed_backfilled_history(self) -> None:
+        if self._symbol is None or self._session_id is None or not self._events:
+            return
+        first_event_ms = int(self._events[0]["stream_ts_ms"])
+        candles = self.catalog.load_history(
+            self._session_id,
+            self._symbol,
+            through_ms=first_event_ms,
+        )
+        if not candles:
+            return
+        bars = [
+            {
+                "time": int(candle["datetime"] // 1000),
+                "open": candle.get("open"),
+                "high": candle.get("high"),
+                "low": candle.get("low"),
+                "close": candle.get("close"),
+                "volume": candle.get("volume") or 0,
+            }
+            for candle in candles
+            if candle.get("datetime") is not None
+        ]
+        if not bars:
+            return
+        self.session.set_history(self._symbol, bars)
+        snapshot = self.ae_engine.seed_intraday_from_bars(
+            self._symbol,
+            bars,
+            end_ms=first_event_ms,
+        )
+        self.session.set_vwap_points(self._symbol, self.ae_engine.vwap_points)
+        if snapshot is not None:
+            self.session.update_ae_snapshot(self._symbol, snapshot)
 
     def step(self, count: int = 1) -> dict[str, Any]:
         if count <= 0:
