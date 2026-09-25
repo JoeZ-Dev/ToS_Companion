@@ -897,6 +897,17 @@
       ? formatEasternTime(Number(replay.current_ts_ms) / 1000)
       : "--";
 
+    const evaluation = replay.evaluation || {};
+    const evalRows = [
+      ["Signals", String((evaluation.signals || []).length)],
+      ["Completed", String(evaluation.completed_count || 0)],
+      ["Avg MAE", Number.isFinite(Number(evaluation.avg_mae_pct)) ? Number(evaluation.avg_mae_pct).toFixed(2) + "%" : "--"],
+      ["Avg MFE", Number.isFinite(Number(evaluation.avg_mfe_pct)) ? Number(evaluation.avg_mfe_pct).toFixed(2) + "%" : "--"],
+    ];
+    byId("replay-evaluation").innerHTML = evalRows.map(([label, value]) =>
+      `<div class="metric"><span class="metric-label">${escapeHtml(label)}</span><span class="metric-value">${escapeHtml(value)}</span></div>`
+    ).join("");
+
     const slider = byId("replay-progress");
     slider.max = String(total);
     slider.value = String(Math.min(cursor, total));
