@@ -1,5 +1,6 @@
 from momentum_companion.setup_engine.confirmation import (
     AdaptiveConfirmationPolicy,
+    contiguous_tail,
     evaluate_adaptive_confirmation,
 )
 
@@ -69,3 +70,18 @@ def test_adaptive_confirmation_does_not_bridge_large_gap_or_halt():
     assert result.consecutive_bars == 1
     assert result.elapsed_seconds == 10
     assert result.confirmed is False
+
+
+def test_contiguous_tail_discards_pre_halt_pattern_geometry():
+    bars = [
+        bar(0, 10.0),
+        bar(10, 10.1),
+        bar(20, 10.2),
+        bar(180, 11.0),
+        bar(190, 11.1),
+        bar(200, 11.2),
+    ]
+
+    tail = contiguous_tail(bars)
+
+    assert [item.time for item in tail] == [180, 190, 200]
