@@ -45,6 +45,12 @@ class _SymbolState:
             "ask_size": None,
             "last_size": None,
             "volume": None,
+            "security_status": None,
+            "halted": False,
+            "hard_to_borrow_quantity": None,
+            "hard_to_borrow_rate": None,
+            "hard_to_borrow": None,
+            "shortable": None,
             "source_ts_type": None,
             "raw_source": None,
             "received_at_ms": None,
@@ -173,6 +179,8 @@ class CompanionSession:
         self.add_symbol(symbol)
 
         received_at_ms = int(time.time() * 1000)
+        security_status = quote.get("security_status")
+        halted = str(security_status or "").strip().lower() == "halted"
         update = {
             "ts_ms": quote.get("ts_ms"),
             "bid": quote.get("bid"),
@@ -182,6 +190,12 @@ class CompanionSession:
             "ask_size": quote.get("ask_size"),
             "last_size": quote.get("last_size"),
             "volume": quote.get("volume"),
+            "security_status": security_status,
+            "halted": halted,
+            "hard_to_borrow_quantity": quote.get("hard_to_borrow_quantity"),
+            "hard_to_borrow_rate": quote.get("hard_to_borrow_rate"),
+            "hard_to_borrow": quote.get("hard_to_borrow"),
+            "shortable": quote.get("shortable"),
             "source_ts_type": quote.get("source_ts_type"),
             "raw_source": quote.get("raw_source"),
             "received_at_ms": received_at_ms,
