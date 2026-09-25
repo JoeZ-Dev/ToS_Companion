@@ -37,7 +37,6 @@ class RecordingCatalog:
                     "counts": manifest.get("counts") or {},
                     "stop_reason": manifest.get("stop_reason"),
                     "historical_backfill": manifest.get("historical_backfill") or {},
-                    "gap_repairs": manifest.get("gap_repairs") or {},
                 }
             )
         return sessions
