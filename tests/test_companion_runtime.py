@@ -477,3 +477,37 @@ def test_apply_recording_pre7_seed_rebuilds_live_vwap_from_7am_history(monkeypat
     assert symbol_state["vwap_points"]
     assert symbol_state["ae_snapshot"]["vwap"] is not None
     assert "GCTK" in runtime._analysis_symbols
+
+
+def test_halted_quote_updates_status_without_creating_price_bar():
+    runtime = bare_runtime()
+    runtime._recording_symbols = set()
+    runtime._analysis_symbols = {"AEHL"}
+    runtime.session.add_symbol("AEHL", make_active=True)
+    aggregator = FakePerSymbolAggregator("AEHL")
+    engine = FakePerSymbolAE("AEHL")
+    runtime._aggregators = {"AEHL": aggregator}
+    runtime._ae_engines = {"AEHL": engine}
+
+    runtime._handle_quote({
+        "ts_ms": 1_700_000_010_000,
+        "symbol": "AEHL",
+        "bid": 3.10,
+        "ask": 3.12,
+        "last": 3.11,
+        "bid_size": 100,
+        "ask_size": 100,
+        "last_size": 0,
+        "volume": 25_000,
+        "security_status": "Halted",
+        "hard_to_borrow": True,
+        "shortable": False,
+        "source_ts_type": "QUOTE_TS",
+        "raw_source": "SCHWAB_STREAM",
+    })
+
+    state = runtime.session.snapshot()["symbols"]["AEHL"]
+    assert state["quote"]["security_status"] == "Halted"
+    assert aggregator.updates == []
+    assert engine.bars == []
+    assert state["relative_strength"]["halted"] is True
