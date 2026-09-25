@@ -482,11 +482,18 @@ class CompanionRuntime:
         if not symbol:
             return
         self.session.ingest_quote(event)
-        self._update_relative_strength(event)
+        security_status = str(event.get("security_status") or "").strip().lower()
+        halted = security_status == "halted"
+        self._update_relative_strength(event, halted=halted)
 
         ts_ms = event.get("ts_ms")
         last = event.get("last")
         if ts_ms is None or last is None:
+            return
+        if halted:
+            # Keep the explicit HALTED quote/status in session + recordings,
+            # but never fabricate a flat price bar from cached L1 last prices
+            # while trading is suspended.
             return
 
         source_ts_type = event.get("source_ts_type") or "QUOTE_TS"
@@ -551,7 +558,7 @@ class CompanionRuntime:
             name=f"tos-fundamentals-{normalized}",
         ).start()
 
-    def _update_relative_strength(self, event: QuoteEvent) -> None:
+    def _update_relative_strength(self, event: QuoteEvent, *, halted: bool = False) -> None:
         symbol = self.session.normalize_symbol(str(event.get("symbol") or ""))
         ts_ms = event.get("ts_ms")
         last = event.get("last")
@@ -561,7 +568,9 @@ class CompanionRuntime:
         if tracker is None:
             tracker = RelativeStrengthTracker()
             self.relative_strength = tracker
-        tracker.ingest(symbol, int(ts_ms), float(last))
+        tracker.set_halted(symbol, halted)
+        if not halted:
+            tracker.ingest(symbol, int(ts_ms), float(last))
         watched = self.session.watched_symbols()
         for watched_symbol, strength in tracker.snapshot(watched).items():
             self.session.update_relative_strength(watched_symbol, strength)
