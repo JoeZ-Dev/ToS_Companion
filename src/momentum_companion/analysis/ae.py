@@ -285,6 +285,7 @@ class AEEngine:
         rest_client: Optional[SchwabRestClient],
         db_path: Optional[Path],
         now_ms_provider: Optional[Callable[[], int]] = None,
+        market_state_provider: Optional[Callable[[], tuple[bool, Optional[bool]]]] = None,
     ) -> None:
         self._rest = rest_client
         self._db_path = db_path
@@ -297,6 +298,7 @@ class AEEngine:
         self._active_symbol: Optional[str] = None
         self._seeded = False
         self._now_ms_provider = now_ms_provider
+        self._market_state_provider = market_state_provider
 
     def reset_intraday(self) -> None:
         self._minute_agg = MinuteBarAggregator()
@@ -821,6 +823,8 @@ class AEEngine:
         return snapshot
 
     def _market_state(self) -> tuple[bool, Optional[bool]]:
+        if self._market_state_provider is not None:
+            return self._market_state_provider()
         now_ms = self._now_ms()
         if self._market_cache and (now_ms - self._market_cache[0] < 60_000):
             return self._market_cache[1], self._market_cache[2]
