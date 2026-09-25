@@ -282,6 +282,9 @@ class ReplayEngine:
 
     def _ingest_repaired_candle(self, record: dict[str, Any]) -> None:
         assert self._symbol is not None
+        completed = self._aggregator.close_out()
+        if completed is not None:
+            self._handle_completed_bar(completed)
         candle = record.get("candle") or {}
         required = ("open", "high", "low", "close")
         if any(candle.get(key) is None for key in required):
