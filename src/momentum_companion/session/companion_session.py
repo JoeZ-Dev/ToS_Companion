@@ -45,6 +45,8 @@ class _SymbolState:
             "ask_size": None,
             "last_size": None,
             "volume": None,
+            "net_percentage_change": None,
+            "regular_market_percentage_change": None,
             "security_status": None,
             "halted": False,
             "hard_to_borrow_quantity": None,
@@ -190,6 +192,8 @@ class CompanionSession:
             "ask_size": quote.get("ask_size"),
             "last_size": quote.get("last_size"),
             "volume": quote.get("volume"),
+            "net_percentage_change": quote.get("net_percentage_change"),
+            "regular_market_percentage_change": quote.get("regular_market_percentage_change"),
             "security_status": security_status,
             "halted": halted,
             "hard_to_borrow_quantity": quote.get("hard_to_borrow_quantity"),
@@ -286,10 +290,32 @@ class CompanionSession:
         """Return a self-contained JSON-serializable application snapshot."""
         with self._lock:
             now_ms = int(time.time() * 1000)
+            relative_values = []
+            for relative_symbol, relative_state in self._symbols.items():
+                value = relative_state.quote.get("net_percentage_change")
+                if isinstance(value, (int, float)):
+                    relative_values.append((relative_symbol, float(value)))
+            relative_values.sort(key=lambda item: item[1], reverse=True)
+            relative_rank = {
+                relative_symbol: index + 1
+                for index, (relative_symbol, _) in enumerate(relative_values)
+            }
             symbols = {
                 symbol: {
                     "symbol": state.symbol,
                     "quote": dict(state.quote),
+                    "market_context": {
+                        "security_status": state.quote.get("security_status"),
+                        "halted": bool(state.quote.get("halted")),
+                        "hard_to_borrow": state.quote.get("hard_to_borrow"),
+                        "hard_to_borrow_rate": state.quote.get("hard_to_borrow_rate"),
+                        "hard_to_borrow_quantity": state.quote.get("hard_to_borrow_quantity"),
+                        "shortable": state.quote.get("shortable"),
+                        "net_percentage_change": state.quote.get("net_percentage_change"),
+                        "regular_market_percentage_change": state.quote.get("regular_market_percentage_change"),
+                        "relative_strength_rank": relative_rank.get(symbol),
+                        "relative_strength_universe_size": len(relative_values),
+                    },
                     "freshness": (
                         {"status": "NO_DATA", "age_ms": None}
                         if state.quote.get("received_at_ms") is None
