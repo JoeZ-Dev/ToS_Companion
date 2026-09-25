@@ -691,6 +691,11 @@ class AEEngine:
                 "is_volatile_enough": is_volatile,
             },
             "volume": {"volume_multiple": vol_mult},
+            "fundamentals": {
+                "shares_outstanding": profile.get("shares_outstanding") if profile else None,
+                "market_cap_float": profile.get("market_cap_float") if profile else None,
+                "short_interest_to_float": profile.get("short_interest_to_float") if profile else None,
+            },
             "levels": {
                 "resistance_clusters": res_clusters_rel,
                 "support_clusters": sup_clusters_rel,
