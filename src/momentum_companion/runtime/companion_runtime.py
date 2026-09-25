@@ -312,11 +312,11 @@ class CompanionRuntime:
             engine = self._ae_engines.get(symbol)
             if engine is None:
                 if not self._ae_engines:
-                    engine = self.ae_engine
-                else:
+                    engine = getattr(self, "ae_engine", None)
+                if engine is None:
                     engine = AEEngine(
-                        self.rest,
-                        self.db_path,
+                        getattr(self, "rest", None),
+                        getattr(self, "db_path", None),
                         market_state_provider=self._get_shared_market_state,
                     )
                 self._ae_engines[symbol] = engine
