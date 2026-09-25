@@ -1248,7 +1248,7 @@
       const symbolState = state.activeSymbol ? state.symbols[state.activeSymbol] : null;
       renderFreshness(symbolState);
     }
-  }, 1000);
+  }, 500);
 
   setInterval(() => {
     if (state.replayView) void refreshReplayState();
