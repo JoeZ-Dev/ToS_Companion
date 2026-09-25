@@ -5,6 +5,7 @@ from typing import Iterable
 
 from momentum_companion.setup_engine.confirmation import (
     AdaptiveConfirmationPolicy,
+    contiguous_tail,
     evaluate_adaptive_confirmation,
 )
 from momentum_companion.setup_engine.pattern_contracts import (
@@ -15,7 +16,6 @@ from momentum_companion.setup_engine.pattern_contracts import (
 )
 from momentum_companion.setup_engine.structure import (
     measure_retracement,
-    normalize_bars,
     strongest_bullish_impulse,
 )
 
@@ -49,7 +49,7 @@ class MicroPullbackDetector:
 
 def detect_micro_pullback(symbol: str, bars, config: MicroPullbackConfig | None = None) -> PatternObservation | None:
     cfg = config or MicroPullbackConfig()
-    normalized = normalize_bars(bars)
+    normalized = contiguous_tail(bars)
     if len(normalized) < cfg.min_bars:
         return None
 
