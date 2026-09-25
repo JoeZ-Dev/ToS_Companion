@@ -273,3 +273,48 @@ def test_replay_reports_volume_removed_by_cap_and_reset_without_changing_bar_vol
     assert reset["volume"] == {"capped_total": 250000, "discarded_total": 2000}
     assert engine.snapshot()["session"]["symbols"]["TOPS"]["bars_10s"][0]["volume"] == 900
     assert engine.seek(11)["data_quality"] == before_cap
+
+
+def test_replay_consumes_gap_repair_candles_without_fabricating_l1_ticks(tmp_path):
+    session = _write_session(tmp_path)
+    path = session / "TOPS.jsonl"
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    base = rows[0]["stream_ts_ms"]
+    repaired = {
+        "schema_version": 1,
+        "kind": "historical_candle",
+        "symbol": "TOPS",
+        "stream_ts_ms": base + 60_000,
+        "source": "SCHWAB_PRICEHISTORY_1M_GAP_REPAIR",
+        "candle": {
+            "datetime": base + 60_000,
+            "open": 0.72,
+            "high": 0.80,
+            "low": 0.70,
+            "close": 0.78,
+            "volume": 5000,
+        },
+    }
+    rows = [rows[0], repaired, {**rows[2], "stream_ts_ms": base + 120_000}]
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+
+    engine = ReplayEngine(recordings_root=tmp_path)
+    loaded = engine.load(session.name, "TOPS")
+    assert loaded["total_events"] == 3
+
+    final = engine.step(3)
+    symbol = engine.snapshot()["session"]["symbols"]["TOPS"]
+
+    repaired_bars = [
+        bar for bar in symbol["bars_10s"]
+        if bar.get("source") == "SCHWAB_PRICEHISTORY_1M_GAP_REPAIR"
+    ]
+    assert len(repaired_bars) == 1
+    assert repaired_bars[0]["interval_seconds"] == 60
+    assert repaired_bars[0]["close"] == 0.78
+    assert final["data_quality"]["gap_repair"] == {
+        "repaired_candles_consumed": 1,
+        "source": "SCHWAB_PRICEHISTORY_1M_GAP_REPAIR",
+        "granularity": "1m",
+    }
+    assert symbol["ae_snapshot"]["vwap"] is not None
