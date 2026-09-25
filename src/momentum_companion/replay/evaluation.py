@@ -5,6 +5,7 @@ from typing import Any, Iterable
 
 
 ENTRY_STATES = frozenset({"BREAKOUT", "CONTINUATION"})
+MIN_SIGNALS_FOR_STATS = 10
 
 
 @dataclass
@@ -106,17 +107,50 @@ class ReplayExcursionEvaluator:
         # reappear as the rolling detector window evolves; forgetting them would
         # create duplicate "first confirmation" entries.
 
+    @staticmethod
+    def _stats(records: list[dict[str, Any]]) -> dict[str, Any]:
+        completed = [item for item in records if item.get("closed")]
+        maes = [item["mae_pct"] for item in records if item.get("mae_pct") is not None]
+        mfes = [item["mfe_pct"] for item in records if item.get("mfe_pct") is not None]
+        returns = [item["return_pct"] for item in completed if item.get("return_pct") is not None]
+        wins = sum(1 for value in returns if value > 0)
+        count = len(records)
+        return {
+            "count": count,
+            "completed_count": len(completed),
+            "avg_mae_pct": sum(maes) / len(maes) if maes else None,
+            "avg_mfe_pct": sum(mfes) / len(mfes) if mfes else None,
+            "avg_horizon_return_pct": sum(returns) / len(returns) if returns else None,
+            "horizon_win_rate": wins / len(returns) if returns else None,
+            "sufficient_sample": len(completed) >= MIN_SIGNALS_FOR_STATS,
+            "note": (
+                None
+                if len(completed) >= MIN_SIGNALS_FOR_STATS
+                else f"only {len(completed)} completed signals; want at least {MIN_SIGNALS_FOR_STATS}"
+            ),
+        }
+
     def snapshot(self) -> dict[str, Any]:
         completed = [record.to_dict() for record in self._completed]
         active = [record.to_dict() for record in self._active.values()]
         combined = completed + active
-        maes = [x["mae_pct"] for x in combined if x["mae_pct"] is not None]
-        mfes = [x["mfe_pct"] for x in combined if x["mfe_pct"] is not None]
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for item in combined:
+            grouped.setdefault(str(item.get("pattern_type") or "UNKNOWN"), []).append(item)
+        overall = self._stats(combined)
         return {
             "horizon_seconds": self.horizon_seconds,
             "signals": combined,
             "completed_count": len(completed),
             "active_count": len(active),
-            "avg_mae_pct": sum(maes) / len(maes) if maes else None,
-            "avg_mfe_pct": sum(mfes) / len(mfes) if mfes else None,
+            "avg_mae_pct": overall["avg_mae_pct"],
+            "avg_mfe_pct": overall["avg_mfe_pct"],
+            "avg_horizon_return_pct": overall["avg_horizon_return_pct"],
+            "horizon_win_rate": overall["horizon_win_rate"],
+            "sufficient_sample": overall["sufficient_sample"],
+            "note": overall["note"],
+            "by_pattern_type": {
+                pattern_type: self._stats(records)
+                for pattern_type, records in grouped.items()
+            },
         }
