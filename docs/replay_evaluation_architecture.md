@@ -130,7 +130,22 @@ This creates a ground-truth review set without changing the source data.
 
 ### Phase 3: Outcome measurement
 
-For each detector observation or human label, measure forward price behavior from recorded evidence:
+Initial detector-confirmation excursion measurement is now implemented for
+10-second replay evidence. A signal opens only on a transition into
+`BREAKOUT` or `CONTINUATION`. The confirmation bar itself is excluded from
+future excursion measurement because its intrabar high/low occurred before the
+close where confirmation became knowable.
+
+The current evaluator tracks a 15-minute horizon and reports:
+
+- MFE;
+- MAE;
+- horizon return;
+- horizon win rate;
+- breakdown by pattern type;
+- an explicit insufficient-sample note until at least 10 completed signals.
+
+For each detector observation or human label, continue measuring forward price behavior from recorded evidence:
 
 - maximum favorable excursion (MFE)
 - maximum adverse excursion (MAE)
@@ -240,7 +255,14 @@ The returned machine state includes the same underlying information used by the 
 - AE snapshot
 - pattern observations
 - replay timestamp/cursor/progress
-- `replay.data_quality`: L1 evidence tier and partial-context flag, authoritative `stream_ts_ms` clock, signed receive-minus-stream offset count/min/max/median from valid `received_at`, event gaps greater than 60 seconds (count/largest, unknown cause), and aggregator capped/discarded volume totals. Missing or malformed receive timestamps contribute no offset sample. These observations do not shift timestamps, fill bars, or assert an exchange halt or provider outage.
+- `replay.data_quality`: L1 evidence tier and partial-context flag, authoritative `stream_ts_ms` clock, signed receive-minus-stream offset count/min/max/median from valid `received_at`, event gaps greater than 60 seconds (count/largest, unknown cause), and aggregator capped/discarded volume totals. Missing or malformed receive timestamps contribute no offset sample.
+- `replay.evaluation`: confirmed-pattern excursion records plus aggregate MAE/MFE/horizon-return statistics and per-pattern-type breakdowns.
+
+New recordings also request Schwab LEVELONE_EQUITIES security-status and borrow
+fields. `Security Status=Halted` is preserved in the raw evidence/session
+state, and live aggregation does not turn cached last prices into flat bars
+while halted. Pattern detectors independently break continuity across large
+bar gaps, covering both explicit halts and unknown outages.
 
 This is the preferred interface for Codex-driven chart/setup review and later batch simulation. Codex should use the API rather than scraping rendered browser output.
 
