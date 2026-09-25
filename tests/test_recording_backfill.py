@@ -83,7 +83,7 @@ def test_backfill_scans_completed_prior_session_and_keeps_target_day(tmp_path: P
     symbol, start_ms, end_ms, freq = rest.calls[0]
     assert symbol == "GCTK"
     assert freq == "1m"
-    assert datetime.fromtimestamp(start_ms / 1000, ET) == datetime(2026, 9, 23, 0, 0, tzinfo=ET)
+    assert datetime.fromtimestamp(start_ms / 1000, ET) == datetime(2026, 9, 17, 0, 0, tzinfo=ET)
     assert datetime.fromtimestamp(end_ms / 1000, ET).date().isoformat() == "2026-09-24"
 
     history = json.loads((recorder.session_dir / "GCTK_history.json").read_text())
