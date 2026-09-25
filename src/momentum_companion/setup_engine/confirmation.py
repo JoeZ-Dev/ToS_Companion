@@ -48,7 +48,12 @@ def _cadence_seconds(bars: list[NormalizedBar]) -> float:
     ]
     if not diffs:
         return 10.0
-    return max(0.001, float(median(diffs[-20:])))
+    recent = diffs[-20:]
+    floor = min(recent)
+    # A large outage/halt must not inflate the cadence estimate that is then
+    # used to decide whether that same outage counts as a gap.
+    cadence_candidates = [value for value in recent if value <= floor * 2.5]
+    return max(0.001, float(median(cadence_candidates or recent)))
 
 
 def _on_side(bar: NormalizedBar, level: float, direction: str) -> bool:
