@@ -5,6 +5,16 @@ from typing import Dict, Optional
 from momentum_companion.data.contracts import QuoteEvent
 
 
+def _optional_bool(value) -> Optional[bool]:
+    if value is None:
+        return None
+    if value in (1, True, "1", "true", "True"):
+        return True
+    if value in (0, False, "0", "false", "False"):
+        return False
+    return None
+
+
 # bid/ask/last are required for UI + aggregation; volume may be absent after-hours.
 REQUIRED_FIELDS = ("bid", "ask", "last")
 
@@ -37,18 +47,26 @@ class LevelOneCache:
                 continue
 
             sym_cache = self._cache.setdefault(symbol, {})
-            mapping = {
+            numeric_mapping = {
                 "bid": fields.get("1"),
                 "ask": fields.get("2"),
                 "last": fields.get("3"),
                 "bid_size": fields.get("4"),
                 "ask_size": fields.get("5"),
-                "last_size": None,
+                "last_size": fields.get("9"),
                 "volume": fields.get("8"),
+                "hard_to_borrow_quantity": fields.get("46"),
+                "hard_to_borrow_rate": fields.get("47"),
             }
-            for key, val in mapping.items():
+            for key, val in numeric_mapping.items():
                 if val is not None:
                     sym_cache[key] = float(val)
+            if fields.get("32") is not None:
+                sym_cache["security_status"] = str(fields.get("32"))
+            for key, field_id in (("hard_to_borrow", "48"), ("shortable", "49")):
+                parsed = _optional_bool(fields.get(field_id))
+                if parsed is not None:
+                    sym_cache[key] = parsed
 
             if not all(k in sym_cache for k in REQUIRED_FIELDS):
                 continue
@@ -64,6 +82,11 @@ class LevelOneCache:
                     ask_size=sym_cache.get("ask_size"),
                     last_size=sym_cache.get("last_size"),
                     volume=sym_cache.get("volume"),
+                    security_status=sym_cache.get("security_status"),
+                    hard_to_borrow_quantity=sym_cache.get("hard_to_borrow_quantity"),
+                    hard_to_borrow_rate=sym_cache.get("hard_to_borrow_rate"),
+                    hard_to_borrow=sym_cache.get("hard_to_borrow"),
+                    shortable=sym_cache.get("shortable"),
                     source_ts_type="QUOTE_TS",
                     raw_source="SCHWAB_STREAM",
                 )
