@@ -3,13 +3,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
+from momentum_companion.setup_engine.confirmation import (
+    AdaptiveConfirmationPolicy,
+    contiguous_tail,
+    evaluate_adaptive_confirmation,
+)
 from momentum_companion.setup_engine.pattern_contracts import (
     PatternLine,
     PatternObservation,
     PatternPoint,
     PatternState,
 )
-from momentum_companion.setup_engine.structure import cluster_levels, normalize_bars, swing_highs, swing_lows
+from momentum_companion.setup_engine.structure import cluster_levels, score_level, swing_highs, swing_lows
 
 
 PATTERN_NAME = "ASCENDING_TRIANGLE"
@@ -22,6 +27,11 @@ class AscendingTriangleConfig:
     resistance_tolerance_pct: float = 0.006
     min_rising_lows: int = 2
     breakout_buffer_pct: float = 0.0015
+    confirmation_policy: AdaptiveConfirmationPolicy = AdaptiveConfirmationPolicy(
+        min_seconds=10.0,
+        max_seconds=30.0,
+        pattern_fraction=0.05,
+    )
 
 
 @dataclass(frozen=True)
@@ -35,7 +45,7 @@ class AscendingTriangleDetector:
 
 def detect_ascending_triangle(symbol: str, bars, config: AscendingTriangleConfig | None = None) -> PatternObservation | None:
     cfg = config or AscendingTriangleConfig()
-    normalized = normalize_bars(bars)
+    normalized = contiguous_tail(bars)
     if len(normalized) < cfg.min_bars:
         return None
 
@@ -62,8 +72,16 @@ def detect_ascending_triangle(symbol: str, bars, config: AscendingTriangleConfig
 
     last = normalized[-1]
     breakout_level = level.high * (1 + cfg.breakout_buffer_pct)
+    level_evidence = score_level(level, normalized)
+    confirmation = evaluate_adaptive_confirmation(
+        normalized,
+        level=breakout_level,
+        direction="above",
+        pattern_started_at=min(first_touch.time, support_first.time),
+        policy=cfg.confirmation_policy,
+    )
     state = (
-        PatternState.BREAKOUT if last.close >= breakout_level
+        PatternState.BREAKOUT if confirmation.confirmed
         else PatternState.TESTING if last.high >= level.low
         else PatternState.VALID
     )
@@ -96,6 +114,16 @@ def detect_ascending_triangle(symbol: str, bars, config: AscendingTriangleConfig
             "support_slope_per_sec": support_slope,
             "compression_pct": compression_pct,
             "breakout_level": breakout_level,
+            "breakout_confirmation": confirmation.to_dict(),
+            "level_evidence": {
+                "touch_count": level_evidence.touch_count,
+                "total_touch_volume": level_evidence.total_touch_volume,
+                "last_touch_ts": level_evidence.last_touch_ts,
+                "round_number_increment": level_evidence.round_number_increment,
+                "round_number_distance_pct": level_evidence.round_number_distance_pct,
+                "round_number_bonus": level_evidence.round_number_bonus,
+                "strength_score": level_evidence.strength_score,
+            },
         },
         points=points,
         lines=lines,

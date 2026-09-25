@@ -201,3 +201,28 @@ def test_symbol_without_quote_reports_no_data():
 
     freshness = session.snapshot()["symbols"]["AEHL"]["freshness"]
     assert freshness == {"status": "NO_DATA", "age_ms": None}
+
+
+def test_session_exposes_borrow_halt_and_relative_strength_context():
+    session = CompanionSession()
+    payload = quote()
+    payload.update({
+        "security_status": "Halted",
+        "hard_to_borrow": True,
+        "hard_to_borrow_quantity": 1000,
+        "hard_to_borrow_rate": 7.5,
+        "shortable": False,
+    })
+    session.ingest_quote(payload)
+    session.update_relative_strength("AEHL", {
+        "return_5m_pct": 12.5,
+        "rank_5m": 1,
+        "watchlist_size_ranked": 3,
+        "leader_5m": True,
+    })
+
+    state = session.snapshot()["symbols"]["AEHL"]
+    assert state["quote"]["security_status"] == "Halted"
+    assert state["quote"]["hard_to_borrow"] is True
+    assert state["relative_strength"]["rank_5m"] == 1
+    assert state["relative_strength"]["leader_5m"] is True

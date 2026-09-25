@@ -39,3 +39,60 @@ def cluster_levels(
         high=max(p.price for p in clustered),
         points=clustered,
     )
+
+
+
+@dataclass(frozen=True)
+class LevelEvidence:
+    touch_count: int
+    total_touch_volume: float
+    last_touch_ts: int | None
+    round_number_increment: float
+    round_number_distance_pct: float
+    round_number_bonus: float
+    strength_score: float
+
+
+def _round_number_increment(price: float) -> float:
+    if price < 2.0:
+        return 0.10
+    if price < 10.0:
+        return 0.25
+    return 0.50
+
+
+def score_level(cluster: LevelCluster, bars) -> LevelEvidence:
+    """Explain a structural level without changing detector selection.
+
+    This ports the useful evidence components from Momentum Monitor while
+    keeping them explicit: repeated touches, actual volume at those touches,
+    and proximity to a price grid that tends to attract attention. The score
+    is intentionally transparent and is evidence, not a learned probability.
+    """
+
+    materialized = list(bars)
+    total_volume = 0.0
+    for point in cluster.points:
+        if 0 <= point.index < len(materialized):
+            bar = materialized[point.index]
+            total_volume += float(getattr(bar, "volume", 0.0) or 0.0)
+
+    increment = _round_number_increment(cluster.center)
+    nearest = round(cluster.center / increment) * increment
+    distance_pct = (
+        abs(cluster.center - nearest) / cluster.center
+        if cluster.center
+        else 0.0
+    )
+    round_bonus = max(0.0, 1.0 - distance_pct / 0.01)
+    touch_count = len(cluster.points)
+    strength = touch_count * 2.0 + (total_volume / 1_000_000.0) * 0.5 + round_bonus
+    return LevelEvidence(
+        touch_count=touch_count,
+        total_touch_volume=total_volume,
+        last_touch_ts=max((point.time for point in cluster.points), default=None),
+        round_number_increment=increment,
+        round_number_distance_pct=distance_pct,
+        round_number_bonus=round_bonus,
+        strength_score=strength,
+    )

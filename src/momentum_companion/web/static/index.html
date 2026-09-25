@@ -25,6 +25,8 @@
       <div><span>Last</span><strong id="last">--</strong></div>
       <div><span>Volume</span><strong id="volume">--</strong></div>
       <div><span>Data</span><strong id="quote-freshness" class="freshness no-data">NO DATA</strong></div>
+      <div><span>Status</span><strong id="security-status">--</strong></div>
+      <div><span>Borrow</span><strong id="borrow-status">--</strong></div>
     </section>
 
     <section class="workspace">
@@ -190,6 +192,13 @@
               <span>Time <strong id="replay-time">--</strong></span>
               <span>Events <strong id="replay-events">0 / 0</strong></span>
               <span>Progress <strong id="replay-percent">0%</strong></span>
+            </div>
+          </section>
+
+          <section class="analysis-card">
+            <div class="section-title">Replay Evaluation</div>
+            <div id="replay-evaluation" class="metric-grid">
+              <div class="muted-copy">No confirmed pattern excursion yet.</div>
             </div>
           </section>
 

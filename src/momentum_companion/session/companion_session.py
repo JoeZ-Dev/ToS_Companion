@@ -47,6 +47,13 @@ class _SymbolState:
             "volume": None,
             "source_ts_type": None,
             "raw_source": None,
+            "security_status": None,
+            "hard_to_borrow_quantity": None,
+            "hard_to_borrow_rate": None,
+            "hard_to_borrow": None,
+            "shortable": None,
+            "quote_time_ms": None,
+            "trade_time_ms": None,
             "received_at_ms": None,
         }
     )
@@ -57,6 +64,8 @@ class _SymbolState:
     llm_output: dict[str, Any] | None = None
     trade_state: dict[str, Any] | None = None
     pattern_observations: list[dict[str, Any]] = field(default_factory=list)
+    relative_strength: dict[str, Any] = field(default_factory=dict)
+    fundamentals: dict[str, Any] = field(default_factory=dict)
 
 
 class CompanionSession:
@@ -184,6 +193,13 @@ class CompanionSession:
             "volume": quote.get("volume"),
             "source_ts_type": quote.get("source_ts_type"),
             "raw_source": quote.get("raw_source"),
+            "security_status": quote.get("security_status"),
+            "hard_to_borrow_quantity": quote.get("hard_to_borrow_quantity"),
+            "hard_to_borrow_rate": quote.get("hard_to_borrow_rate"),
+            "hard_to_borrow": quote.get("hard_to_borrow"),
+            "shortable": quote.get("shortable"),
+            "quote_time_ms": quote.get("quote_time_ms"),
+            "trade_time_ms": quote.get("trade_time_ms"),
             "received_at_ms": received_at_ms,
         }
         with self._lock:
@@ -262,6 +278,28 @@ class CompanionSession:
             self._symbols[normalized].pattern_observations = value
         self._emit("pattern_update", symbol=normalized, payload={"patterns": value})
 
+    def update_relative_strength(
+        self,
+        symbol: str,
+        strength: Mapping[str, Any],
+    ) -> None:
+        normalized = self.add_symbol(symbol)
+        value = dict(strength)
+        with self._lock:
+            self._symbols[normalized].relative_strength = value
+        self._emit("relative_strength", symbol=normalized, payload=value)
+
+    def update_fundamentals(
+        self,
+        symbol: str,
+        fundamentals: Mapping[str, Any],
+    ) -> None:
+        normalized = self.add_symbol(symbol)
+        value = dict(fundamentals)
+        with self._lock:
+            self._symbols[normalized].fundamentals = value
+        self._emit("fundamentals", symbol=normalized, payload=value)
+
     def update_recorder_state(self, state: Mapping[str, Any]) -> None:
         value = dict(state)
         with self._lock:
@@ -307,6 +345,8 @@ class CompanionSession:
                     "pattern_observations": [
                         dict(observation) for observation in state.pattern_observations
                     ],
+                    "relative_strength": dict(state.relative_strength),
+                    "fundamentals": dict(state.fundamentals),
                 }
                 for symbol, state in self._symbols.items()
             }

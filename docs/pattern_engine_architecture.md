@@ -100,7 +100,17 @@ Extracts deterministic swing highs and swing lows.
 
 `structure/levels.py`
 
-Clusters nearby swing points into horizontal price levels.
+Clusters nearby swing points into horizontal price levels and now exposes
+transparent level evidence:
+
+- touch count;
+- volume at the actual touch bars;
+- last-touch time;
+- distance to the applicable round-number grid;
+- explicit round-number bonus;
+- an explainable, non-learned strength score.
+
+The score is evidence only. It does not itself authorize a trade.
 
 This is useful for resistance/support concepts shared by:
 
@@ -123,6 +133,26 @@ This is useful for:
 - pennants;
 - first pullback setups;
 - future momentum-continuation structures.
+
+### Adaptive confirmation
+
+`confirmation.py`
+
+Measures current acceptance of a trigger in real elapsed time rather than a
+fixed number of bars. Each pattern family owns an explicit policy with:
+
+- minimum confirmation seconds;
+- maximum confirmation seconds;
+- fraction of pattern age/duration used to scale the hold;
+- gap threshold.
+
+The required hold is never shorter than one observed bar cadence. A close back
+through the trigger resets the current run. Large data discontinuities split
+the evidence so a halt/outage cannot satisfy a hold merely because wall-clock
+time passed.
+
+`contiguous_tail()` also prevents named detectors from combining pre-gap
+geometry with post-gap bars.
 
 ### Retracement
 
@@ -599,10 +629,12 @@ Current observational live integration:
 
 Still not integrated:
 
-- replay event decoding into the 10-second bar path;
-- setup candidate generator;
-- browser chart overlays;
-- desktop chart overlays;
-- execution logic.
+- automatic execution from pattern observations;
+- browser chart geometry overlays;
+- desktop chart overlays.
+
+Replay event decoding now feeds the same 10-second completed-bar boundary used
+by live pattern evaluation. Replay also measures post-confirmation MAE/MFE
+without changing detector logic.
 
 The runtime integration is observational only. No pattern can trigger or qualify an order at this stage.

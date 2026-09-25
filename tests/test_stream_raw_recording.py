@@ -39,6 +39,11 @@ def test_multi_symbol_subscription_uses_one_l1_subs_request():
     assert request["service"] == "LEVELONE_EQUITIES"
     assert request["parameters"]["keys"] == "AEHL,TOPS"
     assert "8" in request["parameters"]["fields"]
+    assert "32" in request["parameters"]["fields"]
+    assert "46" in request["parameters"]["fields"]
+    assert "47" in request["parameters"]["fields"]
+    assert "48" in request["parameters"]["fields"]
+    assert "49" in request["parameters"]["fields"]
 
 
 def test_raw_payload_callback_sees_payload_before_mapping():
@@ -90,7 +95,7 @@ def test_level_one_activity_age_tracks_received_l1_payload(monkeypatch):
         "data": [{
             "service": "LEVELONE_EQUITIES",
             "timestamp": 1710000000000,
-            "content": [{"key": "AEHL", "3": 3.15}],
+            "content": [{"key": "AEHL", "1": 3.10, "2": 3.20, "3": 3.15, "8": 10000}],
         }]
     }
     client._on_message(ws, json.dumps(payload))
@@ -202,7 +207,7 @@ def test_level_one_telemetry_tracks_server_lag_interval_and_callback(monkeypatch
         "data": [{
             "service": "LEVELONE_EQUITIES",
             "timestamp": 1710000000000,
-            "content": [{"key": "AEHL", "3": 3.15}],
+            "content": [{"key": "AEHL", "1": 3.10, "2": 3.20, "3": 3.15, "8": 10000}],
         }]
     }
     client._on_message(ws, json.dumps(payload))

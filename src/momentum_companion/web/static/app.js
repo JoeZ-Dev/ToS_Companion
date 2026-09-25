@@ -345,6 +345,13 @@
       host.innerHTML = '<div class="muted-copy">No metrics available.</div>';
       return;
     }
+    const rs = snapshot.relative_strength || {};
+    const fundamentals = snapshot.fundamentals || {};
+    const floatData = fundamentals.float || {};
+    const shortInterestData = fundamentals.short_interest || {};
+    const rankText = Number.isFinite(Number(rs.rank_5m))
+      ? `#${Number(rs.rank_5m)} / ${Number(rs.watchlist_size_ranked || 0)}`
+      : "--";
     const rows = [
       ["Last", fmtMaybePrice(snapshot.last_price)],
       ["VWAP", fmtMaybePrice(snapshot.vwap)],
@@ -352,6 +359,10 @@
       ["Volume Multiple", Number.isFinite(Number(snapshot.volume?.volume_multiple)) ? Number(snapshot.volume.volume_multiple).toFixed(2) + "x" : "--"],
       ["Micro State", snapshot.micro?.micro_state || "--"],
       ["MACD", snapshot.regime?.macd_regime || "--"],
+      ["RS 5m", Number.isFinite(Number(rs.return_5m_pct)) ? Number(rs.return_5m_pct).toFixed(2) + "%" : "--"],
+      ["RS Rank", rankText],
+      ["Float", floatData.status === "OK" ? fmtVolume(floatData.value) : "--"],
+      ["Short Interest", shortInterestData.status === "OK" ? fmtVolume(shortInterestData.value) : "--"],
       ["As of", snapshot.as_of_et ? new Date(snapshot.as_of_et).toLocaleTimeString("en-US", { timeZone: EASTERN_TZ, hour: "numeric", minute: "2-digit", second: "2-digit" }) : "--"],
       ["Data Quality", snapshot.data_quality || "--"],
     ];
@@ -597,6 +608,36 @@
     }
   }
 
+  function renderQuoteContext(symbolState) {
+    const quote = symbolState?.quote || {};
+    const statusHost = byId("security-status");
+    const borrowHost = byId("borrow-status");
+    const securityStatus = String(quote.security_status || "--");
+    statusHost.classList.remove("halted", "normal");
+    if (securityStatus.toLowerCase() === "halted") {
+      statusHost.classList.add("halted");
+      statusHost.textContent = "HALTED";
+    } else if (securityStatus.toLowerCase() === "normal") {
+      statusHost.classList.add("normal");
+      statusHost.textContent = "NORMAL";
+    } else {
+      statusHost.textContent = securityStatus;
+    }
+
+    borrowHost.classList.remove("htb");
+    if (quote.hard_to_borrow === true) {
+      borrowHost.classList.add("htb");
+      const rate = Number(quote.hard_to_borrow_rate);
+      borrowHost.textContent = Number.isFinite(rate) ? `HTB ${rate.toFixed(2)}` : "HTB";
+    } else if (quote.shortable === false) {
+      borrowHost.textContent = "NOT SHORTABLE";
+    } else if (quote.shortable === true) {
+      borrowHost.textContent = "SHORTABLE";
+    } else {
+      borrowHost.textContent = "--";
+    }
+  }
+
   function renderAnalysisView(symbolState) {
     const snapshot = symbolState?.ae_snapshot || null;
     const output = symbolState?.llm_output || null;
@@ -627,6 +668,7 @@
     byId("last").textContent = fmtPrice(quote.last);
     byId("volume").textContent = fmtVolume(quote.volume);
     renderFreshness(symbolState);
+    renderQuoteContext(symbolState);
     renderAnalysisView(symbolState);
     if (!symbolState) {
       candleSeries.setData([]);
@@ -708,6 +750,8 @@
         bars_10s: [],
         ae_snapshot: null,
         pattern_observations: [],
+        relative_strength: {},
+        fundamentals: {},
       };
     }
 
@@ -740,6 +784,16 @@
         state.symbols[symbol].vwap_points = event.payload?.points || [];
       }
       chartChanged = true;
+    } else if (event.type === "relative_strength" && symbol) {
+      state.symbols[symbol].relative_strength = event.payload || {};
+      if (state.symbols[symbol].ae_snapshot) {
+        state.symbols[symbol].ae_snapshot.relative_strength = event.payload || {};
+      }
+    } else if (event.type === "fundamentals" && symbol) {
+      state.symbols[symbol].fundamentals = event.payload || {};
+      if (state.symbols[symbol].ae_snapshot) {
+        state.symbols[symbol].ae_snapshot.fundamentals = event.payload || {};
+      }
     } else if (event.type === "analysis_snapshot" && symbol) {
       state.symbols[symbol].ae_snapshot = event.payload?.snapshot || null;
       if (symbol === state.activeSymbol) {
@@ -782,6 +836,7 @@
     byId("ask").textContent = fmtPrice(quote.ask);
     byId("last").textContent = fmtPrice(quote.last);
     byId("volume").textContent = fmtVolume(quote.volume);
+    renderQuoteContext(symbolState);
 
     const freshness = byId("quote-freshness");
     freshness.classList.remove("live", "delayed", "stale", "no-data");
@@ -841,6 +896,17 @@
     byId("replay-time").textContent = replay.current_ts_ms
       ? formatEasternTime(Number(replay.current_ts_ms) / 1000)
       : "--";
+
+    const evaluation = replay.evaluation || {};
+    const evalRows = [
+      ["Signals", String((evaluation.signals || []).length)],
+      ["Completed", String(evaluation.completed_count || 0)],
+      ["Avg MAE", Number.isFinite(Number(evaluation.avg_mae_pct)) ? Number(evaluation.avg_mae_pct).toFixed(2) + "%" : "--"],
+      ["Avg MFE", Number.isFinite(Number(evaluation.avg_mfe_pct)) ? Number(evaluation.avg_mfe_pct).toFixed(2) + "%" : "--"],
+    ];
+    byId("replay-evaluation").innerHTML = evalRows.map(([label, value]) =>
+      `<div class="metric"><span class="metric-label">${escapeHtml(label)}</span><span class="metric-value">${escapeHtml(value)}</span></div>`
+    ).join("");
 
     const slider = byId("replay-progress");
     slider.max = String(total);

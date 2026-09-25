@@ -11,7 +11,9 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from momentum_companion.analysis.ae import AEEngine
+from momentum_companion.analysis.relative_strength import RelativeStrengthTracker
 from momentum_companion.bootstrap import bootstrap
+from momentum_companion.clients.massive_fundamentals_client import MassiveFundamentalsClient
 from momentum_companion.clients.schwab_rest import SchwabRestClient
 from momentum_companion.clients.schwab_stream import SchwabStreamClient
 from momentum_companion.clients.token_provider import TokenProvider
@@ -56,6 +58,7 @@ class CompanionRuntime:
         self.journal = journal
         self.session = session or CompanionSession()
         self.pattern_service = PatternEvaluationService()
+        self.relative_strength = RelativeStrengthTracker()
 
         self.token_provider = token_provider or TokenProvider(
             state_callback=self._on_auth_state
@@ -76,6 +79,17 @@ class CompanionRuntime:
         self._ae_engines: dict[str, AEEngine] = {}
         self._aggregators: dict[str, BarAggregator10s] = {}
         self._analysis_symbols: set[str] = set()
+        massive_api_key = os.getenv("MASSIVE_API_KEY", "").strip()
+        self.fundamentals_client = (
+            MassiveFundamentalsClient(
+                massive_api_key,
+                Path.home() / ".tos_companion" / "cache",
+                logger,
+            )
+            if massive_api_key
+            else None
+        )
+        self._fundamentals_inflight: set[str] = set()
         setattr(self.token_provider, "rest_client", self.rest)
 
         self.llm_coach = LLMCoach()
@@ -286,6 +300,7 @@ class CompanionRuntime:
 
         if is_new_analysis_symbol:
             self.pattern_service.reset(normalized)
+            self._refresh_fundamentals_async(normalized)
             bars, end_ms = self._load_history(normalized)
             try:
                 engine.compute_profile(normalized)
@@ -312,7 +327,13 @@ class CompanionRuntime:
             engine = self._ae_engines.get(symbol)
             if engine is None:
                 if not self._ae_engines:
-                    engine = self.ae_engine
+                    engine = getattr(self, "ae_engine", None)
+                    if engine is None:
+                        engine = AEEngine(
+                            self.rest,
+                            getattr(self, "db_path", None),
+                            market_state_provider=self._get_shared_market_state,
+                        )
                 else:
                     engine = AEEngine(
                         self.rest,
@@ -467,10 +488,18 @@ class CompanionRuntime:
         if not symbol:
             return
         self.session.ingest_quote(event)
+        security_status = str(event.get("security_status") or "").strip().lower()
+        halted = security_status == "halted"
+        self._update_relative_strength(event, halted=halted)
 
         ts_ms = event.get("ts_ms")
         last = event.get("last")
         if ts_ms is None or last is None:
+            return
+        if halted:
+            # Keep the explicit HALTED quote/status in session + recordings,
+            # but never fabricate a flat price bar from cached L1 last prices
+            # while trading is suspended.
             return
 
         source_ts_type = event.get("source_ts_type") or "QUOTE_TS"
@@ -499,6 +528,59 @@ class CompanionRuntime:
         if completed is not None:
             self._handle_completed_bar(symbol, completed)
 
+    def _refresh_fundamentals_async(self, symbol: str) -> None:
+        client = getattr(self, "fundamentals_client", None)
+        if client is None:
+            return
+        normalized = self.session.normalize_symbol(symbol)
+        if not normalized:
+            return
+        with self._lock:
+            inflight = getattr(self, "_fundamentals_inflight", set())
+            if normalized in inflight:
+                return
+            inflight.add(normalized)
+            self._fundamentals_inflight = inflight
+
+        def worker() -> None:
+            try:
+                today = datetime.now(self._et_tz).date().isoformat()
+                payload = {
+                    "source": "MASSIVE_OPTIONAL",
+                    "float": client.fetch_float(normalized),
+                    "short_interest": client.fetch_short_interest(normalized),
+                    "short_volume_pct": client.fetch_short_volume_pct(normalized, today),
+                }
+                self.session.update_fundamentals(normalized, payload)
+            except Exception:
+                logger.warning("Optional fundamentals refresh failed for %s", normalized, exc_info=True)
+            finally:
+                with self._lock:
+                    self._fundamentals_inflight.discard(normalized)
+
+        threading.Thread(
+            target=worker,
+            daemon=True,
+            name=f"tos-fundamentals-{normalized}",
+        ).start()
+
+    def _update_relative_strength(self, event: QuoteEvent, *, halted: bool = False) -> None:
+        symbol = self.session.normalize_symbol(str(event.get("symbol") or ""))
+        ts_ms = event.get("ts_ms")
+        last = event.get("last")
+        if not symbol or ts_ms is None or not isinstance(last, (int, float)) or last <= 0:
+            return
+        tracker = getattr(self, "relative_strength", None)
+        if tracker is None:
+            tracker = RelativeStrengthTracker()
+            self.relative_strength = tracker
+        tracker.set_halted(symbol, halted)
+        if not halted:
+            tracker.ingest(symbol, int(ts_ms), float(last))
+        watched = self.session.watched_symbols()
+        for watched_symbol, strength in tracker.snapshot(watched).items():
+            self.session.update_relative_strength(watched_symbol, strength)
+
     def _handle_completed_bar(self, symbol: str, bar: TenSecondBar) -> None:
         self.session.ingest_bar(symbol, bar)
 
@@ -518,6 +600,19 @@ class CompanionRuntime:
             if points is not None:
                 self.session.set_vwap_points(symbol, points)
             if snapshot:
+                snapshot = dict(snapshot)
+                symbol_state = self.session.snapshot().get("symbols", {}).get(symbol, {})
+                snapshot["relative_strength"] = dict(symbol_state.get("relative_strength") or {})
+                snapshot["fundamentals"] = dict(symbol_state.get("fundamentals") or {})
+                quote_context = symbol_state.get("quote") or {}
+                snapshot["market_microstructure"] = {
+                    "security_status": quote_context.get("security_status"),
+                    "halted": str(quote_context.get("security_status") or "").lower() == "halted",
+                    "hard_to_borrow": quote_context.get("hard_to_borrow"),
+                    "hard_to_borrow_quantity": quote_context.get("hard_to_borrow_quantity"),
+                    "hard_to_borrow_rate": quote_context.get("hard_to_borrow_rate"),
+                    "shortable": quote_context.get("shortable"),
+                }
                 self.session.update_ae_snapshot(symbol, snapshot)
         except Exception:
             logger.warning("AE live ingest failed for %s", symbol, exc_info=True)
@@ -599,6 +694,7 @@ class CompanionRuntime:
                 raise RuntimeError("no recording session is active")
             recorder.add_symbol(normalized)
             self._recording_symbols = set(recorder.active_symbols())
+        self._refresh_fundamentals_async(normalized)
         self._ensure_stream()
         self._refresh_stream_subscription()
         if pre7_vwap is not None or pre7_volume is not None:

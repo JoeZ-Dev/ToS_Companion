@@ -3,6 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
+from momentum_companion.setup_engine.confirmation import (
+    AdaptiveConfirmationPolicy,
+    contiguous_tail,
+    evaluate_adaptive_confirmation,
+)
 from momentum_companion.setup_engine.pattern_contracts import (
     PatternLine,
     PatternObservation,
@@ -11,7 +16,6 @@ from momentum_companion.setup_engine.pattern_contracts import (
 )
 from momentum_companion.setup_engine.structure import (
     measure_retracement,
-    normalize_bars,
     strongest_bullish_impulse,
 )
 
@@ -27,6 +31,11 @@ class MicroPullbackConfig:
     min_retracement_pct: float = 0.08
     max_retracement_pct: float = 0.50
     continuation_buffer_pct: float = 0.001
+    confirmation_policy: AdaptiveConfirmationPolicy = AdaptiveConfirmationPolicy(
+        min_seconds=5.0,
+        max_seconds=15.0,
+        pattern_fraction=0.10,
+    )
 
 
 @dataclass(frozen=True)
@@ -40,7 +49,7 @@ class MicroPullbackDetector:
 
 def detect_micro_pullback(symbol: str, bars, config: MicroPullbackConfig | None = None) -> PatternObservation | None:
     cfg = config or MicroPullbackConfig()
-    normalized = normalize_bars(bars)
+    normalized = contiguous_tail(bars)
     if len(normalized) < cfg.min_bars:
         return None
 
@@ -64,8 +73,15 @@ def detect_micro_pullback(symbol: str, bars, config: MicroPullbackConfig | None 
     last = pullback_bars[-1]
     prior = pullback_bars[-2] if len(pullback_bars) > 1 else window[impulse.end_index]
     continuation_level = impulse.end_price * (1 + cfg.continuation_buffer_pct)
+    confirmation = evaluate_adaptive_confirmation(
+        normalized,
+        level=continuation_level,
+        direction="above",
+        pattern_started_at=impulse.end_time,
+        policy=cfg.confirmation_policy,
+    )
     state = (
-        PatternState.CONTINUATION if last.close >= continuation_level
+        PatternState.CONTINUATION if confirmation.confirmed
         else PatternState.TURNING if last.close > prior.close and last.close > retracement.low_price
         else PatternState.PULLBACK
     )
@@ -94,6 +110,7 @@ def detect_micro_pullback(symbol: str, bars, config: MicroPullbackConfig | None 
             "duration_sec": retracement.duration_sec,
             "retracement_pct": retracement.depth_pct,
             "continuation_level": continuation_level,
+            "continuation_confirmation": confirmation.to_dict(),
         },
         points=points,
         lines=lines,

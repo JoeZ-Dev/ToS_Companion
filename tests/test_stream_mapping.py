@@ -42,3 +42,58 @@ def test_stream_mapping_raises_on_wrong_service():
         assert False, "Expected ValueError"
     except ValueError:
         pass
+
+
+def test_stream_mapping_preserves_halt_and_borrow_context():
+    cache = LevelOneCache()
+    message = {
+        "service": "LEVELONE_EQUITIES",
+        "timestamp": 1710000000000,
+        "content": [{
+            "key": "HALT",
+            "1": 4.10,
+            "2": 4.20,
+            "3": 4.15,
+            "8": 500000,
+            "9": 250,
+            "32": "Halted",
+            "34": 1710000000000,
+            "35": 1709999999000,
+            "46": 12000,
+            "47": 8.75,
+            "48": 1,
+            "49": 0,
+        }],
+    }
+
+    event = cache.process_message(message)
+
+    assert event is not None
+    assert event["security_status"] == "Halted"
+    assert event["hard_to_borrow"] is True
+    assert event["hard_to_borrow_quantity"] == 12000
+    assert event["hard_to_borrow_rate"] == 8.75
+    assert event["shortable"] is False
+    assert event["last_size"] == 250
+    assert event["quote_time_ms"] == 1710000000000
+    assert event["trade_time_ms"] == 1709999999000
+
+
+def test_stream_mapping_treats_negative_borrow_flags_as_unknown():
+    cache = LevelOneCache()
+    event = cache.process_message({
+        "service": "LEVELONE_EQUITIES",
+        "timestamp": 1710000000000,
+        "content": [{
+            "key": "UNK",
+            "1": 1.0,
+            "2": 1.1,
+            "3": 1.05,
+            "48": -1,
+            "49": -1,
+        }],
+    })
+
+    assert event is not None
+    assert event["hard_to_borrow"] is None
+    assert event["shortable"] is None
