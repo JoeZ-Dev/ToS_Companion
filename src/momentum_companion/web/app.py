@@ -21,6 +21,13 @@ class RecordingRequest(BaseModel):
 
 class RecordingSymbolRequest(BaseModel):
     symbol: str
+    pre7_vwap: float | None = None
+    pre7_volume: float | None = None
+
+
+class Pre7SeedRequest(BaseModel):
+    pre7_vwap: float
+    pre7_volume: float
 
 
 class ReplayLoadRequest(BaseModel):
@@ -169,7 +176,25 @@ def create_app(
     @app.post("/api/recording/symbol")
     def add_recording_symbol(request: RecordingSymbolRequest) -> dict[str, Any]:
         try:
-            return companion.add_recording_symbol(request.symbol)
+            return companion.add_recording_symbol(
+                request.symbol,
+                pre7_vwap=request.pre7_vwap,
+                pre7_volume=request.pre7_volume,
+            )
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/recording/symbol/{symbol}/pre7")
+    def apply_recording_pre7_seed(
+        symbol: str,
+        request: Pre7SeedRequest,
+    ) -> dict[str, Any]:
+        try:
+            return companion.apply_recording_pre7_seed(
+                symbol,
+                pre7_vwap=request.pre7_vwap,
+                pre7_volume=request.pre7_volume,
+            )
         except (ValueError, RuntimeError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
