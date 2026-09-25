@@ -133,7 +133,7 @@ class SchwabStreamClient:
             "SchwabClientCorrelId": self._streamer_info["schwabClientCorrelId"],
             "parameters": {
                 "keys": ",".join(sorted(normalized)),
-                "fields": "0,1,2,3,4,5,8,9,10,11,12,13,14,15",
+                "fields": "0,1,2,3,4,5,8,9,10,11,12,13,14,15,32,34,35,46,47,48,49",
             },
         }
         self._ws.send(json.dumps(sub_msg))
