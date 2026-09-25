@@ -10,6 +10,7 @@ cd "$ROOT_DIR"
 
 echo "Running maintained core test set..."
 pytest -q \
+  tests/test_adaptive_confirmation.py \
   tests/test_ae.py \
   tests/test_app_state.py \
   tests/test_bar_aggregator.py \
@@ -36,6 +37,8 @@ pytest -q \
   tests/test_pattern_engine.py \
   tests/test_pattern_replay.py \
   tests/test_pattern_service.py \
+  tests/test_relative_strength.py \
+  tests/test_replay_evaluation.py \
   tests/test_snapshot_status_summary.py \
   tests/test_stream_freshness.py \
   tests/test_stream_mapping.py \
