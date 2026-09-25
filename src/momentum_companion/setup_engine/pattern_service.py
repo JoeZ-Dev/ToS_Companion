@@ -29,6 +29,7 @@ class PatternEvaluationService:
         self.max_bars_per_symbol = max_bars_per_symbol
         self._bars: dict[str, deque[dict[str, Any]]] = {}
         self._observations: dict[str, list[dict[str, Any]]] = {}
+        self._status: dict[str, dict[str, Any]] = {}
         self._lock = RLock()
 
     @staticmethod
@@ -43,6 +44,31 @@ class PatternEvaluationService:
             return dict(bar)
         raise TypeError("bar must be a dataclass or mapping")
 
+    def update_security_status(self, symbol: str, status: str | None, ts_ms: int | None) -> dict[str, Any]:
+        normalized = self._normalize_symbol(symbol)
+        if not normalized:
+            raise ValueError("symbol is required")
+        normalized_status = str(status or "UNKNOWN").upper()
+        ts_value = int(ts_ms) if ts_ms is not None else None
+        with self._lock:
+            current = dict(self._status.get(normalized) or {})
+            previous = current.get("status")
+            if normalized_status == "HALTED" and previous != "HALTED":
+                current["halted_since_ms"] = ts_value
+                current["last_halt_start_ms"] = ts_value
+            elif previous == "HALTED" and normalized_status != "HALTED":
+                current["last_resume_ms"] = ts_value
+                current["halted_since_ms"] = None
+            current["status"] = normalized_status
+            current["updated_at_ms"] = ts_value
+            self._status[normalized] = current
+            return dict(current)
+
+    def status_context(self, symbol: str) -> dict[str, Any]:
+        normalized = self._normalize_symbol(symbol)
+        with self._lock:
+            return dict(self._status.get(normalized) or {"status": "UNKNOWN"})
+
     def ingest_completed_bar(self, symbol: str, bar: Any) -> list[dict[str, Any]]:
         normalized = self._normalize_symbol(symbol)
         if not normalized:
@@ -55,6 +81,16 @@ class PatternEvaluationService:
             )
             bars.append(value)
             observations = self.engine.detect_dicts(normalized, list(bars))
+            status = dict(self._status.get(normalized) or {"status": "UNKNOWN"})
+            for observation in observations:
+                evidence = dict(observation.get("evidence") or {})
+                evidence["trading_status"] = status.get("status", "UNKNOWN")
+                evidence["halt_context"] = {
+                    "halted_since_ms": status.get("halted_since_ms"),
+                    "last_halt_start_ms": status.get("last_halt_start_ms"),
+                    "last_resume_ms": status.get("last_resume_ms"),
+                }
+                observation["evidence"] = evidence
             self._observations[normalized] = observations
             return [dict(item) for item in observations]
 
@@ -86,7 +122,9 @@ class PatternEvaluationService:
             if symbol is None:
                 self._bars.clear()
                 self._observations.clear()
+                self._status.clear()
                 return
             normalized = self._normalize_symbol(symbol)
             self._bars.pop(normalized, None)
             self._observations.pop(normalized, None)
+            self._status.pop(normalized, None)
