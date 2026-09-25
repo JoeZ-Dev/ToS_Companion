@@ -342,6 +342,25 @@ class AEEngine:
         htf_high = float(bars["high"].max())
         session_open_rth = self._fetch_rth_open(symbol)
         now_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        shares_outstanding = None
+        market_cap_float = None
+        short_interest_to_float = None
+        try:
+            fundamental_payload = self._rest.fetch_quote_fundamental(symbol)
+            symbol_payload = fundamental_payload.get(symbol) if isinstance(fundamental_payload, dict) else None
+            if not isinstance(symbol_payload, dict) and isinstance(fundamental_payload, dict):
+                symbol_payload = next(
+                    (value for value in fundamental_payload.values() if isinstance(value, dict)),
+                    None,
+                )
+            fundamental = symbol_payload.get("fundamental") if isinstance(symbol_payload, dict) else None
+            if isinstance(fundamental, dict):
+                shares_outstanding = fundamental.get("sharesOutstanding")
+                market_cap_float = fundamental.get("marketCapFloat")
+                short_interest_to_float = fundamental.get("shortIntToFloat")
+        except Exception:
+            logger.debug("Fundamental context unavailable for %s", symbol, exc_info=True)
+
         profile = {
             "symbol": symbol,
             "created_at_utc": now_utc,
@@ -349,6 +368,9 @@ class AEEngine:
             "prior_close": prior_close,
             "htf_high": htf_high,
             "session_open_rth": session_open_rth,
+            "shares_outstanding": shares_outstanding,
+            "market_cap_float": market_cap_float,
+            "short_interest_to_float": short_interest_to_float,
             "resistance_clusters": [{"timeframe_source": source_tf, **z} for z in res_clusters],
             "support_clusters": [{"timeframe_source": source_tf, **z} for z in sup_clusters],
         }
@@ -669,6 +691,11 @@ class AEEngine:
                 "is_volatile_enough": is_volatile,
             },
             "volume": {"volume_multiple": vol_mult},
+            "fundamentals": {
+                "shares_outstanding": profile.get("shares_outstanding") if profile else None,
+                "market_cap_float": profile.get("market_cap_float") if profile else None,
+                "short_interest_to_float": profile.get("short_interest_to_float") if profile else None,
+            },
             "levels": {
                 "resistance_clusters": res_clusters_rel,
                 "support_clusters": sup_clusters_rel,

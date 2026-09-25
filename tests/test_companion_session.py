@@ -201,3 +201,38 @@ def test_symbol_without_quote_reports_no_data():
 
     freshness = session.snapshot()["symbols"]["AEHL"]["freshness"]
     assert freshness == {"status": "NO_DATA", "age_ms": None}
+
+
+def test_market_context_exposes_halt_htb_and_watchlist_relative_strength():
+    session = CompanionSession()
+    first = quote("AIFF", 4.10)
+    first.update({
+        "security_status": "Halted",
+        "hard_to_borrow": True,
+        "hard_to_borrow_rate": 42.5,
+        "hard_to_borrow_quantity": 2500,
+        "shortable": True,
+        "net_percentage_change": 85.0,
+        "regular_market_percentage_change": 12.0,
+    })
+    second = quote("KITT", 1.20)
+    second.update({
+        "security_status": "Normal",
+        "hard_to_borrow": False,
+        "shortable": True,
+        "net_percentage_change": 40.0,
+        "regular_market_percentage_change": 5.0,
+    })
+    session.ingest_quote(first)
+    session.ingest_quote(second)
+
+    snap = session.snapshot()
+    aiff = snap["symbols"]["AIFF"]["market_context"]
+    kitt = snap["symbols"]["KITT"]["market_context"]
+
+    assert aiff["halted"] is True
+    assert aiff["hard_to_borrow"] is True
+    assert aiff["hard_to_borrow_rate"] == 42.5
+    assert aiff["relative_strength_rank"] == 1
+    assert kitt["relative_strength_rank"] == 2
+    assert aiff["relative_strength_universe_size"] == 2

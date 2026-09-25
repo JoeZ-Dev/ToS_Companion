@@ -312,11 +312,11 @@ class CompanionRuntime:
             engine = self._ae_engines.get(symbol)
             if engine is None:
                 if not self._ae_engines:
-                    engine = self.ae_engine
-                else:
+                    engine = getattr(self, "ae_engine", None)
+                if engine is None:
                     engine = AEEngine(
-                        self.rest,
-                        self.db_path,
+                        getattr(self, "rest", None),
+                        getattr(self, "db_path", None),
                         market_state_provider=self._get_shared_market_state,
                     )
                 self._ae_engines[symbol] = engine
@@ -467,6 +467,12 @@ class CompanionRuntime:
         if not symbol:
             return
         self.session.ingest_quote(event)
+
+        # A Schwab security-status halt is not the same thing as a quiet market.
+        # Keep the quote/context visible, but do not turn halted snapshots into
+        # synthetic price/bar evidence for indicators or pattern detection.
+        if str(event.get("security_status") or "").strip().lower() == "halted":
+            return
 
         ts_ms = event.get("ts_ms")
         last = event.get("last")
