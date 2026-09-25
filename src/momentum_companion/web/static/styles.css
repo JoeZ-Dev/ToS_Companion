@@ -56,7 +56,7 @@ button {
 }
 
 button:disabled {
-  cursor: wait;
+  cursor: not-allowed;
   opacity: .55;
 }
 
@@ -68,7 +68,7 @@ button:disabled {
 
 .quote-strip {
   display: grid;
-  grid-template-columns: repeat(6, minmax(100px, 1fr));
+  grid-template-columns: repeat(8, minmax(90px, 1fr));
   gap: 1px;
   background: #20252c;
   border-bottom: 1px solid #20252c;
@@ -838,4 +838,24 @@ select {
   .replay-picker {
     grid-template-columns: 1fr;
   }
+}
+
+
+#security-status,
+#borrow-status {
+  font-size: 12px;
+}
+
+#security-status.halted {
+  color: #ff6b6b;
+  font-weight: 900;
+}
+
+#security-status.normal {
+  color: #76d59b;
+}
+
+#borrow-status.htb {
+  color: #dfbf69;
+  font-weight: 800;
 }
