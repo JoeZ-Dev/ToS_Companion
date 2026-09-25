@@ -45,6 +45,12 @@ class _SymbolState:
             "ask_size": None,
             "last_size": None,
             "volume": None,
+            "previous_close": None,
+            "security_status": None,
+            "htb_quantity": None,
+            "htb_rate": None,
+            "hard_to_borrow": None,
+            "shortable": None,
             "source_ts_type": None,
             "raw_source": None,
             "received_at_ms": None,
@@ -57,6 +63,7 @@ class _SymbolState:
     llm_output: dict[str, Any] | None = None
     trade_state: dict[str, Any] | None = None
     pattern_observations: list[dict[str, Any]] = field(default_factory=list)
+    relative_strength: dict[str, Any] | None = None
 
 
 class CompanionSession:
@@ -182,6 +189,12 @@ class CompanionSession:
             "ask_size": quote.get("ask_size"),
             "last_size": quote.get("last_size"),
             "volume": quote.get("volume"),
+            "previous_close": quote.get("previous_close"),
+            "security_status": quote.get("security_status"),
+            "htb_quantity": quote.get("htb_quantity"),
+            "htb_rate": quote.get("htb_rate"),
+            "hard_to_borrow": quote.get("hard_to_borrow"),
+            "shortable": quote.get("shortable"),
             "source_ts_type": quote.get("source_ts_type"),
             "raw_source": quote.get("raw_source"),
             "received_at_ms": received_at_ms,
@@ -189,7 +202,10 @@ class CompanionSession:
         with self._lock:
             self._symbols[symbol].quote.update(update)
             payload = dict(self._symbols[symbol].quote)
+            relative_updates = self._recompute_relative_strength_locked()
         self._emit("quote", symbol=symbol, payload=payload)
+        for rs_symbol, rs_payload in relative_updates.items():
+            self._emit("relative_strength", symbol=rs_symbol, payload=rs_payload)
 
     def set_history(self, symbol: str, bars: list[Mapping[str, Any]]) -> None:
         normalized = self.add_symbol(symbol)
@@ -307,6 +323,11 @@ class CompanionSession:
                     "pattern_observations": [
                         dict(observation) for observation in state.pattern_observations
                     ],
+                    "relative_strength": (
+                        dict(state.relative_strength)
+                        if state.relative_strength is not None
+                        else None
+                    ),
                 }
                 for symbol, state in self._symbols.items()
             }
@@ -318,6 +339,41 @@ class CompanionSession:
                 "symbols": symbols,
                 "sequence": self._sequence,
             }
+
+    def _recompute_relative_strength_locked(self) -> dict[str, dict[str, Any]]:
+        """Rank watched symbols by session change versus previous close."""
+        changes: list[tuple[str, float]] = []
+        for symbol, state in self._symbols.items():
+            last = state.quote.get("last")
+            previous_close = state.quote.get("previous_close")
+            try:
+                last_value = float(last)
+                previous_close_value = float(previous_close)
+            except (TypeError, ValueError):
+                continue
+            if previous_close_value <= 0:
+                continue
+            change_pct = (last_value - previous_close_value) / previous_close_value * 100.0
+            changes.append((symbol, change_pct))
+
+        ranked = sorted(changes, key=lambda item: item[1], reverse=True)
+        leader_symbol = ranked[0][0] if ranked else None
+        leader_change = ranked[0][1] if ranked else None
+        updates: dict[str, dict[str, Any]] = {}
+        for rank, (symbol, change_pct) in enumerate(ranked, start=1):
+            value = {
+                "change_pct": change_pct,
+                "rank": rank,
+                "total_ranked": len(ranked),
+                "leader_symbol": leader_symbol,
+                "leader_change_pct": leader_change,
+                "delta_to_leader_pct": (
+                    None if leader_change is None else change_pct - leader_change
+                ),
+            }
+            self._symbols[symbol].relative_strength = value
+            updates[symbol] = dict(value)
+        return updates
 
     def _emit(
         self,
