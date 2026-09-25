@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from momentum_companion.data.contracts import QuoteEvent
 
@@ -13,7 +13,7 @@ class LevelOneCache:
     """Maintains last-known fields and emits canonical quote events per Appendix D."""
 
     def __init__(self) -> None:
-        self._cache: Dict[str, Dict[str, float]] = {}
+        self._cache: Dict[str, Dict[str, Any]] = {}
 
     def process_messages(self, message: dict) -> list[QuoteEvent]:
         """Map every symbol delta in one LEVELONE_EQUITIES message."""
@@ -61,7 +61,11 @@ class LevelOneCache:
                 if val is None:
                     continue
                 if key in numeric_fields:
-                    sym_cache[key] = float(val)
+                    parsed_numeric = float(val)
+                    if key == "htb_quantity" and parsed_numeric < 0:
+                        sym_cache.pop(key, None)
+                    else:
+                        sym_cache[key] = parsed_numeric
                 elif key in boolean_fields:
                     if isinstance(val, bool):
                         sym_cache[key] = val
@@ -70,7 +74,9 @@ class LevelOneCache:
                             parsed = int(val)
                         except (TypeError, ValueError):
                             continue
-                        if parsed >= 0:
+                        if parsed < 0:
+                            sym_cache.pop(key, None)
+                        else:
                             sym_cache[key] = bool(parsed)
                 else:
                     sym_cache[key] = str(val)
