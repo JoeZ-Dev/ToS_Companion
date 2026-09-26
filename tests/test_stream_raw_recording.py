@@ -194,9 +194,18 @@ def test_level_one_telemetry_tracks_server_lag_interval_and_callback(monkeypatch
     monotonic_values = iter([100.0, 106.0])
     perf_values = iter([200.0, 200.002, 206.0, 206.003])
     wall_values = iter([1710000001000, 1710000007000])
+    last_wall_ms = [1710000007000]
+
+    def fake_wall_time():
+        try:
+            last_wall_ms[0] = next(wall_values)
+        except StopIteration:
+            pass
+        return last_wall_ms[0] / 1000.0
+
     monkeypatch.setattr("momentum_companion.clients.schwab_stream.time.monotonic", lambda: next(monotonic_values))
     monkeypatch.setattr("momentum_companion.clients.schwab_stream.time.perf_counter", lambda: next(perf_values))
-    monkeypatch.setattr("momentum_companion.clients.schwab_stream.time.time", lambda: next(wall_values) / 1000.0)
+    monkeypatch.setattr("momentum_companion.clients.schwab_stream.time.time", fake_wall_time)
     client._telemetry_window_started = 100.0
     caplog.set_level("INFO")
 
