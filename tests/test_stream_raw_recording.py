@@ -189,7 +189,9 @@ def test_level_one_telemetry_tracks_server_lag_interval_and_callback(monkeypatch
     client._ws = ws
     client._connected = True
 
-    monotonic_values = iter([100.0, 100.0, 106.0])
+    # Client construction happens before the clock monkeypatch. Each of the two
+    # L1 messages consumes exactly one monotonic timestamp here.
+    monotonic_values = iter([100.0, 106.0])
     perf_values = iter([200.0, 200.002, 206.0, 206.003])
     wall_values = iter([1710000001000, 1710000007000])
     monkeypatch.setattr("momentum_companion.clients.schwab_stream.time.monotonic", lambda: next(monotonic_values))
