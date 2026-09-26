@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
+from momentum_companion.setup_engine.confirmation import (
+    AdaptiveConfirmationPolicy,
+    measure_confirmation,
+)
 from momentum_companion.setup_engine.pattern_contracts import (
     PatternLine,
     PatternObservation,
@@ -27,6 +31,11 @@ class MicroPullbackConfig:
     min_retracement_pct: float = 0.08
     max_retracement_pct: float = 0.50
     continuation_buffer_pct: float = 0.001
+    confirmation_policy: AdaptiveConfirmationPolicy = AdaptiveConfirmationPolicy(
+        min_seconds=5.0,
+        max_seconds=20.0,
+        formation_fraction=0.10,
+    )
 
 
 @dataclass(frozen=True)
@@ -64,6 +73,12 @@ def detect_micro_pullback(symbol: str, bars, config: MicroPullbackConfig | None 
     last = pullback_bars[-1]
     prior = pullback_bars[-2] if len(pullback_bars) > 1 else window[impulse.end_index]
     continuation_level = impulse.end_price * (1 + cfg.continuation_buffer_pct)
+    confirmation = measure_confirmation(
+        normalized,
+        qualifies=lambda bar: bar.close >= continuation_level,
+        formation_started_at=impulse.start_time,
+        policy=cfg.confirmation_policy,
+    )
     state = (
         PatternState.CONTINUATION if last.close >= continuation_level
         else PatternState.TURNING if last.close > prior.close and last.close > retracement.low_price
@@ -94,6 +109,7 @@ def detect_micro_pullback(symbol: str, bars, config: MicroPullbackConfig | None 
             "duration_sec": retracement.duration_sec,
             "retracement_pct": retracement.depth_pct,
             "continuation_level": continuation_level,
+            "continuation_confirmation": confirmation.to_dict(),
         },
         points=points,
         lines=lines,

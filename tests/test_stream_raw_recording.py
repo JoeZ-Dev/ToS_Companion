@@ -90,7 +90,7 @@ def test_level_one_activity_age_tracks_received_l1_payload(monkeypatch):
         "data": [{
             "service": "LEVELONE_EQUITIES",
             "timestamp": 1710000000000,
-            "content": [{"key": "AEHL", "3": 3.15}],
+            "content": [{"key": "AEHL", "1": 3.14, "2": 3.16, "3": 3.15}],
         }]
     }
     client._on_message(ws, json.dumps(payload))
@@ -189,12 +189,23 @@ def test_level_one_telemetry_tracks_server_lag_interval_and_callback(monkeypatch
     client._ws = ws
     client._connected = True
 
-    monotonic_values = iter([100.0, 100.0, 106.0])
+    # Client construction happens before the clock monkeypatch. Each of the two
+    # L1 messages consumes exactly one monotonic timestamp here.
+    monotonic_values = iter([100.0, 106.0])
     perf_values = iter([200.0, 200.002, 206.0, 206.003])
     wall_values = iter([1710000001000, 1710000007000])
+    last_wall_ms = [1710000007000]
+
+    def fake_wall_time():
+        try:
+            last_wall_ms[0] = next(wall_values)
+        except StopIteration:
+            pass
+        return last_wall_ms[0] / 1000.0
+
     monkeypatch.setattr("momentum_companion.clients.schwab_stream.time.monotonic", lambda: next(monotonic_values))
     monkeypatch.setattr("momentum_companion.clients.schwab_stream.time.perf_counter", lambda: next(perf_values))
-    monkeypatch.setattr("momentum_companion.clients.schwab_stream.time.time", lambda: next(wall_values) / 1000.0)
+    monkeypatch.setattr("momentum_companion.clients.schwab_stream.time.time", fake_wall_time)
     client._telemetry_window_started = 100.0
     caplog.set_level("INFO")
 
@@ -202,7 +213,7 @@ def test_level_one_telemetry_tracks_server_lag_interval_and_callback(monkeypatch
         "data": [{
             "service": "LEVELONE_EQUITIES",
             "timestamp": 1710000000000,
-            "content": [{"key": "AEHL", "3": 3.15}],
+            "content": [{"key": "AEHL", "1": 3.14, "2": 3.16, "3": 3.15}],
         }]
     }
     client._on_message(ws, json.dumps(payload))
