@@ -267,6 +267,13 @@ def create_app(
     def replay_sessions() -> list[dict[str, Any]]:
         return replay.catalog.list_sessions()
 
+    @app.get("/api/recordings/{session_id}/integrity")
+    def recording_integrity(session_id: str) -> dict[str, Any]:
+        try:
+            return replay.catalog.integrity_report(session_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     @app.get("/api/replay/state")
     def replay_state() -> dict[str, Any]:
         return replay.snapshot()

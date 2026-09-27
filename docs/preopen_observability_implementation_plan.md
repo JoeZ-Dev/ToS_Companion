@@ -260,6 +260,23 @@ Per symbol include:
 
 Session rollup should summarize all symbols.
 
+### Integrity-report contract
+
+`integrity_report.json` schema version 1 is generated when a new recording
+closes. The same report can be calculated without writing files through
+`GET /api/recordings/{session_id}/integrity`. Reports include per-symbol first
+and last raw L1 timestamps, raw and repaired-row counts, gaps over 60 seconds,
+full versus unresolved minute-candle repairs, maximum gap duration, explicit
+status/halt counts, pattern counts by detector/state, provenance completeness,
+and machine-readable replay-confidence warnings. A session rollup totals these
+fields.
+
+Gap status is calculated from adjacent raw L1 timestamps. A gap is fully
+repaired only when a historical one-minute row exists for every intervening
+minute boundary. Status silence never changes gap classification and never
+creates a halt. On-demand calculation is read-only; legacy sessions report
+missing provenance and unavailable derived journals rather than guessing.
+
 ## 1E. Holdout reservation workflow
 
 ### Objective
