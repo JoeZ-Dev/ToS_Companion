@@ -189,6 +189,9 @@ class DetectorAnnotationEvaluator:
                 "first_structure_ms": None,
                 "first_structure_by_trigger_ms": None,
                 "first_trigger_state_ms": None,
+                "matched_trigger_state_ms": None,
+                "first_trigger_latency_ms": None,
+                "matched_trigger_latency_ms": None,
                 "trigger_latency_ms": None,
                 "state_at_annotated_trigger": None,
                 "nearby_observations": [],
@@ -239,6 +242,38 @@ class DetectorAnnotationEvaluator:
         first_structure = nearby[0] if nearby else None
         first_structure_by_trigger = by_trigger[0] if by_trigger else None
         first_trigger = trigger_observations[0] if trigger_observations else None
+        matched_trigger_ms = match.get("matched_trigger_ms")
+        matched_trigger = (
+            next(
+                (
+                    item
+                    for item in trigger_observations
+                    if int(item["updated_ms"]) == int(matched_trigger_ms)
+                ),
+                None,
+            )
+            if matched_trigger_ms is not None
+            else None
+        )
+        if matched_trigger is None and trigger_observations:
+            matched_trigger = min(
+                trigger_observations,
+                key=lambda item: (
+                    abs(int(item["updated_ms"]) - trigger_ms),
+                    int(item["updated_ms"]) > trigger_ms,
+                    int(item["updated_ms"]),
+                ),
+            )
+        matched_trigger_latency_ms = (
+            int(matched_trigger["updated_ms"]) - trigger_ms
+            if matched_trigger is not None
+            else None
+        )
+        first_trigger_latency_ms = (
+            int(first_trigger["updated_ms"]) - trigger_ms
+            if first_trigger is not None
+            else None
+        )
         state_at_trigger = by_trigger[-1]["state"] if by_trigger else None
 
         return {
@@ -248,9 +283,14 @@ class DetectorAnnotationEvaluator:
             "structure_detected": bool(nearby),
             "structure_detected_by_trigger": bool(by_trigger),
             "trigger_detected": bool(trigger_observations),
-            "fired_by_annotated_trigger": bool(trigger_by_trigger),
+            "fired_by_annotated_trigger": (
+                matched_trigger is not None
+                and int(matched_trigger["updated_ms"]) <= trigger_ms
+            ),
             "false_positive_on_rejected_candidate": (
-                (not valid_at_time) and bool(trigger_by_trigger)
+                (not valid_at_time)
+                and matched_trigger is not None
+                and int(matched_trigger["updated_ms"]) <= trigger_ms
             ),
             "first_structure_ms": (
                 first_structure["updated_ms"] if first_structure else None
@@ -262,11 +302,16 @@ class DetectorAnnotationEvaluator:
             "first_trigger_state_ms": (
                 first_trigger["updated_ms"] if first_trigger else None
             ),
-            "trigger_latency_ms": (
-                first_trigger["updated_ms"] - trigger_ms
-                if first_trigger is not None
-                else None
+            "matched_trigger_state_ms": (
+                matched_trigger["updated_ms"] if matched_trigger else None
             ),
+            "first_trigger_latency_ms": first_trigger_latency_ms,
+            "matched_trigger_latency_ms": matched_trigger_latency_ms,
+            # Backward-compatible primary latency alias. Audit summaries and
+            # consumers should interpret trigger_latency_ms as the matched
+            # trigger observation, not the first trigger emitted by the
+            # selected detector instance.
+            "trigger_latency_ms": matched_trigger_latency_ms,
             "state_at_annotated_trigger": state_at_trigger,
             "nearby_observations": nearby,
         }
@@ -489,6 +534,7 @@ class DetectorAnnotationEvaluator:
                 setup_start_ms - tolerance if setup_start_ms is not None else None
             ),
             "setup_window_end_ms": trigger_ms if setup_start_ms is not None else None,
+            "matched_trigger_ms": chosen.get("nearest_trigger_ms"),
             "matched_trigger_distance_ms": chosen.get("nearest_trigger_distance_ms"),
             "nearest_observation_distance_ms": chosen.get("nearest_observation_distance_ms"),
         }
@@ -523,9 +569,9 @@ class DetectorAnnotationEvaluator:
                 if item["false_positive_on_rejected_candidate"]
             ]
             latencies = [
-                int(item["trigger_latency_ms"])
+                int(item["matched_trigger_latency_ms"])
                 for item in trigger_hits
-                if item["trigger_latency_ms"] is not None
+                if item["matched_trigger_latency_ms"] is not None
             ]
             per_detector[detector] = {
                 "verified_valid_labels": len(valid),
@@ -552,9 +598,9 @@ class DetectorAnnotationEvaluator:
             }
 
         all_trigger_latencies = [
-            int(item["trigger_latency_ms"])
+            int(item["matched_trigger_latency_ms"])
             for item in valid_supported
-            if item["trigger_latency_ms"] is not None
+            if item["matched_trigger_latency_ms"] is not None
         ]
         return {
             "verification_annotations": len(results),
