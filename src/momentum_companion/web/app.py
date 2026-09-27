@@ -102,9 +102,16 @@ def create_app(
     replay = replay_engine or ReplayEngine(
         recordings_root=Path.home() / ".tos_companion" / "recordings"
     )
-    review_corpus = ReviewCorpus(replay.catalog.root)
+    recordings_root = Path(
+        getattr(
+            replay.catalog,
+            "root",
+            Path.home() / ".tos_companion" / "recordings",
+        )
+    )
+    review_corpus = ReviewCorpus(recordings_root)
     review_annotations = ReviewAnnotationStore(
-        replay.catalog.root.parent / "review_annotations"
+        recordings_root.parent / "review_annotations"
     )
 
     @asynccontextmanager
