@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from momentum_companion.evaluation import DetectorAnnotationEvaluator
 from momentum_companion.replay import ReplayEngine
 from momentum_companion.review import ReviewAnnotationStore, ReviewCorpus
 from momentum_companion.runtime import CompanionRuntime
@@ -69,6 +70,13 @@ class ReviewVerificationRequest(BaseModel):
     lookback_ms: int = 10 * 60 * 1000
 
 
+class DetectorAuditRequest(BaseModel):
+    session_id: str | None = None
+    symbol: str | None = None
+    default_lookback_ms: int = 5 * 60 * 1000
+    post_trigger_ms: int = 2 * 60 * 1000
+
+
 class ReviewAnnotationRequest(BaseModel):
     session_id: str
     symbol: str
@@ -112,6 +120,10 @@ def create_app(
     review_corpus = ReviewCorpus(recordings_root)
     review_annotations = ReviewAnnotationStore(
         recordings_root.parent / "review_annotations"
+    )
+    detector_evaluator = DetectorAnnotationEvaluator(
+        recordings_root=recordings_root,
+        annotation_store=review_annotations,
     )
 
     @asynccontextmanager
@@ -312,6 +324,18 @@ def create_app(
         try:
             return review_annotations.add(request.model_dump())
         except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/evaluation/detector-audit")
+    def detector_audit(request: DetectorAuditRequest) -> dict[str, Any]:
+        try:
+            return detector_evaluator.audit(
+                session_id=request.session_id,
+                symbol=request.symbol,
+                default_lookback_ms=request.default_lookback_ms,
+                post_trigger_ms=request.post_trigger_ms,
+            )
+        except (ValueError, RuntimeError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/replay/load")
