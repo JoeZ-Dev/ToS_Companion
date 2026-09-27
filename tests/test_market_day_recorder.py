@@ -168,6 +168,7 @@ def test_default_manifest_declares_level_one_only(tmp_path: Path):
     assert "TIMESALE_EQUITY" not in manifest["counts"]["AEHL"]
     assert (recorder.session_dir / "integrity_report.json").exists()
     assert (recorder.session_dir / "pattern_outcomes.json").exists()
+    assert (recorder.session_dir / "pattern_overlaps.json").exists()
 
 
 def test_recorder_journals_patterns_only_for_active_symbols(tmp_path: Path):

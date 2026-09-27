@@ -588,12 +588,20 @@ def test_recording_integrity_endpoint_is_read_only_and_handles_unknown_session(t
     with TestClient(create_app(runtime, replay_engine=replay)) as client:
         response = client.get("/api/recordings/session/integrity")
         outcomes = client.get("/api/evaluation/pattern-outcomes/session")
+        overlaps = client.get("/api/evaluation/pattern-overlaps/session")
+        invalid_overlap_filter = client.get(
+            "/api/evaluation/pattern-overlaps/session",
+            params={"level_tolerance_pct": -1},
+        )
         missing = client.get("/api/recordings/missing/integrity")
 
     assert response.status_code == 200
     assert response.json()["symbols"]["TOPS"]["raw_event_count"] == 1
     assert outcomes.status_code == 200
     assert outcomes.json()["outcomes"] == []
+    assert overlaps.status_code == 200
+    assert overlaps.json()["overlaps"] == []
+    assert invalid_overlap_filter.status_code == 422
     assert missing.status_code == 404
     assert not (session / "integrity_report.json").exists()
 
