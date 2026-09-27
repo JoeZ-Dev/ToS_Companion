@@ -293,6 +293,22 @@ Preferred implementation:
 
 The repository-level registry remains useful for fixed historical baselines, but future session classification should not require a code deployment.
 
+### Classification contract
+
+Corpus classifications are stored under application data in
+`corpus_classifications.json`, outside immutable recording directories. Unknown
+and newly recorded sessions resolve to `unclassified` without needing a stored
+row. The API lists classifications and supports get/update at
+`/api/corpus/classifications/{session_id}`. Each change records its timestamp,
+note, previous value, and new value.
+
+The repository's six historical development sessions remain fixed baselines.
+Once a future session is marked `holdout`, moving it to another corpus requires
+`confirm_holdout_relabel=true`; the confirmation is recorded in its history.
+Review recording listings and detector-audit metadata use this persisted value.
+An unreadable registry fails closed instead of reverting reserved sessions to
+the default classification.
+
 ## Phase 1 exit criteria
 
 A new live recording can answer:

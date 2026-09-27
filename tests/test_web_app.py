@@ -593,3 +593,51 @@ def test_recording_integrity_endpoint_is_read_only_and_handles_unknown_session(t
     assert response.json()["symbols"]["TOPS"]["raw_event_count"] == 1
     assert missing.status_code == 404
     assert not (session / "integrity_report.json").exists()
+
+
+def test_corpus_classification_api_defaults_reserves_and_protects_holdout(tmp_path):
+    import json
+    from momentum_companion.replay.engine import ReplayEngine
+
+    recordings = tmp_path / "recordings"
+    session = recordings / "future-session"
+    session.mkdir(parents=True)
+    (session / "manifest.json").write_text(
+        json.dumps({"kind": "market_day_recording", "symbols": ["TOPS"]})
+    )
+    runtime = FakeRuntime()
+    replay = ReplayEngine(recordings_root=recordings)
+
+    with TestClient(create_app(runtime, replay_engine=replay)) as client:
+        initial = client.get("/api/corpus/classifications/future-session")
+        reserved = client.put(
+            "/api/corpus/classifications/future-session",
+            json={"classification": "holdout", "note": "Reserved before review"},
+        )
+        rejected = client.put(
+            "/api/corpus/classifications/future-session",
+            json={"classification": "development"},
+        )
+        relabeled = client.put(
+            "/api/corpus/classifications/future-session",
+            json={
+                "classification": "development",
+                "note": "Holdout cycle ended",
+                "confirm_holdout_relabel": True,
+            },
+        )
+        recordings_response = client.get("/api/review/recordings")
+        unknown = client.put(
+            "/api/corpus/classifications/missing",
+            json={"classification": "holdout"},
+        )
+
+    assert initial.json()["classification"] == "unclassified"
+    assert reserved.json()["classification"] == "holdout"
+    assert reserved.json()["classified_at_utc"] is not None
+    assert rejected.status_code == 400
+    assert relabeled.json()["history"][-1]["holdout_relabel_confirmed"] is True
+    assert recordings_response.json()[0]["corpus"]["classification"] == "development"
+    assert unknown.status_code == 404
+    persisted = json.loads((tmp_path / "corpus_classifications.json").read_text())
+    assert persisted["sessions"]["future-session"]["classification"] == "development"

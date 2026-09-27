@@ -10,7 +10,10 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from momentum_companion.evaluation import DetectorAnnotationEvaluator
+from momentum_companion.evaluation import (
+    CorpusClassificationStore,
+    DetectorAnnotationEvaluator,
+)
 from momentum_companion.replay import ReplayEngine
 from momentum_companion.review import ReviewAnnotationStore, ReviewCorpus
 from momentum_companion.runtime import CompanionRuntime
@@ -77,6 +80,12 @@ class DetectorAuditRequest(BaseModel):
     post_trigger_ms: int = 2 * 60 * 1000
 
 
+class CorpusClassificationRequest(BaseModel):
+    classification: str
+    note: str | None = None
+    confirm_holdout_relabel: bool = False
+
+
 class ReviewAnnotationRequest(BaseModel):
     session_id: str
     symbol: str
@@ -121,9 +130,13 @@ def create_app(
     review_annotations = ReviewAnnotationStore(
         recordings_root.parent / "review_annotations"
     )
+    corpus_store = CorpusClassificationStore(
+        recordings_root.parent / "corpus_classifications.json"
+    )
     detector_evaluator = DetectorAnnotationEvaluator(
         recordings_root=recordings_root,
         annotation_store=review_annotations,
+        corpus_store=corpus_store,
     )
 
     @asynccontextmanager
@@ -293,7 +306,44 @@ def create_app(
 
     @app.get("/api/review/recordings")
     def review_recordings() -> list[dict[str, Any]]:
-        return review_corpus.list_recordings()
+        recordings = review_corpus.list_recordings()
+        for recording in recordings:
+            recording["corpus"] = corpus_store.get(recording["session_id"])
+        return recordings
+
+    @app.get("/api/corpus/classifications")
+    def corpus_classifications() -> list[dict[str, Any]]:
+        session_ids = [
+            item["session_id"] for item in replay.catalog.list_sessions()
+        ]
+        return corpus_store.list(session_ids)
+
+    @app.get("/api/corpus/classifications/{session_id}")
+    def corpus_classification(session_id: str) -> dict[str, Any]:
+        try:
+            replay.catalog.load_manifest(session_id)
+            return corpus_store.get(session_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.put("/api/corpus/classifications/{session_id}")
+    def classify_corpus_session(
+        session_id: str,
+        request: CorpusClassificationRequest,
+    ) -> dict[str, Any]:
+        try:
+            replay.catalog.load_manifest(session_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        try:
+            return corpus_store.classify(
+                session_id,
+                request.classification,
+                note=request.note,
+                confirm_holdout_relabel=request.confirm_holdout_relabel,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/review/window")
     def review_window(request: ReviewWindowRequest) -> dict[str, Any]:
