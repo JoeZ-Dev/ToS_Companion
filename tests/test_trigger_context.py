@@ -52,6 +52,11 @@ def test_context_distinguishes_false_zero_and_unavailable_values():
     assert context["fundamentals"]["shares_outstanding"]["available"] is False
     assert context["volume"]["completed_bar"]["value"] == 0
     assert context["context_as_of_ts_ms"] == timestamp_ms
+    assert context["session_levels"]["premarket_high"] == {
+        "available": True,
+        "value": 4.5,
+        "source": "ae_snapshot.session.premarket_high",
+    }
 
 
 def test_context_falls_back_to_completed_bar_close_without_quote_price():
@@ -65,3 +70,41 @@ def test_context_falls_back_to_completed_bar_close_without_quote_price():
     assert context["price"]["source"] == "completed_bar.close"
     assert context["vwap"]["available"] is False
     assert context["security"]["halted"]["available"] is False
+
+
+def test_context_exposes_standardized_session_levels_as_observational_evidence():
+    timestamp_ms = int(
+        datetime(2026, 9, 28, 9, 41, tzinfo=ZoneInfo("America/New_York")).timestamp()
+        * 1000
+    )
+    history_time = int(
+        datetime(2026, 9, 28, 9, 30, tzinfo=ZoneInfo("America/New_York")).timestamp()
+    )
+    context = build_trigger_context(
+        symbol_state={
+            "quote": {"last": 5.5, "ts_ms": timestamp_ms},
+            "history_bars": [
+                {
+                    "time": history_time,
+                    "open": 5.0,
+                    "high": 6.0,
+                    "low": 4.0,
+                    "close": 5.0,
+                    "volume": 100,
+                }
+            ],
+            "bars_10s": [],
+            "ae_snapshot": {"vwap": 5.0, "session": {}},
+        },
+        bar={"close": 5.5, "volume": 50},
+        observation_ts_ms=timestamp_ms,
+    )
+
+    levels = context["session_levels"]
+    assert levels["regular_session_high"]["value"] == 6.0
+    assert levels["regular_session_low"]["value"] == 4.0
+    assert levels["vwap"]["value"] == 5.0
+    assert levels["distances_pct"]["vwap"]["value"] == 10.0
+    assert levels["opening_range_minutes"] == 10
+    assert levels["opening_range_complete"] is True
+    assert levels["prior_day_close"]["available"] is False

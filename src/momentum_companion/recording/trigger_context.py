@@ -9,6 +9,10 @@ from momentum_companion.setup_engine.structure.volume import (
     recent_volume_stats,
     volume_trend,
 )
+from momentum_companion.setup_engine.structure.session_levels import (
+    SessionLevelConfig,
+    session_level_context,
+)
 
 ET = ZoneInfo("America/New_York")
 TRIGGER_STATES = frozenset({"BREAKOUT", "CONTINUATION"})
@@ -51,6 +55,34 @@ def build_trigger_context(
         price_source = "completed_bar.close"
     vwap = _number_or_none(ae.get("vwap"))
     distance_to_vwap = _number_or_none(derived.get("distance_to_vwap_pct"))
+    standardized_session = session_level_context(
+        [
+            *(symbol_state.get("history_bars") or []),
+            *completed_bars,
+        ],
+        as_of_ts=context_as_of_ms // 1000,
+        current_price=last,
+        vwap=vwap,
+        config=SessionLevelConfig(opening_range_minutes=10),
+    )
+    standardized_levels = dict(standardized_session["levels"])
+    standardized_distances = dict(standardized_session["distances_pct"])
+    standardized_sources = {
+        key: "session_level_primitive" for key in standardized_levels
+    }
+    for key in (
+        "premarket_high",
+        "premarket_low",
+        "opening_range_high",
+        "opening_range_low",
+    ):
+        if standardized_levels[key] is not None:
+            continue
+        legacy_value = _number_or_none(session_levels.get(key))
+        if legacy_value is not None:
+            standardized_levels[key] = legacy_value
+            standardized_distances[key] = _distance_pct(last, legacy_value)
+            standardized_sources[key] = f"ae_snapshot.session.{key}"
 
     return {
         "schema_version": 1,
@@ -161,17 +193,27 @@ def build_trigger_context(
             ),
         },
         "session_levels": {
-            key: evidence_value(
-                _number_or_none(session_levels.get(key)),
-                source=f"ae_snapshot.session.{key}",
-            )
-            for key in (
-                "premarket_high",
-                "premarket_low",
-                "opening_range_high",
-                "opening_range_low",
-                "open_price",
-            )
+            **{
+                key: evidence_value(
+                    _number_or_none(value),
+                    source=standardized_sources[key],
+                )
+                for key, value in standardized_levels.items()
+            },
+            "open_price": evidence_value(
+                _number_or_none(session_levels.get("open_price")),
+                source="ae_snapshot.session.open_price",
+            ),
+            "distances_pct": {
+                key: evidence_value(
+                    _number_or_none(value),
+                    source="session_level_primitive",
+                )
+                for key, value in standardized_distances.items()
+            },
+            "opening_range_minutes": standardized_session["opening_range_minutes"],
+            "opening_range_complete": standardized_session["opening_range_complete"],
+            "timezone": standardized_session["timezone"],
         },
         "structural_levels": {
             "nearest_resistance": evidence_value(
@@ -207,3 +249,9 @@ def _int_or_none(value: Any) -> int | None:
         return int(value) if value is not None else None
     except (TypeError, ValueError):
         return None
+
+
+def _distance_pct(price: int | float | None, level: int | float | None) -> float | None:
+    if price is None or level is None or level == 0:
+        return None
+    return (price - level) / level * 100.0

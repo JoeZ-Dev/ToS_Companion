@@ -11,6 +11,10 @@ from momentum_companion.setup_engine.structure.volume import (
     volume_trend,
     volume_values,
 )
+from momentum_companion.setup_engine.structure.session_levels import (
+    SessionLevelConfig,
+    session_level_context,
+)
 
 __all__ = [
     "NormalizedBar",
@@ -33,4 +37,6 @@ __all__ = [
     "volume_ratio",
     "volume_trend",
     "volume_values",
+    "SessionLevelConfig",
+    "session_level_context",
 ]
