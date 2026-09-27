@@ -47,6 +47,7 @@ class ReplayEngine:
         self._largest_gap_ms = 0
         self._repaired_candle_count = 0
         self.pattern_service = PatternEvaluationService()
+        self.pattern_timeline: list[dict[str, Any]] = []
         self.ae_engine = AEEngine(
             None,
             None,
@@ -326,6 +327,14 @@ class ReplayEngine:
         assert self._symbol is not None
         self.session.ingest_bar(self._symbol, bar)
         patterns = self.pattern_service.ingest_completed_bar(self._symbol, bar)
+        for pattern in patterns:
+            self.pattern_timeline.append(
+                {
+                    "bar_ts": int(bar.ts),
+                    "symbol": self._symbol,
+                    "pattern": dict(pattern),
+                }
+            )
         self.session.update_pattern_observations(self._symbol, patterns)
         snapshot = self.ae_engine.ingest_10s_bar(bar)
         self.session.set_vwap_points(self._symbol, self.ae_engine.vwap_points)

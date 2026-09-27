@@ -504,3 +504,52 @@ def test_review_api_exposes_future_safe_packets_and_annotations(tmp_path):
     assert saved.status_code == 200
     assert listed.status_code == 200
     assert listed.json()[0]["outcome"] == "failed"
+
+
+def test_detector_audit_endpoint_uses_verification_annotations_and_reports_unsupported_types(tmp_path):
+    import json
+    from momentum_companion.replay.engine import ReplayEngine
+
+    recordings = tmp_path / "recordings"
+    session = recordings / "2026-09-23_070000_session"
+    session.mkdir(parents=True)
+    (session / "manifest.json").write_text(json.dumps({
+        "schema_version": 1,
+        "kind": "market_day_recording",
+        "symbols": ["TOPS"],
+        "services": ["LEVELONE_EQUITIES"],
+        "counts": {"TOPS": {"LEVELONE_EQUITIES": 2}},
+    }))
+    rows = [
+        {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"TOPS","stream_ts_ms":1000,
+         "raw":{"key":"TOPS","1":1.0,"2":1.1,"3":1.05,"8":100}},
+        {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"TOPS","stream_ts_ms":11000,
+         "raw":{"key":"TOPS","3":1.06,"8":120}},
+    ]
+    (session / "TOPS.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+
+    runtime = FakeRuntime()
+    replay = ReplayEngine(recordings_root=recordings)
+    with TestClient(create_app(runtime, replay_engine=replay)) as client:
+        saved = client.post("/api/review/annotations", json={
+            "session_id": session.name,
+            "symbol": "TOPS",
+            "setup_type": "local_resistance_breakout",
+            "trigger_ms": 11000,
+            "valid_at_time": True,
+            "outcome": "succeeded",
+            "review_pass": "verification",
+            "source": "codex",
+        })
+        audit = client.post("/api/evaluation/detector-audit", json={
+            "session_id": session.name,
+            "symbol": "TOPS",
+        })
+
+    assert saved.status_code == 200
+    assert audit.status_code == 200
+    payload = audit.json()
+    assert payload["summary"]["verification_annotations"] == 1
+    assert payload["summary"]["supported_annotations"] == 0
+    assert payload["summary"]["unsupported_setup_types"] == ["local_resistance_breakout"]
+    assert payload["results"][0]["supported_by_current_detector_registry"] is False
