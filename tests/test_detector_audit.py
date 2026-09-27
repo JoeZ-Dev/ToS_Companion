@@ -244,7 +244,7 @@ def test_setup_start_matching_rejects_unrelated_instance_outside_tolerance():
     result = DetectorAnnotationEvaluator.compare_annotation(annotation, timeline)
 
     assert result["matching"]["status"] == "no_matching_instance"
-    assert result["matching"]["basis"] == "setup_start_ms"
+    assert result["matching"]["basis"] == "setup_window_boundary"
     assert result["structure_detected"] is False
     assert result["trigger_detected"] is False
     assert result["false_positive_on_rejected_candidate"] is False
