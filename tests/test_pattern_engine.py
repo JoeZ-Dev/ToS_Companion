@@ -35,8 +35,9 @@ def micro_pullback_bars(last_close=10.50):
         bar(10, 10.03, 10.22, 10.02, 10.20),
         bar(20, 10.20, 10.42, 10.18, 10.40),
         bar(30, 10.40, 10.60, 10.37, 10.56),
-        bar(40, 10.55, 10.56, 10.47, 10.49),
-        bar(50, 10.49, 10.52, 10.43, last_close),
+        bar(40, 10.55, 10.56, 10.43, 10.47),  # pullback low
+        bar(50, 10.47, 10.52, 10.46, 10.51),  # completed recovery bar / pivot
+        bar(60, 10.51, max(10.54, last_close), 10.49, last_close),
     ]
 
 
@@ -76,6 +77,9 @@ def test_micro_pullback_can_transition_to_continuation():
 
     assert observation is not None
     assert observation.state == PatternState.CONTINUATION
+    assert observation.evidence["continuation_basis"] == "post_pullback_recovery_pivot"
+    assert observation.evidence["recovery_pivot"] == 10.52
+    assert observation.evidence["continuation_level"] < 10.63
 
 
 def test_default_engine_is_assembled_outside_core_engine():
@@ -169,3 +173,55 @@ def test_micro_pullback_instance_disappears_after_prior_continuation():
     completed = detect_micro_pullback("ABCD", later)
 
     assert completed is None or completed.id != first.id
+
+
+def test_micro_pullback_requires_completed_recovery_bar_before_continuation():
+    bars = [
+        bar(0, 10.00, 10.05, 10.00, 10.03),
+        bar(10, 10.03, 10.22, 10.02, 10.20),
+        bar(20, 10.20, 10.42, 10.18, 10.40),
+        bar(30, 10.40, 10.60, 10.37, 10.56),
+        bar(40, 10.55, 10.56, 10.43, 10.47),
+        bar(50, 10.47, 10.64, 10.45, 10.63),
+    ]
+
+    observation = detect_micro_pullback("ABCD", bars)
+
+    assert observation is not None
+    assert observation.state != PatternState.CONTINUATION
+    assert observation.evidence["recovery_pivot"] is None
+    assert observation.evidence["continuation_level"] is None
+
+
+def test_micro_pullback_continuation_breaks_post_low_recovery_pivot_not_impulse_high():
+    bars = [
+        bar(0, 10.00, 10.05, 10.00, 10.03),
+        bar(10, 10.03, 10.22, 10.02, 10.20),
+        bar(20, 10.20, 10.42, 10.18, 10.40),
+        bar(30, 10.40, 10.60, 10.37, 10.56),
+        bar(40, 10.55, 10.56, 10.43, 10.47),
+        bar(50, 10.47, 10.50, 10.46, 10.49),
+        bar(60, 10.49, 10.55, 10.48, 10.54),
+    ]
+
+    observation = detect_micro_pullback("ABCD", bars)
+
+    assert observation is not None
+    assert observation.state == PatternState.CONTINUATION
+    assert observation.evidence["continuation_level"] < observation.evidence["impulse_high"]
+
+
+def test_completed_micro_pullback_does_not_resurrect_same_instance():
+    completed_bars = micro_pullback_bars(last_close=10.63)
+    completed = detect_micro_pullback("ABCD", completed_bars)
+
+    assert completed is not None
+    assert completed.state == PatternState.CONTINUATION
+
+    later = [
+        *completed_bars,
+        bar(70, 10.62, 10.66, 10.55, 10.57),
+    ]
+    next_observation = detect_micro_pullback("ABCD", later)
+
+    assert next_observation is None or next_observation.id != completed.id
