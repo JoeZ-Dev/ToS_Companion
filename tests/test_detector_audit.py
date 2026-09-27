@@ -278,3 +278,27 @@ def test_structure_recall_at_trigger_does_not_credit_post_trigger_detection():
     assert summary["structure_detected_by_trigger_valid"] == 0
     assert summary["per_detector"]["MICRO_PULLBACK"]["structure_recall"] == 1.0
     assert summary["per_detector"]["MICRO_PULLBACK"]["structure_recall_at_trigger"] == 0.0
+
+
+def test_post_trigger_only_instance_is_matched_as_late_not_unmatched():
+    trigger = 1_800_000_000_000
+    annotation = {
+        "annotation_id": "late-only",
+        "session_id": "session",
+        "symbol": "TEST",
+        "setup_type": "micro_pullback",
+        "trigger_ms": trigger,
+        "valid_at_time": True,
+        "outcome": "succeeded",
+    }
+    timeline = _timeline(
+        "MICRO_PULLBACK",
+        [(trigger + 20_000, "PULLBACK")],
+    )
+
+    result = DetectorAnnotationEvaluator.compare_annotation(annotation, timeline)
+
+    assert result["matching"]["status"] == "matched"
+    assert result["matching"]["basis"] == "nearest_post_trigger_instance"
+    assert result["structure_detected"] is True
+    assert result["structure_detected_by_trigger"] is False
