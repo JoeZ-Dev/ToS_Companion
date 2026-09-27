@@ -247,3 +247,21 @@ def test_micro_pullback_uses_first_confirmed_trough_not_later_lower_low():
     assert next(
         point for point in observation.points if point.role == "pullback_low"
     ).time == 40
+
+
+def test_unconfirmed_pullback_is_provisional_and_cannot_continue():
+    bars = [
+        bar(0, 10.00, 10.05, 10.00, 10.03),
+        bar(10, 10.03, 10.22, 10.02, 10.20),
+        bar(20, 10.20, 10.42, 10.18, 10.40),
+        bar(30, 10.40, 10.60, 10.37, 10.56),
+        bar(40, 10.55, 10.56, 10.49, 10.50),
+        bar(50, 10.50, 10.64, 10.47, 10.63),
+    ]
+
+    observation = detect_micro_pullback("ABCD", bars)
+
+    assert observation is not None
+    assert observation.evidence["retracement_selection"] == "provisional_current_low"
+    assert observation.state != PatternState.CONTINUATION
+    assert observation.evidence["continuation_level"] is None
