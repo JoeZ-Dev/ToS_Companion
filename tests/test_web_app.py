@@ -451,3 +451,56 @@ def test_browser_surfaces_momentum_context_fields():
     assert "market_context" in app_js
     assert "shares_outstanding" in app_js
     assert "short_interest_to_float" in app_js
+
+
+def test_review_api_exposes_future_safe_packets_and_annotations(tmp_path):
+    import json
+    from momentum_companion.replay.engine import ReplayEngine
+
+    session = tmp_path / "2026-09-23_070000_session"
+    session.mkdir(parents=True)
+    (session / "manifest.json").write_text(json.dumps({
+        "schema_version": 1,
+        "kind": "market_day_recording",
+        "symbols": ["TOPS"],
+        "services": ["LEVELONE_EQUITIES"],
+        "counts": {"TOPS": {"LEVELONE_EQUITIES": 3}},
+    }))
+    base = 1_790_161_200_000
+    rows = [
+        {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"TOPS","stream_ts_ms":base,
+         "raw":{"key":"TOPS","1":1.0,"2":1.1,"3":1.05,"8":100}},
+        {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"TOPS","stream_ts_ms":base+10_000,
+         "raw":{"key":"TOPS","3":1.10,"8":120}},
+        {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"TOPS","stream_ts_ms":base+20_000,
+         "raw":{"key":"TOPS","3":0.95,"8":150}},
+    ]
+    (session / "TOPS.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+
+    runtime = FakeRuntime()
+    replay = ReplayEngine(recordings_root=tmp_path)
+    with TestClient(create_app(runtime, replay_engine=replay)) as client:
+        packet = client.post("/api/review/verify", json={
+            "session_id": session.name,
+            "symbol": "TOPS",
+            "trigger_ms": base + 10_000,
+            "lookback_ms": 10_000,
+        })
+        saved = client.post("/api/review/annotations", json={
+            "session_id": session.name,
+            "symbol": "TOPS",
+            "setup_type": "breakout",
+            "trigger_ms": base + 10_000,
+            "valid_at_time": True,
+            "outcome": "failed",
+            "confidence": 0.9,
+            "evidence": {"level": 1.10},
+        })
+        listed = client.get("/api/review/annotations", params={"symbol": "TOPS"})
+
+    assert packet.status_code == 200
+    assert packet.json()["window"]["future_data_included"] is False
+    assert packet.json()["end_state"]["quote"]["last"] == 1.10
+    assert saved.status_code == 200
+    assert listed.status_code == 200
+    assert listed.json()[0]["outcome"] == "failed"
