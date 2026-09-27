@@ -14,7 +14,7 @@ from momentum_companion.setup_engine.pattern_contracts import (
     PatternState,
 )
 from momentum_companion.setup_engine.structure import (
-    measure_retracement,
+    first_confirmed_retracement,
     normalize_bars,
     latest_bullish_impulse,
 )
@@ -61,7 +61,7 @@ def detect_micro_pullback(symbol: str, bars, config: MicroPullbackConfig | None 
     impulse = latest_bullish_impulse(window, min_move_pct=cfg.min_impulse_pct, reserve_tail_bars=1)
     if impulse is None:
         return None
-    retracement = measure_retracement(window, impulse)
+    retracement = first_confirmed_retracement(window, impulse)
     if retracement is None:
         return None
     if retracement.duration_sec <= 0 or retracement.duration_sec > cfg.max_duration_sec:
@@ -146,6 +146,7 @@ def detect_micro_pullback(symbol: str, bars, config: MicroPullbackConfig | None 
             "continuation_confirmation": confirmation.to_dict(),
             "continuation_basis": "post_pullback_recovery_pivot",
             "impulse_selection": "latest_qualifying",
+            "retracement_selection": "first_confirmed_trough",
             "lifecycle": "single_continuation",
         },
         points=points,
