@@ -35,6 +35,11 @@ class ReviewCorpus:
 
         first_ms = int(engine._events[0]["stream_ts_ms"])
         last_ms = int(engine._events[-1]["stream_ts_ms"])
+        if start_ms is not None and end_ms is not None:
+            if int(start_ms) > int(end_ms):
+                raise ValueError("start_ms must be <= end_ms")
+            if int(end_ms) - int(start_ms) > MAX_WINDOW_MS:
+                raise ValueError("review window may not exceed 45 minutes")
         resolved_end = last_ms if end_ms is None else int(end_ms)
         resolved_end = max(first_ms, min(resolved_end, last_ms))
         resolved_start = (
