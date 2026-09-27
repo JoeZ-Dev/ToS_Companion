@@ -36,6 +36,7 @@ pytest -q \
   tests/test_pattern_engine.py \
   tests/test_pattern_replay.py \
   tests/test_pattern_service.py \
+  tests/test_review_api.py \
   tests/test_snapshot_status_summary.py \
   tests/test_stream_freshness.py \
   tests/test_stream_mapping.py \
