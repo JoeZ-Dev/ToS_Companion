@@ -162,6 +162,55 @@ class RecordingCatalog:
             ),
         )
 
+    def load_security_status_events(
+        self, session_id: str, *, symbol: str | None = None
+    ) -> list[dict[str, Any]]:
+        return self._load_derived_events(
+            session_id,
+            filename="security_status_events.jsonl",
+            kind="security_status_event",
+            timestamp_field="provider_ts_ms",
+            symbol=symbol,
+        )
+
+    def _load_derived_events(
+        self,
+        session_id: str,
+        *,
+        filename: str,
+        kind: str,
+        timestamp_field: str,
+        symbol: str | None,
+    ) -> list[dict[str, Any]]:
+        session_dir = self._session_dir(session_id)
+        self.load_manifest(session_id)
+        normalized = str(symbol or "").strip().upper() or None
+        events: list[dict[str, Any]] = []
+        try:
+            with (session_dir / filename).open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if event.get("kind") != kind:
+                        continue
+                    event_symbol = str(event.get("symbol") or "").strip().upper()
+                    if normalized is not None and event_symbol != normalized:
+                        continue
+                    events.append(event)
+        except FileNotFoundError:
+            return []
+        return sorted(
+            events,
+            key=lambda event: (
+                int(event.get(timestamp_field) or 0),
+                str(event.get("event_id") or ""),
+            ),
+        )
+
     def _session_dir(self, session_id: str) -> Path:
         value = str(session_id or "").strip()
         if not value or Path(value).name != value or "/" in value or "\\" in value:
