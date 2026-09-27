@@ -17,6 +17,7 @@ pytest -q \
   tests/test_codex_bridge_client.py \
   tests/test_companion_runtime.py \
   tests/test_companion_session.py \
+  tests/test_detector_audit.py \
   tests/test_emm_abort.py \
   tests/test_emm_engine.py \
   tests/test_gate_block.py \
