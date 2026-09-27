@@ -363,20 +363,32 @@ class DetectorAnnotationEvaluator:
         )
 
         if setup_start_ms is not None:
+            # setup_start_ms marks the beginning of the reviewer-labeled setup
+            # window, not the exact start of the detector instance. Nested
+            # detector formations may legitimately begin later inside that
+            # window. Allow a small detector-specific lead tolerance before the
+            # labeled start, then accept instances whose estimated formation
+            # begins through the annotated trigger. Post-trigger-only
+            # recognition remains eligible when the reconstructed started_at is
+            # within this setup interval.
             eligible = [
                 candidate
                 for candidate in candidates
-                if abs(candidate["started_ms"] - setup_start_ms) <= tolerance
+                if setup_start_ms - tolerance
+                <= candidate["started_ms"]
+                <= trigger_ms
             ]
             if not eligible:
                 return [], {
                     "status": "no_matching_instance",
-                    "basis": "setup_start_ms",
+                    "basis": "setup_window_boundary",
                     "pattern_id": None,
                     "instance_started_ms": None,
                     "start_distance_ms": None,
                     "candidate_instance_count": len(candidates),
                     "start_tolerance_ms": tolerance,
+                    "setup_window_start_ms": setup_start_ms - tolerance,
+                    "setup_window_end_ms": trigger_ms,
                 }
             # setup_start_ms defines which detector instances plausibly
             # belong to the reviewer-labeled setup window. It does not by
@@ -473,6 +485,10 @@ class DetectorAnnotationEvaluator:
             "start_distance_ms": start_distance_ms,
             "candidate_instance_count": len(candidates),
             "start_tolerance_ms": tolerance if setup_start_ms is not None else None,
+            "setup_window_start_ms": (
+                setup_start_ms - tolerance if setup_start_ms is not None else None
+            ),
+            "setup_window_end_ms": trigger_ms if setup_start_ms is not None else None,
             "matched_trigger_distance_ms": chosen.get("nearest_trigger_distance_ms"),
             "nearest_observation_distance_ms": chosen.get("nearest_observation_distance_ms"),
         }
