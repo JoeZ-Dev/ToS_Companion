@@ -14,7 +14,7 @@ from momentum_companion.setup_engine.pattern_contracts import (
     PatternState,
 )
 from momentum_companion.setup_engine.structure import (
-    cluster_levels,
+    LevelCluster,
     normalize_bars,
     swing_highs,
 )
@@ -73,12 +73,13 @@ def detect_local_resistance_breakout(
         return None
 
     highs = swing_highs(window)
-    level = cluster_levels(
+    level = _select_stable_resistance_cluster(
         highs,
         tolerance_pct=cfg.resistance_tolerance_pct,
         max_points=cfg.max_level_points,
+        min_points=cfg.min_resistance_touches,
     )
-    if level is None or len(level.points) < cfg.min_resistance_touches:
+    if level is None:
         return None
 
     first_touch = level.points[0]
@@ -150,4 +151,61 @@ def detect_local_resistance_breakout(
                 resistance_end,
             )
         ],
+    )
+
+
+
+def _select_stable_resistance_cluster(
+    points,
+    *,
+    tolerance_pct: float,
+    max_points: int,
+    min_points: int,
+) -> LevelCluster | None:
+    """Build sequential price clusters without letting a later outlier drag a level.
+
+    Generic averaging across all recent swing highs can move an established
+    resistance level upward after price has already broken it. Sequential
+    clustering preserves the identity of an existing level while allowing a
+    materially higher swing to begin a new candidate level.
+    """
+    clusters: list[list] = []
+    for point in list(points)[-max_points:]:
+        best_index = None
+        best_distance = None
+        for index, cluster in enumerate(clusters):
+            center = sum(item.price for item in cluster) / len(cluster)
+            tolerance = abs(center) * tolerance_pct
+            distance = abs(point.price - center)
+            if distance <= tolerance and (
+                best_distance is None or distance < best_distance
+            ):
+                best_index = index
+                best_distance = distance
+        if best_index is None:
+            clusters.append([point])
+        else:
+            clusters[best_index].append(point)
+
+    eligible = [cluster for cluster in clusters if len(cluster) >= min_points]
+    if not eligible:
+        return None
+
+    chosen = max(
+        eligible,
+        key=lambda cluster: (
+            cluster[-1].time,
+            len(cluster),
+            -(
+                max(item.price for item in cluster)
+                - min(item.price for item in cluster)
+            ),
+        ),
+    )
+    center = sum(item.price for item in chosen) / len(chosen)
+    return LevelCluster(
+        center=center,
+        low=min(item.price for item in chosen),
+        high=max(item.price for item in chosen),
+        points=tuple(chosen),
     )
