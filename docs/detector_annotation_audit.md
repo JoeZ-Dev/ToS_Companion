@@ -43,8 +43,10 @@ Why this matters: the same detector can emit multiple formations for the same sy
 
 Matching rules:
 
-- if the annotation has `setup_start_ms`, prefer a detector instance whose `started_at` is close to that timestamp
-- otherwise, prefer the most recently formed detector instance that already existed by the annotated trigger
+- if the annotation has `setup_start_ms`, use that timestamp as an eligibility window rather than as the final selector
+- among setup-window-eligible instances that reach the detector trigger state, prefer the instance whose trigger-state observation is closest to the annotated trigger
+- if no eligible instance reaches a trigger state, prefer the eligible structure observation closest to the annotated trigger
+- otherwise, when no `setup_start_ms` exists, prefer the most recently formed detector instance that already existed by the annotated trigger
 - once an instance is selected, only observations with that `pattern_id` are used for structure, trigger, state, and latency scoring
 - if no plausible instance matches, return `matching.status = "no_matching_instance"` instead of borrowing an older pattern
 
@@ -52,7 +54,7 @@ Current setup-start tolerances are intentionally narrow:
 - `MICRO_PULLBACK`: 2 minutes
 - `ASCENDING_TRIANGLE`: 5 minutes
 
-These are evaluator association tolerances, not detector thresholds or trading rules.
+These are evaluator association tolerances, not detector thresholds or trading rules. The matched result also reports `matched_trigger_distance_ms` and `nearest_observation_distance_ms` so instance selection is inspectable.
 
 ## Structure vs trigger-state detection
 

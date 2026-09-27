@@ -302,3 +302,124 @@ def test_post_trigger_only_instance_is_matched_as_late_not_unmatched():
     assert result["matching"]["basis"] == "nearest_post_trigger_instance"
     assert result["structure_detected"] is True
     assert result["structure_detected_by_trigger"] is False
+
+
+def test_setup_start_window_prefers_instance_trigger_closest_to_annotation():
+    trigger = 1_800_000_000_000
+    setup_start = trigger - 6 * 60_000
+    annotation = {
+        "annotation_id": "nested-trigger",
+        "session_id": "session",
+        "symbol": "TEST",
+        "setup_type": "micro_pullback",
+        "setup_start_ms": setup_start,
+        "trigger_ms": trigger,
+        "valid_at_time": True,
+        "outcome": "succeeded",
+    }
+    timeline = [
+        {
+            "bar_ts": (trigger - 340_000) // 1000,
+            "symbol": "TEST",
+            "pattern": {
+                "id": "TEST:MICRO_PULLBACK:early",
+                "pattern_type": "MICRO_PULLBACK",
+                "state": "PULLBACK",
+                "started_at": (setup_start - 10_000) // 1000,
+                "updated_at": (trigger - 340_000) // 1000,
+                "evidence": {},
+            },
+        },
+        {
+            "bar_ts": (trigger - 330_000) // 1000,
+            "symbol": "TEST",
+            "pattern": {
+                "id": "TEST:MICRO_PULLBACK:early",
+                "pattern_type": "MICRO_PULLBACK",
+                "state": "CONTINUATION",
+                "started_at": (setup_start - 10_000) // 1000,
+                "updated_at": (trigger - 330_000) // 1000,
+                "evidence": {},
+            },
+        },
+        {
+            "bar_ts": (trigger - 50_000) // 1000,
+            "symbol": "TEST",
+            "pattern": {
+                "id": "TEST:MICRO_PULLBACK:near",
+                "pattern_type": "MICRO_PULLBACK",
+                "state": "TURNING",
+                "started_at": (setup_start + 90_000) // 1000,
+                "updated_at": (trigger - 50_000) // 1000,
+                "evidence": {},
+            },
+        },
+        {
+            "bar_ts": (trigger - 10_000) // 1000,
+            "symbol": "TEST",
+            "pattern": {
+                "id": "TEST:MICRO_PULLBACK:near",
+                "pattern_type": "MICRO_PULLBACK",
+                "state": "CONTINUATION",
+                "started_at": (setup_start + 90_000) // 1000,
+                "updated_at": (trigger - 10_000) // 1000,
+                "evidence": {},
+            },
+        },
+    ]
+
+    result = DetectorAnnotationEvaluator.compare_annotation(annotation, timeline)
+
+    assert result["matching"]["pattern_id"] == "TEST:MICRO_PULLBACK:near"
+    assert result["matching"]["basis"] == "setup_window_nearest_trigger"
+    assert result["matching"]["matched_trigger_distance_ms"] == -10_000
+    assert result["first_trigger_state_ms"] == trigger - 10_000
+    assert result["trigger_latency_ms"] == -10_000
+
+
+def test_setup_start_window_without_trigger_prefers_nearest_structure():
+    trigger = 1_800_000_000_000
+    setup_start = trigger - 3 * 60_000
+    annotation = {
+        "annotation_id": "structure-only",
+        "session_id": "session",
+        "symbol": "TEST",
+        "setup_type": "micro_pullback",
+        "setup_start_ms": setup_start,
+        "trigger_ms": trigger,
+        "valid_at_time": True,
+        "outcome": "succeeded",
+    }
+    timeline = [
+        {
+            "bar_ts": (trigger - 120_000) // 1000,
+            "symbol": "TEST",
+            "pattern": {
+                "id": "TEST:MICRO_PULLBACK:older",
+                "pattern_type": "MICRO_PULLBACK",
+                "state": "PULLBACK",
+                "started_at": (setup_start - 30_000) // 1000,
+                "updated_at": (trigger - 120_000) // 1000,
+                "evidence": {},
+            },
+        },
+        {
+            "bar_ts": (trigger - 20_000) // 1000,
+            "symbol": "TEST",
+            "pattern": {
+                "id": "TEST:MICRO_PULLBACK:nearer",
+                "pattern_type": "MICRO_PULLBACK",
+                "state": "TURNING",
+                "started_at": (setup_start + 60_000) // 1000,
+                "updated_at": (trigger - 20_000) // 1000,
+                "evidence": {},
+            },
+        },
+    ]
+
+    result = DetectorAnnotationEvaluator.compare_annotation(annotation, timeline)
+
+    assert result["matching"]["pattern_id"] == "TEST:MICRO_PULLBACK:nearer"
+    assert result["matching"]["basis"] == "setup_window_nearest_structure"
+    assert result["trigger_detected"] is False
+    assert result["state_at_annotated_trigger"] == "TURNING"
