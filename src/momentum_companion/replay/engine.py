@@ -266,6 +266,8 @@ class ReplayEngine:
         }
         for quote in self._cache.process_messages(message):
             self.session.ingest_quote(quote)
+            if str(quote.get("security_status") or "").strip().lower() == "halted":
+                continue
             last = quote.get("last")
             if last is None:
                 continue
