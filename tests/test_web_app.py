@@ -1,3 +1,4 @@
+import json
 import time
 from pathlib import Path
 import subprocess
@@ -15,6 +16,98 @@ def test_chart_vwap_uses_backend_series_after_display_window_is_trimmed():
     js = function + "\nconsole.log(JSON.stringify(vwapPoints({vwap_points:[{time:10,value:42.25}],history_bars:[{time:10,close:99,volume:100}],bars_10s:[]})));"
     result = subprocess.run(["node", "-e", js], text=True, capture_output=True, check=True)
     assert result.stdout.strip() == '[{"time":10,"value":42.25}]'
+
+
+def test_pattern_overlay_descriptors_render_geometry_recovery_and_triggers():
+    script = Path(__file__).resolve().parents[1] / "src/momentum_companion/web/static/app.js"
+    source = script.read_text()
+    helpers = source[
+        source.index("  function patternColor("):
+        source.index("  function patternShortName(")
+    ]
+    patterns = [
+        {
+            "id": "AEHL:ASCENDING_TRIANGLE:10",
+            "pattern_type": "ASCENDING_TRIANGLE",
+            "state": "BREAKOUT",
+            "updated_at": 30,
+            "lines": [
+                {
+                    "role": "resistance",
+                    "start": {"time": 10, "price": 4.2},
+                    "end": {"time": 30, "price": 4.2},
+                },
+                {
+                    "role": "rising_support",
+                    "start": {"time": 10, "price": 3.8},
+                    "end": {"time": 30, "price": 4.0},
+                },
+            ],
+            "evidence": {},
+        },
+        {
+            "id": "AEHL:MICRO_PULLBACK:20",
+            "pattern_type": "MICRO_PULLBACK",
+            "state": "CONTINUATION",
+            "updated_at": 50,
+            "lines": [
+                {
+                    "role": "impulse",
+                    "start": {"time": 20, "price": 4.0},
+                    "end": {"time": 30, "price": 4.8},
+                }
+            ],
+            "evidence": {"recovery_pivot": 4.6, "recovery_pivot_time": 40},
+        },
+    ]
+    javascript = (
+        "const LightweightCharts={LineStyle:{Solid:0,Dotted:1,Dashed:2}};\n"
+        + helpers
+        + "\nconst patterns="
+        + json.dumps(patterns)
+        + ";\nconsole.log(JSON.stringify({all:patternOverlayDescriptors(patterns,{}),"
+        + "hidden:patternOverlayDescriptors(patterns,{MICRO_PULLBACK:false})}));"
+    )
+    result = subprocess.run(
+        ["node", "-e", javascript],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+
+    assert [line["role"] for line in payload["all"]["lines"]] == [
+        "resistance",
+        "rising_support",
+        "impulse",
+        "recovery_pivot",
+    ]
+    assert [trigger["state"] for trigger in payload["all"]["triggers"]] == [
+        "BREAKOUT",
+        "CONTINUATION",
+    ]
+    assert all(
+        line["patternType"] != "MICRO_PULLBACK"
+        for line in payload["hidden"]["lines"]
+    )
+
+
+def test_pattern_overlay_updates_preserve_viewport_and_expose_family_controls():
+    runtime = FakeRuntime()
+    with TestClient(create_app(runtime)) as client:
+        index = client.get("/").text
+        app_js = client.get("/app.js").text
+
+    overlay_update = app_js[
+        app_js.index("  function setPatternOverlays("):
+        app_js.index("  function mergedBars(")
+    ]
+    assert 'id="pattern-overlay-filters"' in index
+    assert "getVisibleLogicalRange" in overlay_update
+    assert "setVisibleLogicalRange" in overlay_update
+    assert "fitContent" not in overlay_update
+    assert "patternTriggerHistory" in app_js
+    assert "state.patternVisibility" in app_js
 
 
 class FakeRuntime:

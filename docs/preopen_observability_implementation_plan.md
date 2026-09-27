@@ -637,6 +637,26 @@ Render detector geometry for human sanity checking while preserving detector/UI 
 
 A human can visually confirm what the detector believed without changing the detector.
 
+### Browser overlay contract
+
+The browser renders the geometry already supplied by active pattern
+observations as independent line series. This covers resistance/support,
+impulse/pullback, and consolidation-range geometry generically; when the micro
+pullback evidence includes a recovery pivot, the browser adds its horizontal
+recovery reference. Breakout and continuation observations add bounded,
+deduplicated chart markers.
+
+Pattern-family controls hide/show both geometry and retained trigger markers.
+Completed geometry is removed when it is no longer in the active observation
+set, while trigger history is capped at 50 markers per live/replay chart. Replay
+rewinds clear later accumulated markers. Pattern rows expose detector evidence
+and start/update timestamps through their detail tooltip.
+
+Overlay updates snapshot and restore the visible logical range and never call
+chart fitting. Chart fitting remains limited to the existing first load of a
+new live symbol or replay stream. Rendering consumes detector output and does
+not feed data back into any detector or trading decision.
+
 ---
 
 # Phase 7 — Hardening and replay parity
