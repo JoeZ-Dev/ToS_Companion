@@ -49,3 +49,40 @@ def strongest_bullish_impulse(
             if best is None or leg.move_pct > best.move_pct:
                 best = leg
     return best
+
+
+def latest_bullish_impulse(
+    bars: list[NormalizedBar],
+    *,
+    min_move_pct: float,
+    reserve_tail_bars: int = 1,
+) -> ImpulseLeg | None:
+    """Return the most recent qualifying bullish impulse.
+
+    Micro-pullbacks are local continuation structures. Using the strongest
+    impulse anywhere in a rolling window can keep an older move alive and make
+    a later pullback inherit stale continuation semantics. This helper prefers
+    the latest qualifying impulse end, then the strongest move ending there.
+    """
+    stop = max(0, len(bars) - reserve_tail_bars)
+    for end_i in range(stop - 1, 0, -1):
+        best_for_end: ImpulseLeg | None = None
+        for start_i in range(0, end_i):
+            start_price = bars[start_i].low
+            if start_price <= 0:
+                continue
+            leg = ImpulseLeg(
+                start_index=start_i,
+                end_index=end_i,
+                start_time=bars[start_i].time,
+                end_time=bars[end_i].time,
+                start_price=start_price,
+                end_price=bars[end_i].high,
+            )
+            if leg.move_pct < min_move_pct:
+                continue
+            if best_for_end is None or leg.move_pct > best_for_end.move_pct:
+                best_for_end = leg
+        if best_for_end is not None:
+            return best_for_end
+    return None
