@@ -368,27 +368,48 @@ class DetectorAnnotationEvaluator:
                 if candidate["started_ms"] <= trigger_ms
                 and candidate["has_observation_by_trigger"]
             ]
-            if not eligible:
-                return [], {
-                    "status": "no_matching_instance",
-                    "basis": "latest_instance_by_trigger",
-                    "pattern_id": None,
-                    "instance_started_ms": None,
-                    "start_distance_ms": None,
-                    "candidate_instance_count": len(candidates),
-                }
-            # Without a reviewer-supplied setup start, prefer the most recently
-            # formed detector instance that actually existed by the annotation
-            # trigger. This prevents older completed patterns in the lookback
-            # window from being credited to a later candidate.
-            chosen = max(
-                eligible,
-                key=lambda candidate: (
-                    candidate["started_ms"],
-                    candidate["last_observation_by_trigger_ms"] or -1,
-                ),
-            )
-            basis = "latest_instance_by_trigger"
+            if eligible:
+                # Without a reviewer-supplied setup start, prefer the most
+                # recently formed detector instance that actually existed by
+                # the annotation trigger. This prevents older completed
+                # patterns in the lookback window from being credited to a
+                # later candidate.
+                chosen = max(
+                    eligible,
+                    key=lambda candidate: (
+                        candidate["started_ms"],
+                        candidate["last_observation_by_trigger_ms"] or -1,
+                    ),
+                )
+                basis = "latest_instance_by_trigger"
+            else:
+                # A detector may first recognize the setup after the annotated
+                # trigger. Preserve that as a late structure detection rather
+                # than reporting no matching instance. Choose the nearest
+                # post-trigger instance so broad-window recall and trigger-time
+                # recall remain distinct.
+                post_trigger = [
+                    candidate
+                    for candidate in candidates
+                    if candidate["started_ms"] > trigger_ms
+                ]
+                if not post_trigger:
+                    return [], {
+                        "status": "no_matching_instance",
+                        "basis": "latest_instance_by_trigger",
+                        "pattern_id": None,
+                        "instance_started_ms": None,
+                        "start_distance_ms": None,
+                        "candidate_instance_count": len(candidates),
+                    }
+                chosen = min(
+                    post_trigger,
+                    key=lambda candidate: (
+                        candidate["started_ms"] - trigger_ms,
+                        candidate["nearest_observation_distance_ms"],
+                    ),
+                )
+                basis = "nearest_post_trigger_instance"
             start_distance_ms = chosen["started_ms"] - trigger_ms
 
         matched = [dict(item) for item in chosen["items"]]
