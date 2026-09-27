@@ -468,6 +468,11 @@ class DetectorAnnotationEvaluator:
                 for item in rejected_supported
                 if item["false_positive_on_rejected_candidate"]
             ),
+            "no_matching_instance": sum(
+                1
+                for item in supported
+                if (item.get("matching") or {}).get("status") == "no_matching_instance"
+            ),
             "median_trigger_latency_ms": (
                 median(all_trigger_latencies) if all_trigger_latencies else None
             ),
