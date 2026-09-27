@@ -9,6 +9,7 @@ from momentum_companion.recording.provenance import (
     DERIVED_JOURNAL_SCHEMA_VERSION,
     deterministic_fingerprint,
 )
+from momentum_companion.recording.trigger_context import TRIGGER_STATES
 
 UTC = timezone.utc
 PATTERN_JOURNAL_FILENAME = "pattern_events.jsonl"
@@ -52,6 +53,7 @@ def build_pattern_event(
     observation_ts_ms: int,
     provenance: Mapping[str, Any],
     source_mode: str,
+    trigger_context: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Build one stable journal row and the snapshot key used for deduplication."""
     symbol = str(observation.get("symbol") or "").strip().upper()
@@ -98,6 +100,8 @@ def build_pattern_event(
         "source_mode": source_mode,
         "snapshot_fingerprint": snapshot_fingerprint,
     }
+    if snapshot["state"].upper() in TRIGGER_STATES:
+        event["trigger_context"] = dict(trigger_context or {}) or None
     return event, snapshot_fingerprint
 
 
@@ -125,6 +129,7 @@ class PatternEventJournal:
         observations: Iterable[Mapping[str, Any]],
         *,
         observation_ts_ms: int,
+        trigger_context: Mapping[str, Any] | None = None,
     ) -> int:
         appended = 0
         for observation in observations:
@@ -134,6 +139,7 @@ class PatternEventJournal:
                 observation_ts_ms=observation_ts_ms,
                 provenance=self.provenance,
                 source_mode=self.source_mode,
+                trigger_context=trigger_context,
             )
             key = (event["symbol"], event["pattern_id"])
             if self._last_snapshots.get(key) == snapshot_fingerprint:

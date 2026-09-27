@@ -66,6 +66,31 @@ def test_journal_skips_unchanged_snapshots_but_records_transitions(tmp_path):
     assert [json.loads(line)["state"] for line in lines] == ["VALID", "BREAKOUT"]
 
 
+def test_trigger_state_event_persists_context_without_adding_it_to_forming_event(tmp_path):
+    session = tmp_path / "session"
+    session.mkdir()
+    journal = PatternEventJournal(
+        session,
+        provenance=build_recording_provenance(),
+    )
+    context = {"price": {"available": True, "value": 4.25, "source": "quote"}}
+
+    journal.append_observations([observation()], observation_ts_ms=20_000)
+    journal.append_observations(
+        [observation(state="BREAKOUT")],
+        observation_ts_ms=30_000,
+        trigger_context=context,
+    )
+    journal.close()
+
+    events = [
+        json.loads(line)
+        for line in (session / "pattern_events.jsonl").read_text().splitlines()
+    ]
+    assert "trigger_context" not in events[0]
+    assert events[1]["trigger_context"] == context
+
+
 def test_catalog_loads_pattern_journal_and_legacy_session_without_one(tmp_path):
     session = tmp_path / "session"
     session.mkdir()

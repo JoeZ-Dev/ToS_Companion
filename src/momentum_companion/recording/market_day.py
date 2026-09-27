@@ -289,6 +289,7 @@ class MarketDayRecorder:
         observations: Iterable[Mapping[str, Any]],
         *,
         observation_ts_ms: int,
+        trigger_context: Mapping[str, Any] | None = None,
     ) -> int:
         normalized = str(symbol or "").strip().upper()
         with self._lock:
@@ -304,6 +305,7 @@ class MarketDayRecorder:
             return self._pattern_journal.append_observations(
                 selected,
                 observation_ts_ms=observation_ts_ms,
+                trigger_context=trigger_context,
             )
 
     def state(self) -> dict:

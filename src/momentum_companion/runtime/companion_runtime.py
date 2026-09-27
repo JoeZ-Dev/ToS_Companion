@@ -28,6 +28,7 @@ from momentum_companion.recording.history import (
 )
 from momentum_companion.recording.market_day import MarketDayRecorder, reached_cutoff, seconds_until_cutoff
 from momentum_companion.recording.provenance import build_recording_provenance
+from momentum_companion.recording.trigger_context import build_trigger_context
 from momentum_companion.session import CompanionSession
 from momentum_companion.setup_engine.pattern_service import PatternEvaluationService
 from momentum_companion.utils.logging import logging
@@ -509,23 +510,12 @@ class CompanionRuntime:
     def _handle_completed_bar(self, symbol: str, bar: TenSecondBar) -> None:
         self.session.ingest_bar(symbol, bar)
 
+        patterns = None
         try:
             patterns = self.pattern_service.ingest_completed_bar(symbol, bar)
             self.session.update_pattern_observations(symbol, patterns)
         except Exception:
             logger.warning("Pattern evaluation failed for %s", symbol, exc_info=True)
-        else:
-            try:
-                with self._lock:
-                    recorder = self._recorder
-                if recorder is not None:
-                    recorder.record_pattern_observations(
-                        symbol,
-                        patterns,
-                        observation_ts_ms=int(bar.ts) * 1000,
-                    )
-            except Exception:
-                logger.warning("Pattern journal failed for %s", symbol, exc_info=True)
 
         try:
             with self._lock:
@@ -540,6 +530,35 @@ class CompanionRuntime:
                 self.session.update_ae_snapshot(symbol, snapshot)
         except Exception:
             logger.warning("AE live ingest failed for %s", symbol, exc_info=True)
+
+        if patterns is not None:
+            try:
+                with self._lock:
+                    recorder = self._recorder
+                if recorder is not None:
+                    symbol_state = (
+                        self.session.snapshot().get("symbols", {}).get(symbol) or {}
+                    )
+                    context = build_trigger_context(
+                        symbol_state=symbol_state,
+                        bar={
+                            "ts": bar.ts,
+                            "open": bar.open,
+                            "high": bar.high,
+                            "low": bar.low,
+                            "close": bar.close,
+                            "volume": bar.volume,
+                        },
+                        observation_ts_ms=int(bar.ts) * 1000,
+                    )
+                    recorder.record_pattern_observations(
+                        symbol,
+                        patterns,
+                        observation_ts_ms=int(bar.ts) * 1000,
+                        trigger_context=context,
+                    )
+            except Exception:
+                logger.warning("Pattern journal failed for %s", symbol, exc_info=True)
 
     def _on_stream_state(self, state: str) -> None:
         self.session.update_connection_state(state)
