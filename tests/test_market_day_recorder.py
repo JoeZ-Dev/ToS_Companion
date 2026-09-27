@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -98,6 +99,35 @@ def test_default_manifest_declares_level_one_only(tmp_path: Path):
     manifest = json.loads((recorder.session_dir / "manifest.json").read_text())
     assert manifest["services"] == ["LEVELONE_EQUITIES"]
     assert "TIMESALE_EQUITY" not in manifest["counts"]["AEHL"]
+
+
+def test_recorder_journals_patterns_only_for_active_symbols(tmp_path: Path):
+    recorder = MarketDayRecorder(["AEHL"], output_root=tmp_path)
+    event = {
+        "id": "AEHL:TEST_PATTERN:10",
+        "symbol": "AEHL",
+        "pattern_type": "TEST_PATTERN",
+        "state": "FORMING",
+        "started_at": 10,
+        "evidence": {},
+        "points": [],
+        "lines": [],
+    }
+
+    assert recorder.record_pattern_observations(
+        "AEHL", [event], observation_ts_ms=20_000
+    ) == 1
+    recorder.remove_symbol("AEHL")
+    assert recorder.record_pattern_observations(
+        "AEHL", [event], observation_ts_ms=30_000
+    ) == 0
+    recorder.close()
+
+    manifest = json.loads((recorder.session_dir / "manifest.json").read_text())
+    artifact = manifest["derived_artifacts"]["pattern_events"]
+    assert artifact["path"] == "pattern_events.jsonl"
+    assert artifact["schema_version"] == 1
+    assert artifact["event_count"] == 1
 
 
 def test_new_manifest_records_runtime_and_detector_provenance(tmp_path: Path):

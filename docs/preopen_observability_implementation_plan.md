@@ -189,6 +189,22 @@ Do not create duplicate journal rows every time an unchanged observation is emit
 
 Replay reconstruction must remain available and should be comparable against the live journal.
 
+### Journal contract
+
+New recording sessions declare `pattern_events.jsonl` as a derived artifact in
+the manifest. Each schema-version-1 row records the session and symbol, stable
+pattern ID and type, detector state, pattern-start and observation timestamps in
+milliseconds, evidence, point/line geometry, detector config fingerprint and
+frozen semantic revision when defined, source mode, and deterministic event and
+snapshot fingerprints. The live observation timestamp is the completed bar that
+caused evaluation.
+
+The writer appends a row when state, evidence, or semantic geometry changes for
+a pattern ID. Repeated identical snapshots are skipped. Absence from a later
+stateless detector result does not create an inferred invalidation. Legacy
+sessions without the artifact load with an empty journal; raw event files remain
+unchanged and replay reconstruction remains independent.
+
 ## 1C. Halt/status event history
 
 ### Objective
