@@ -4,14 +4,20 @@ import json
 import threading
 from datetime import datetime, time as dt_time, timezone
 from pathlib import Path
-from typing import Iterable, TextIO
+from typing import Any, Iterable, Mapping, TextIO
 from zoneinfo import ZoneInfo
+
+from momentum_companion.recording.provenance import (
+    MANIFEST_SCHEMA_VERSION,
+    MARKET_EVENT_SCHEMA_VERSION,
+    build_recording_provenance,
+)
 
 ET = ZoneInfo("America/New_York")
 UTC = timezone.utc
 CUTOFF_ET = dt_time(hour=15, minute=0)
 RECORDED_SERVICES = frozenset({"TIMESALE_EQUITY", "LEVELONE_EQUITIES"})
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = MARKET_EVENT_SCHEMA_VERSION
 
 
 def normalize_symbols(symbols: Iterable[str]) -> list[str]:
@@ -99,6 +105,7 @@ class MarketDayRecorder:
         output_root: Path | None = None,
         started_at: datetime | None = None,
         services: Iterable[str] | None = None,
+        provenance: Mapping[str, Any] | None = None,
     ) -> None:
         self.symbols = normalize_symbols(symbols)
         self._symbol_set = set(self.symbols)
@@ -110,6 +117,7 @@ class MarketDayRecorder:
         if not selected_services:
             raise ValueError("At least one recording service is required")
         self.services = frozenset(selected_services)
+        self.provenance = dict(provenance or build_recording_provenance())
         self.started_at = (started_at or datetime.now(ET)).astimezone(ET)
         root = output_root or (Path.home() / ".tos_companion" / "recordings")
         stamp = self.started_at.strftime("%Y-%m-%d_%H%M%S")
@@ -291,8 +299,9 @@ class MarketDayRecorder:
 
     def _write_manifest(self, *, ended_at: str | None, stop_reason: str | None) -> None:
         payload = {
-            "schema_version": SCHEMA_VERSION,
+            "schema_version": MANIFEST_SCHEMA_VERSION,
             "kind": "market_day_recording",
+            "provenance": self.provenance,
             "symbols": self.symbols,
             "active_symbols": self.active_symbols(),
             "symbol_lifecycle": self._symbol_lifecycle,

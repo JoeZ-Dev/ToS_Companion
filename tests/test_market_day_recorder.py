@@ -12,6 +12,13 @@ from momentum_companion.recording.market_day import (
     normalize_symbols,
     reached_cutoff,
 )
+from momentum_companion.recording.provenance import (
+    FROZEN_DETECTOR_REVISIONS,
+    MANIFEST_SCHEMA_VERSION,
+    application_git_state,
+    build_recording_provenance,
+    deterministic_fingerprint,
+)
 
 
 def test_normalize_symbols_supports_multiple_and_deduplicates():
@@ -93,6 +100,55 @@ def test_default_manifest_declares_level_one_only(tmp_path: Path):
     assert "TIMESALE_EQUITY" not in manifest["counts"]["AEHL"]
 
 
+def test_new_manifest_records_runtime_and_detector_provenance(tmp_path: Path):
+    provenance = build_recording_provenance(
+        git_revision="a" * 40,
+        git_worktree_dirty=False,
+        app_version="test-version",
+    )
+    recorder = MarketDayRecorder(
+        ["AEHL"],
+        output_root=tmp_path,
+        provenance=provenance,
+    )
+    recorder.close()
+
+    import json
+    manifest = json.loads((recorder.session_dir / "manifest.json").read_text())
+    recorded = manifest["provenance"]
+    enabled = recorded["detectors"]["enabled"]
+
+    assert manifest["schema_version"] == MANIFEST_SCHEMA_VERSION
+    assert recorded["application"] == {
+        "git_revision": "a" * 40,
+        "git_worktree_dirty": False,
+        "version": "test-version",
+    }
+    assert [item["name"] for item in enabled] == [
+        "ASCENDING_TRIANGLE",
+        "MICRO_PULLBACK",
+        "LOCAL_RESISTANCE_BREAKOUT",
+        "TIGHT_CONSOLIDATION_BREAKOUT",
+    ]
+    micro = next(item for item in enabled if item["name"] == "MICRO_PULLBACK")
+    assert micro["semantic_revision"] == FROZEN_DETECTOR_REVISIONS["MICRO_PULLBACK"]
+    assert micro["config_fingerprint"] == deterministic_fingerprint(micro["config"])
+    assert recorded["schemas"] == {
+        "manifest": 2,
+        "market_event": 1,
+        "derived_journal": 1,
+    }
+    assert recorded["pattern_evaluation"]["bar_cadence_seconds"] == 10
+    assert recorded["session"]["timezone"] == "America/New_York"
+
+
+def test_deployed_git_revision_can_be_supplied_without_git_checkout(monkeypatch):
+    monkeypatch.setenv("TOS_COMPANION_GIT_REVISION", "b" * 40)
+    monkeypatch.setenv("TOS_COMPANION_GIT_WORKTREE_DIRTY", "false")
+
+    assert application_git_state() == ("b" * 40, False)
+
+
 def test_manifest_counts_match_jsonl_records(tmp_path: Path):
     import json
 
@@ -130,6 +186,7 @@ def test_manifest_counts_match_jsonl_records(tmp_path: Path):
     assert manifest["stop_reason"] == "browser_stop"
     assert manifest["counts"]["AEHL"]["LEVELONE_EQUITIES"] == 3
     assert len(jsonl_lines) == 3
+    assert all(json.loads(line)["schema_version"] == 1 for line in jsonl_lines)
 
 
 def test_recorded_l1_can_reconstruct_minute_candles(tmp_path: Path):

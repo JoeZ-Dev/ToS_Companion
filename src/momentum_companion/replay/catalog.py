@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from momentum_companion.recording.backfill import load_backfill_candles
+from momentum_companion.recording.provenance import normalize_manifest_provenance
 
 
 class RecordingCatalog:
@@ -37,6 +38,7 @@ class RecordingCatalog:
                     "counts": manifest.get("counts") or {},
                     "stop_reason": manifest.get("stop_reason"),
                     "historical_backfill": manifest.get("historical_backfill") or {},
+                    "provenance": normalize_manifest_provenance(manifest),
                 }
             )
         return sessions
@@ -52,6 +54,7 @@ class RecordingCatalog:
             raise ValueError(f"invalid replay manifest: {session_id}") from exc
         if manifest.get("kind") != "market_day_recording":
             raise ValueError(f"invalid replay session: {session_id}")
+        manifest["provenance"] = normalize_manifest_provenance(manifest)
         return manifest
 
     def load_events(self, session_id: str, symbol: str) -> list[dict[str, Any]]:

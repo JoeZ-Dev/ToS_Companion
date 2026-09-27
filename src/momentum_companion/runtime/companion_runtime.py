@@ -27,6 +27,7 @@ from momentum_companion.recording.history import (
     merge_candles_prefer_primary,
 )
 from momentum_companion.recording.market_day import MarketDayRecorder, reached_cutoff, seconds_until_cutoff
+from momentum_companion.recording.provenance import build_recording_provenance
 from momentum_companion.session import CompanionSession
 from momentum_companion.setup_engine.pattern_service import PatternEvaluationService
 from momentum_companion.utils.logging import logging
@@ -561,7 +562,12 @@ class CompanionRuntime:
         with self._lock:
             if self._recorder is not None:
                 raise RuntimeError("a recording session is already active")
-            recorder = MarketDayRecorder(normalized)
+            recorder = MarketDayRecorder(
+                normalized,
+                provenance=build_recording_provenance(
+                    engine=self.pattern_service.engine,
+                ),
+            )
             self._recorder = recorder
             self._recording_symbols = set(recorder.symbols)
 

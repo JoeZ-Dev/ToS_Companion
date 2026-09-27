@@ -67,7 +67,58 @@ def test_catalog_lists_recorded_sessions_without_opening_live_services(tmp_path)
         "symbols": ["TOPS"],
         "counts": {"TOPS": {"LEVELONE_EQUITIES": 3}},
         "stop_reason": "3pm_cutoff",
+        "historical_backfill": {},
+        "provenance": {
+            "application": {
+                "git_revision": None,
+                "git_worktree_dirty": None,
+                "version": None,
+            },
+            "detectors": {
+                "enabled": None,
+                "inventory_fingerprint": None,
+            },
+            "schemas": {
+                "manifest": 1,
+                "market_event": None,
+                "derived_journal": None,
+            },
+            "pattern_evaluation": {"bar_cadence_seconds": None},
+            "session": {
+                "timezone": None,
+                "premarket_start_et": None,
+                "regular_market_open_et": None,
+                "regular_market_close_et": None,
+                "after_hours_end_et": None,
+                "recording_cutoff_et": None,
+            },
+            "source_mode": None,
+        },
     }]
+
+
+def test_catalog_loads_legacy_manifest_with_explicit_unknown_provenance(tmp_path):
+    session = _write_session(tmp_path)
+    manifest = RecordingCatalog(tmp_path).load_manifest(session.name)
+
+    assert manifest["schema_version"] == 1
+    assert manifest["provenance"]["application"]["git_revision"] is None
+    assert manifest["provenance"]["detectors"]["enabled"] is None
+    assert manifest["provenance"]["pattern_evaluation"]["bar_cadence_seconds"] is None
+
+
+def test_catalog_fills_unknown_fields_in_partial_provenance(tmp_path):
+    session = _write_session(tmp_path)
+    manifest_path = session / "manifest.json"
+    raw = json.loads(manifest_path.read_text())
+    raw["provenance"] = {"application": {"git_revision": "a" * 40}}
+    manifest_path.write_text(json.dumps(raw))
+
+    manifest = RecordingCatalog(tmp_path).load_manifest(session.name)
+
+    assert manifest["provenance"]["application"]["git_revision"] == "a" * 40
+    assert manifest["provenance"]["application"]["version"] is None
+    assert manifest["provenance"]["detectors"]["enabled"] is None
 
 
 def test_catalog_rejects_path_traversal(tmp_path):

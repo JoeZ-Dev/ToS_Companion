@@ -138,6 +138,29 @@ At recording/session creation, persist:
 - old manifests remain readable;
 - missing provenance on legacy recordings is represented as unknown, not guessed.
 
+### Manifest contract
+
+Manifest schema version 2 adds a top-level `provenance` object while preserving
+the schema-version-1 raw market-event rows. The object contains:
+
+- `application`: Git revision, dirty-worktree state when observable, and package
+  version when installed;
+- `detectors.enabled`: detector name, complete config value, deterministic config
+  fingerprint, and a semantic revision when one is frozen;
+- `detectors.inventory_fingerprint`: a deterministic fingerprint of the enabled
+  detector/config/revision inventory;
+- `schemas`: manifest, raw market-event, and derived-journal schema versions;
+- `pattern_evaluation.bar_cadence_seconds`;
+- `session`: timezone and explicit premarket, regular-session, after-hours, and
+  recording-cutoff boundaries;
+- `source_mode`.
+
+Catalog reads normalize legacy manifests to the same shape with unavailable
+values represented by `null`. They do not infer which detectors or cadence were
+used by an old recording. Source checkouts resolve the Git revision directly;
+the joelab Docker deployment injects the checked-out revision as a build
+argument because the image does not contain the repository's `.git` directory.
+
 ## 1B. First-class pattern-event journal
 
 ### Objective
