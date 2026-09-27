@@ -182,10 +182,12 @@ class DetectorAnnotationEvaluator:
                     "candidate_instance_count": 0,
                 },
                 "structure_detected": False,
+                "structure_detected_by_trigger": False,
                 "trigger_detected": False,
                 "fired_by_annotated_trigger": False,
                 "false_positive_on_rejected_candidate": False,
                 "first_structure_ms": None,
+                "first_structure_by_trigger_ms": None,
                 "first_trigger_state_ms": None,
                 "trigger_latency_ms": None,
                 "state_at_annotated_trigger": None,
@@ -235,6 +237,7 @@ class DetectorAnnotationEvaluator:
             item for item in trigger_observations if item["updated_ms"] <= trigger_ms
         ]
         first_structure = nearby[0] if nearby else None
+        first_structure_by_trigger = by_trigger[0] if by_trigger else None
         first_trigger = trigger_observations[0] if trigger_observations else None
         state_at_trigger = by_trigger[-1]["state"] if by_trigger else None
 
@@ -243,6 +246,7 @@ class DetectorAnnotationEvaluator:
             "supported_by_current_detector_registry": True,
             "matching": match,
             "structure_detected": bool(nearby),
+            "structure_detected_by_trigger": bool(by_trigger),
             "trigger_detected": bool(trigger_observations),
             "fired_by_annotated_trigger": bool(trigger_by_trigger),
             "false_positive_on_rejected_candidate": (
@@ -250,6 +254,10 @@ class DetectorAnnotationEvaluator:
             ),
             "first_structure_ms": (
                 first_structure["updated_ms"] if first_structure else None
+            ),
+            "first_structure_by_trigger_ms": (
+                first_structure_by_trigger["updated_ms"]
+                if first_structure_by_trigger else None
             ),
             "first_trigger_state_ms": (
                 first_trigger["updated_ms"] if first_trigger else None
@@ -415,6 +423,9 @@ class DetectorAnnotationEvaluator:
             valid = [item for item in items if item["valid_at_time"]]
             rejected = [item for item in items if not item["valid_at_time"]]
             structure_hits = [item for item in valid if item["structure_detected"]]
+            structure_hits_by_trigger = [
+                item for item in valid if item["structure_detected_by_trigger"]
+            ]
             trigger_hits = [item for item in valid if item["trigger_detected"]]
             false_positives = [
                 item
@@ -432,6 +443,10 @@ class DetectorAnnotationEvaluator:
                 "structure_detected_valid": len(structure_hits),
                 "structure_recall": (
                     len(structure_hits) / len(valid) if valid else None
+                ),
+                "structure_detected_by_trigger_valid": len(structure_hits_by_trigger),
+                "structure_recall_at_trigger": (
+                    len(structure_hits_by_trigger) / len(valid) if valid else None
                 ),
                 "trigger_detected_valid": len(trigger_hits),
                 "trigger_recall": len(trigger_hits) / len(valid) if valid else None,
@@ -459,6 +474,11 @@ class DetectorAnnotationEvaluator:
             "rejected_supported": len(rejected_supported),
             "structure_detected_valid": sum(
                 1 for item in valid_supported if item["structure_detected"]
+            ),
+            "structure_detected_by_trigger_valid": sum(
+                1
+                for item in valid_supported
+                if item["structure_detected_by_trigger"]
             ),
             "trigger_detected_valid": sum(
                 1 for item in valid_supported if item["trigger_detected"]
