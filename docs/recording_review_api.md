@@ -40,6 +40,22 @@ The response contains:
 - replay/data-quality metadata
 - an explicit `future_data_included: false` marker
 
+If a requested window falls wholly before the first recorded event, the API returns an empty evidence packet instead of clamping forward into future data. The packet reports:
+
+- `window.availability.status = "before_recording"`
+- the first/last recorded event timestamps
+- `events_in_window = 0`
+
+Likewise, a wholly post-recording request is reported as `after_recording`. These are data-availability states, not 45-minute-window errors.
+
+Each packet also includes a `review_context` object derived from the packet end timestamp. During the regular-session open it reports:
+
+- 09:30:00-09:34:59 ET: `opening_volatility_context = "very_high"`
+- 09:35:00-09:44:59 ET: `opening_volatility_context = "elevated"`
+- otherwise: `opening_volatility_context = "normal"`
+
+This is review context only. It does not alter detector behavior or automatically invalidate a setup.
+
 This endpoint is for discovery. A reviewer can move sequentially through a recording and identify candidate momentum setups, including valid setups that later failed.
 
 ### POST /api/review/verify
@@ -110,6 +126,23 @@ A setup that later fails should still be labeled valid when the evidence at the 
 
 Do not use later outcome to decide whether the setup was valid at the trigger.
 
+### Opening-session review rule
+
+The regular-session open requires stricter structural evidence because 09:30-09:35 ET can contain abrupt price discovery, wide swings, false breaks, and fast reversals that resemble patterns on coarser bars.
+
+From 09:30-09:35 ET:
+
+- do not label ordinary opening expansion, a single sharp push, a single reversal, or a one-shot reclaim as a structured setup by itself
+- require structure that persists across multiple short-interval observations
+- prefer repeated interaction with a defined level, compression, a controlled pullback, retest/reclaim behavior, or a clear higher-low/lower-high sequence
+- valid opening setups are allowed; the time window is not an automatic rejection rule
+
+From 09:35-09:45 ET, opening volatility is still considered elevated. Normal pattern interpretation is allowed, but the reviewer should keep a higher bar for structure than later in the session.
+
+After 09:45 ET, use normal review standards unless the recording itself shows an unusually unstable regime.
+
+The replay/L1-derived packet remains the machine-review source of truth. Human tick-chart screenshots may be used for adjudicating ambiguous examples, but should not replace the timestamp-bounded replay evidence.
+
 ### Pass 2: Blind verification
 
 For every proposed setup, call `/api/review/verify` ending at its trigger timestamp.
@@ -117,6 +150,22 @@ For every proposed setup, call `/api/review/verify` ending at its trigger timest
 Judge only whether the structure existed at that moment.
 
 Save the verification result as another annotation using `review_pass: "verification"` or retain the original discovery annotation and add a verification-specific note/evidence packet in downstream tooling.
+
+### Outcome consistency
+
+Outcome is evaluated only after `valid_at_time` has been decided from trigger-bounded evidence.
+
+For corpus labeling, use a consistent 15-minute post-trigger observation horizon when the recording contains that much data. This horizon is an evaluation convention, not a trading rule or target.
+
+Within that horizon:
+
+- `succeeded`: clear favorable continuation from the trigger before structural invalidation
+- `failed`: a valid setup triggers and then reaches its structural invalidation before meaningful follow-through
+- `no_follow_through`: the setup remains valid but produces neither clear continuation nor structural failure within the horizon
+- `invalid_before_trigger`: blind verification shows that the proposed setup was not actually valid at the trigger
+- `unknown`: insufficient post-trigger evidence, including recordings that end too soon
+
+When possible, record the evaluation horizon and the observed MFE/MAE separately from the qualitative outcome. Do not change the validity label based on later price action.
 
 ## Annotation semantics
 
