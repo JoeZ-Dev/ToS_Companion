@@ -3,6 +3,9 @@ from momentum_companion.setup_engine.pattern_engine import PatternEngine
 from momentum_companion.setup_engine.patterns import build_default_pattern_engine
 from momentum_companion.setup_engine.patterns.ascending_triangle import detect_ascending_triangle
 from momentum_companion.setup_engine.patterns.micro_pullback import detect_micro_pullback
+from momentum_companion.setup_engine.patterns.local_resistance_breakout import (
+    detect_local_resistance_breakout,
+)
 
 
 def bar(t, o, h, l, c, v=1000):
@@ -265,3 +268,69 @@ def test_unconfirmed_pullback_is_provisional_and_cannot_continue():
     assert observation.evidence["retracement_selection"] == "provisional_current_low"
     assert observation.state != PatternState.CONTINUATION
     assert observation.evidence["continuation_level"] is None
+
+
+def local_resistance_bars(last_close=10.00):
+    return [
+        bar(0, 9.70, 9.82, 9.65, 9.78),
+        bar(10, 9.78, 10.00, 9.75, 9.92),  # resistance touch 1
+        bar(20, 9.91, 9.94, 9.78, 9.84),
+        bar(30, 9.84, 10.01, 9.82, 9.95),  # resistance touch 2
+        bar(40, 9.94, 9.96, 9.84, 9.88),
+        bar(50, 9.88, 9.98, 9.86, 9.94),
+        bar(60, 9.94, max(10.04, last_close), 9.92, last_close),
+    ]
+
+
+def test_detects_local_resistance_without_requiring_rising_lows():
+    observation = detect_local_resistance_breakout(
+        "abcd",
+        local_resistance_bars(last_close=9.97),
+    )
+
+    assert observation is not None
+    assert observation.pattern_type == "LOCAL_RESISTANCE_BREAKOUT"
+    assert observation.evidence["resistance_touches"] >= 2
+    assert observation.evidence["selection"] == "recent_clustered_swing_highs"
+    assert {line.role for line in observation.lines} == {"resistance"}
+    assert any(point.role == "resistance_touch" for point in observation.points)
+
+
+def test_local_resistance_breakout_requires_current_cross():
+    observation = detect_local_resistance_breakout(
+        "ABCD",
+        local_resistance_bars(last_close=10.05),
+    )
+
+    assert observation is not None
+    assert observation.state == PatternState.BREAKOUT
+    assert observation.evidence["crossed_now"] is True
+    assert observation.evidence["previous_close"] < observation.evidence["breakout_level"]
+    assert observation.evidence["last_close"] >= observation.evidence["breakout_level"]
+
+
+def test_local_resistance_does_not_resurrect_after_prior_breakout():
+    bars = [
+        bar(0, 9.70, 9.82, 9.65, 9.78),
+        bar(10, 9.78, 10.00, 9.75, 9.92),
+        bar(20, 9.91, 9.94, 9.78, 9.84),
+        bar(30, 9.84, 10.01, 9.82, 9.95),
+        bar(40, 9.94, 10.08, 9.92, 10.06),  # already broke resistance
+        bar(50, 10.04, 10.05, 9.95, 9.98),
+        bar(60, 9.98, 10.08, 9.96, 10.06),
+    ]
+
+    assert detect_local_resistance_breakout("ABCD", bars) is None
+
+
+def test_local_resistance_returns_none_for_single_high():
+    bars = [
+        bar(0, 9.70, 9.82, 9.65, 9.78),
+        bar(10, 9.78, 10.00, 9.75, 9.92),
+        bar(20, 9.91, 9.94, 9.78, 9.84),
+        bar(30, 9.84, 9.92, 9.80, 9.88),
+        bar(40, 9.88, 9.93, 9.82, 9.90),
+        bar(50, 9.90, 9.96, 9.86, 9.94),
+    ]
+
+    assert detect_local_resistance_breakout("ABCD", bars) is None

@@ -50,6 +50,7 @@ src/momentum_companion/setup_engine/
         __init__.py
         ascending_triangle.py
         micro_pullback.py
+        local_resistance_breakout.py
 ```
 
 ## Data flow
@@ -403,7 +404,28 @@ Currently emits evidence including:
 - recovery pivot and timestamp;
 - continuation level derived from the recovery pivot.
 
-These two detectors are reference implementations for the framework, not special cases built into it.
+### Local resistance breakout
+
+Consumes:
+
+- normalized bars;
+- recent swing highs;
+- clustered horizontal resistance.
+
+It intentionally does not require the rising-low geometry of an ascending triangle. The structure remains valid while repeated local swing highs define resistance and no intervening bar has already closed through the breakout level. A breakout observation is emitted only on the current close crossing the buffered resistance level from below; a previously resolved level is not resurrected.
+
+Its initial defaults are structural starting points and were not tuned against the existing six-session development corpus. It is registered prospectively so new recordings can capture its behavior before any corpus-driven tuning.
+
+Currently emits evidence including:
+
+- resistance level/range;
+- number of resistance touches;
+- breakout level;
+- previous/current close;
+- whether the current bar performed the breakout cross;
+- adaptive confirmation evidence.
+
+These detectors are reference implementations for the framework, not special cases built into it.
 
 ## Future pattern families
 
@@ -585,6 +607,7 @@ As of this branch:
 - reusable structure package exists;
 - ascending triangle reference detector exists;
 - micro pullback reference detector exists;
+- local resistance breakout detector exists and is prospectively registered without development-corpus tuning;
 - explicit default registration exists;
 - duplicate registration is rejected;
 - synthetic pattern tests exist;
