@@ -373,6 +373,27 @@ Do not invent invalidation rules for detectors that do not expose one.
 
 Pattern events can be evaluated later without rerunning bespoke scripts for basic forward behavior.
 
+### Outcome-measurement contract
+
+`pattern_outcomes.json` schema version 1 is generated at recording close and is
+available read-only from
+`GET /api/evaluation/pattern-outcomes/{session_id}`. The first live journal event
+in `BREAKOUT` or `CONTINUATION` for each pattern ID is the descriptive trigger.
+The completed trigger-bar close is the reference price. Measurements reuse
+`compute_excursions` for long-side MAE/MFE and add extrema timestamps and elapsed
+times.
+
+The default horizon is 15 minutes. Forward returns at 1, 2, 5, 10, and 15
+minutes use the first observed bar timestamp at or within 10 seconds after the
+target; unavailable observations remain `null` and are never interpolated. The
+horizon stops at recording end, the first unresolved raw gap, or an explicit
+provider halt. Fully repaired minute gaps remain measurable and are flagged.
+
+Structural invalidation is measured only for a detector-provided
+`invalidation_level`, plus the tight-consolidation detector's existing explicit
+`breakdown_level` and close-breach rule. No invalidation level is inferred for
+other patterns.
+
 ---
 
 # Phase 3 — Context evidence primitives

@@ -359,6 +359,14 @@ class MarketDayRecorder:
                 write_integrity_report(self.session_dir)
             except Exception:
                 logger.warning("Recording integrity report write failed", exc_info=True)
+            try:
+                from momentum_companion.evaluation.pattern_outcomes import (
+                    write_pattern_outcomes,
+                )
+
+                write_pattern_outcomes(self.session_dir.parent, self.session_dir.name)
+            except Exception:
+                logger.warning("Pattern outcome measurement failed", exc_info=True)
 
     def _write_manifest(self, *, ended_at: str | None, stop_reason: str | None) -> None:
         payload = {
@@ -393,6 +401,10 @@ class MarketDayRecorder:
                 "integrity_report": {
                     "path": INTEGRITY_REPORT_FILENAME,
                     "schema_version": INTEGRITY_REPORT_SCHEMA_VERSION,
+                },
+                "pattern_outcomes": {
+                    "path": "pattern_outcomes.json",
+                    "schema_version": 1,
                 }
             },
         }
