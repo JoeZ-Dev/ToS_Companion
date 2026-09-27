@@ -7,6 +7,12 @@ from typing import Any, Callable
 
 from momentum_companion.replay.engine import ReplayEngine
 from momentum_companion.review.annotations import ReviewAnnotationStore
+from momentum_companion.evaluation.corpus_registry import (
+    DEVELOPMENT_SESSIONS,
+    HOLDOUT_SESSIONS,
+    EVALUATION_BASELINE_REVISION,
+    metadata_for,
+)
 
 
 DETECTOR_ALIASES: dict[str, str] = {
@@ -116,9 +122,19 @@ class DetectorAnnotationEvaluator:
                     )
                 )
 
+        corpus_counts: dict[str, int] = defaultdict(int)
+        for item in results:
+            corpus_counts[str((item.get("corpus") or {}).get("corpus") or "unclassified")] += 1
+
         return {
             "schema_version": 1,
             "purpose": "detector_vs_verified_annotation_audit",
+            "corpus_registry": {
+                "development_sessions": sorted(DEVELOPMENT_SESSIONS),
+                "holdout_sessions": sorted(HOLDOUT_SESSIONS),
+                "evaluation_baseline_revision": EVALUATION_BASELINE_REVISION,
+                "annotation_counts": dict(sorted(corpus_counts.items())),
+            },
             "configuration": {
                 "default_lookback_ms": default_lookback_ms,
                 "post_trigger_ms": post_trigger_ms,
@@ -152,9 +168,13 @@ class DetectorAnnotationEvaluator:
         window_end_ms = trigger_ms + int(post_trigger_ms)
         valid_at_time = bool(annotation.get("valid_at_time"))
 
+        session_id = str(annotation.get("session_id") or "")
+        corpus = metadata_for(session_id, detector_type).to_dict()
+
         base = {
             "annotation_id": annotation.get("annotation_id"),
             "session_id": annotation.get("session_id"),
+            "corpus": corpus,
             "symbol": str(annotation.get("symbol") or "").upper(),
             "setup_type": setup_type,
             "detector_type": detector_type,
