@@ -129,6 +129,39 @@ class RecordingCatalog:
             through_ms=through_ms,
         )
 
+    def load_pattern_events(
+        self, session_id: str, *, symbol: str | None = None
+    ) -> list[dict[str, Any]]:
+        session_dir = self._session_dir(session_id)
+        self.load_manifest(session_id)
+        normalized = str(symbol or "").strip().upper() or None
+        path = session_dir / "pattern_events.jsonl"
+        events: list[dict[str, Any]] = []
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if event.get("kind") != "pattern_event":
+                        continue
+                    event_symbol = str(event.get("symbol") or "").strip().upper()
+                    if normalized is not None and event_symbol != normalized:
+                        continue
+                    events.append(event)
+        except FileNotFoundError:
+            return []
+        return sorted(
+            events,
+            key=lambda event: (
+                int(event.get("observation_ts_ms") or 0),
+                str(event.get("event_id") or ""),
+            ),
+        )
+
     def _session_dir(self, session_id: str) -> Path:
         value = str(session_id or "").strip()
         if not value or Path(value).name != value or "/" in value or "\\" in value:

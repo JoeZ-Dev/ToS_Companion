@@ -12,6 +12,10 @@ from momentum_companion.recording.provenance import (
     MARKET_EVENT_SCHEMA_VERSION,
     build_recording_provenance,
 )
+from momentum_companion.recording.pattern_journal import (
+    PATTERN_JOURNAL_FILENAME,
+    PatternEventJournal,
+)
 
 ET = ZoneInfo("America/New_York")
 UTC = timezone.utc
@@ -123,6 +127,11 @@ class MarketDayRecorder:
         stamp = self.started_at.strftime("%Y-%m-%d_%H%M%S")
         self.session_dir = root / f"{stamp}_session"
         self.session_dir.mkdir(parents=True, exist_ok=False)
+        self._pattern_journal = PatternEventJournal(
+            self.session_dir,
+            provenance=self.provenance,
+            source_mode="live",
+        )
         self._files: dict[str, TextIO] = {}
         self._counts: dict[str, dict[str, int]] = {
             sym: {service: 0 for service in sorted(self.services)} for sym in self.symbols
@@ -251,6 +260,29 @@ class MarketDayRecorder:
         with self._lock:
             return [symbol for symbol in self.symbols if symbol in self._active_symbols]
 
+    def record_pattern_observations(
+        self,
+        symbol: str,
+        observations: Iterable[Mapping[str, Any]],
+        *,
+        observation_ts_ms: int,
+    ) -> int:
+        normalized = str(symbol or "").strip().upper()
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("Recorder is closed")
+            if normalized not in self._active_symbols:
+                return 0
+            selected = [
+                observation
+                for observation in observations
+                if str(observation.get("symbol") or "").strip().upper() == normalized
+            ]
+            return self._pattern_journal.append_observations(
+                selected,
+                observation_ts_ms=observation_ts_ms,
+            )
+
     def state(self) -> dict:
         with self._lock:
             return {
@@ -262,6 +294,7 @@ class MarketDayRecorder:
                 "counts": {
                     symbol: dict(counts) for symbol, counts in self._counts.items()
                 },
+                "pattern_event_count": self._pattern_journal.count,
                 "pre7_seeds": {
                     symbol: dict(seed) for symbol, seed in self._pre7_seeds.items()
                 },
@@ -291,6 +324,7 @@ class MarketDayRecorder:
                 handle.flush()
                 handle.close()
             self._files.clear()
+            self._pattern_journal.close()
             self._closed = True
             self._write_manifest(
                 ended_at=ended_iso,
@@ -312,6 +346,15 @@ class MarketDayRecorder:
             "stop_reason": stop_reason,
             "counts": self._counts,
             "pre7_seeds": self._pre7_seeds,
+            "derived_artifacts": {
+                "pattern_events": {
+                    "path": PATTERN_JOURNAL_FILENAME,
+                    "schema_version": self.provenance.get("schemas", {}).get(
+                        "derived_journal"
+                    ),
+                    "event_count": self._pattern_journal.count,
+                }
+            },
         }
         (self.session_dir / "manifest.json").write_text(
             json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"

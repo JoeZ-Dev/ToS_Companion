@@ -514,6 +514,18 @@ class CompanionRuntime:
             self.session.update_pattern_observations(symbol, patterns)
         except Exception:
             logger.warning("Pattern evaluation failed for %s", symbol, exc_info=True)
+        else:
+            try:
+                with self._lock:
+                    recorder = self._recorder
+                if recorder is not None:
+                    recorder.record_pattern_observations(
+                        symbol,
+                        patterns,
+                        observation_ts_ms=int(bar.ts) * 1000,
+                    )
+            except Exception:
+                logger.warning("Pattern journal failed for %s", symbol, exc_info=True)
 
         try:
             with self._lock:
