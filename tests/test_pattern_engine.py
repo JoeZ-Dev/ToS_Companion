@@ -168,7 +168,7 @@ def test_micro_pullback_instance_disappears_after_prior_continuation():
 
     later = [
         *bars,
-        bar(60, 10.62, 10.64, 10.55, 10.57),
+        bar(70, 10.62, 10.64, 10.55, 10.57),
     ]
     completed = detect_micro_pullback("ABCD", later)
 
