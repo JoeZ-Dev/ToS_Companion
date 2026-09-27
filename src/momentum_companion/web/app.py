@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from momentum_companion.replay import ReplayEngine
+from momentum_companion.review import ReviewAnnotationStore, ReviewCorpus
 from momentum_companion.runtime import CompanionRuntime
 
 
@@ -54,6 +55,36 @@ class ReplayInspectRequest(BaseModel):
     timestamp_ms: int | None = None
 
 
+class ReviewWindowRequest(BaseModel):
+    session_id: str
+    symbol: str
+    start_ms: int | None = None
+    end_ms: int | None = None
+
+
+class ReviewVerificationRequest(BaseModel):
+    session_id: str
+    symbol: str
+    trigger_ms: int
+    lookback_ms: int = 10 * 60 * 1000
+
+
+class ReviewAnnotationRequest(BaseModel):
+    session_id: str
+    symbol: str
+    setup_type: str
+    trigger_ms: int
+    valid_at_time: bool
+    setup_start_ms: int | None = None
+    outcome: str = "unknown"
+    confidence: float | None = None
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    invalidation: str | None = None
+    notes: str = ""
+    review_pass: str = "discovery"
+    source: str = "chatgpt"
+
+
 LIGHTWEIGHT_CHARTS_JS = (
     Path(__file__).resolve().parents[1]
     / "ui"
@@ -70,6 +101,10 @@ def create_app(
     companion = runtime or CompanionRuntime()
     replay = replay_engine or ReplayEngine(
         recordings_root=Path.home() / ".tos_companion" / "recordings"
+    )
+    review_corpus = ReviewCorpus(replay.catalog.root)
+    review_annotations = ReviewAnnotationStore(
+        replay.catalog.root.parent / "review_annotations"
     )
 
     @asynccontextmanager
@@ -228,6 +263,48 @@ def create_app(
                 isolated.seek(request.cursor)
             return isolated.snapshot()
         except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/review/recordings")
+    def review_recordings() -> list[dict[str, Any]]:
+        return review_corpus.list_recordings()
+
+    @app.post("/api/review/window")
+    def review_window(request: ReviewWindowRequest) -> dict[str, Any]:
+        try:
+            return review_corpus.window(
+                request.session_id,
+                request.symbol,
+                start_ms=request.start_ms,
+                end_ms=request.end_ms,
+            )
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/review/verify")
+    def review_verify(request: ReviewVerificationRequest) -> dict[str, Any]:
+        try:
+            return review_corpus.verification_window(
+                request.session_id,
+                request.symbol,
+                trigger_ms=request.trigger_ms,
+                lookback_ms=request.lookback_ms,
+            )
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/review/annotations")
+    def review_annotation_list(
+        session_id: str | None = None,
+        symbol: str | None = None,
+    ) -> list[dict[str, Any]]:
+        return review_annotations.list(session_id=session_id, symbol=symbol)
+
+    @app.post("/api/review/annotations")
+    def review_annotation_add(request: ReviewAnnotationRequest) -> dict[str, Any]:
+        try:
+            return review_annotations.add(request.model_dump())
+        except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/replay/load")
