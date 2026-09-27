@@ -553,3 +553,43 @@ def test_detector_audit_endpoint_uses_verification_annotations_and_reports_unsup
     assert payload["summary"]["supported_annotations"] == 0
     assert payload["summary"]["unsupported_setup_types"] == ["local_resistance_breakout"]
     assert payload["results"][0]["supported_by_current_detector_registry"] is False
+
+
+def test_recording_integrity_endpoint_is_read_only_and_handles_unknown_session(tmp_path):
+    import json
+    from momentum_companion.replay.engine import ReplayEngine
+
+    session = tmp_path / "session"
+    session.mkdir()
+    (session / "manifest.json").write_text(
+        json.dumps(
+            {
+                "kind": "market_day_recording",
+                "symbols": ["TOPS"],
+                "ended_at_et": "2026-09-27T09:00:00-04:00",
+            }
+        )
+    )
+    (session / "TOPS.jsonl").write_text(
+        json.dumps(
+            {
+                "kind": "market_event",
+                "service": "LEVELONE_EQUITIES",
+                "symbol": "TOPS",
+                "stream_ts_ms": 1000,
+                "raw": {"key": "TOPS"},
+            }
+        )
+        + "\n"
+    )
+    runtime = FakeRuntime()
+    replay = ReplayEngine(recordings_root=tmp_path)
+
+    with TestClient(create_app(runtime, replay_engine=replay)) as client:
+        response = client.get("/api/recordings/session/integrity")
+        missing = client.get("/api/recordings/missing/integrity")
+
+    assert response.status_code == 200
+    assert response.json()["symbols"]["TOPS"]["raw_event_count"] == 1
+    assert missing.status_code == 404
+    assert not (session / "integrity_report.json").exists()

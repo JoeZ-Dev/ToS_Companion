@@ -8,6 +8,15 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, TextIO
 from zoneinfo import ZoneInfo
 
+from momentum_companion.recording.integrity import (
+    INTEGRITY_REPORT_FILENAME,
+    INTEGRITY_REPORT_SCHEMA_VERSION,
+    write_integrity_report,
+)
+from momentum_companion.recording.pattern_journal import (
+    PATTERN_JOURNAL_FILENAME,
+    PatternEventJournal,
+)
 from momentum_companion.recording.provenance import (
     MANIFEST_SCHEMA_VERSION,
     MARKET_EVENT_SCHEMA_VERSION,
@@ -16,10 +25,6 @@ from momentum_companion.recording.provenance import (
 from momentum_companion.recording.status_journal import (
     STATUS_JOURNAL_FILENAME,
     SecurityStatusJournal,
-)
-from momentum_companion.recording.pattern_journal import (
-    PATTERN_JOURNAL_FILENAME,
-    PatternEventJournal,
 )
 
 ET = ZoneInfo("America/New_York")
@@ -350,6 +355,10 @@ class MarketDayRecorder:
                 ended_at=ended_iso,
                 stop_reason=stop_reason,
             )
+            try:
+                write_integrity_report(self.session_dir)
+            except Exception:
+                logger.warning("Recording integrity report write failed", exc_info=True)
 
     def _write_manifest(self, *, ended_at: str | None, stop_reason: str | None) -> None:
         payload = {
@@ -380,6 +389,10 @@ class MarketDayRecorder:
                         "derived_journal"
                     ),
                     "event_count": self._status_journal.count,
+                },
+                "integrity_report": {
+                    "path": INTEGRITY_REPORT_FILENAME,
+                    "schema_version": INTEGRITY_REPORT_SCHEMA_VERSION,
                 }
             },
         }

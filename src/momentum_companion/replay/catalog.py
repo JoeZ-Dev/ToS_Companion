@@ -173,6 +173,11 @@ class RecordingCatalog:
             symbol=symbol,
         )
 
+    def integrity_report(self, session_id: str) -> dict[str, Any]:
+        from momentum_companion.recording.integrity import build_integrity_report
+
+        return build_integrity_report(self._session_dir(session_id))
+
     def _load_derived_events(
         self,
         session_id: str,
