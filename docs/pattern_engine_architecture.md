@@ -388,8 +388,10 @@ Currently emits evidence including:
 Consumes:
 
 - normalized bars;
-- strongest recent bullish impulse;
+- the latest qualifying local bullish impulse, anchored between local swing highs;
 - measured retracement.
+
+A micro-pullback is treated as a single local impulse -> retracement -> continuation lifecycle. Once an earlier post-impulse bar has already closed through the continuation level, that detector instance is complete and is not allowed to drift back into PULLBACK/TURNING on later bars.
 
 Currently emits evidence including:
 

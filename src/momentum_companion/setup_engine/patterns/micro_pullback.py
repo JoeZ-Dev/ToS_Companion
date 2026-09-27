@@ -16,7 +16,7 @@ from momentum_companion.setup_engine.pattern_contracts import (
 from momentum_companion.setup_engine.structure import (
     measure_retracement,
     normalize_bars,
-    strongest_bullish_impulse,
+    latest_bullish_impulse,
 )
 
 
@@ -58,7 +58,7 @@ def detect_micro_pullback(symbol: str, bars, config: MicroPullbackConfig | None 
     if len(window) < cfg.min_bars:
         return None
 
-    impulse = strongest_bullish_impulse(window, min_move_pct=cfg.min_impulse_pct, reserve_tail_bars=1)
+    impulse = latest_bullish_impulse(window, min_move_pct=cfg.min_impulse_pct, reserve_tail_bars=1)
     if impulse is None:
         return None
     retracement = measure_retracement(window, impulse)
@@ -73,6 +73,18 @@ def detect_micro_pullback(symbol: str, bars, config: MicroPullbackConfig | None 
     last = pullback_bars[-1]
     prior = pullback_bars[-2] if len(pullback_bars) > 1 else window[impulse.end_index]
     continuation_level = impulse.end_price * (1 + cfg.continuation_buffer_pct)
+
+    # A micro-pullback is a single local impulse -> retracement -> continuation
+    # lifecycle. Once an earlier post-impulse bar has already closed through the
+    # continuation level, that instance is complete and must not later regress
+    # back into PULLBACK/TURNING as the rolling window advances.
+    prior_continuations = [
+        bar for bar in pullback_bars[:-1]
+        if bar.close >= continuation_level
+    ]
+    if prior_continuations:
+        return None
+
     confirmation = measure_confirmation(
         normalized,
         qualifies=lambda bar: bar.close >= continuation_level,
@@ -110,6 +122,8 @@ def detect_micro_pullback(symbol: str, bars, config: MicroPullbackConfig | None 
             "retracement_pct": retracement.depth_pct,
             "continuation_level": continuation_level,
             "continuation_confirmation": confirmation.to_dict(),
+            "impulse_selection": "latest_qualifying",
+            "lifecycle": "single_continuation",
         },
         points=points,
         lines=lines,
