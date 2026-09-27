@@ -592,6 +592,22 @@ Support deterministic filtering by:
 
 A research agent can consume structured setup evidence without visually interpreting the live frontend.
 
+### Structured research export contract
+
+`GET /api/research/export` composes recording provenance, corpus classification,
+integrity, grouped pattern instances, complete journal transitions and their
+evidence/geometry/trigger snapshots, explicit security-status context, and
+overlap records. It supports deterministic filters for session, symbol, pattern
+type, corpus classification, trigger presence, and observed-lifetime time range.
+
+Outcome measurements are omitted by default. Callers must request
+`include_outcomes=true`, and the resulting MAE/MFE, forward returns, and
+invalidation measurements remain in a separate `outcome_measurements` section.
+The export labels itself as unsuitable for blind review because complete
+lifecycle journals can contain post-trigger observations. Trigger-bounded
+validity review continues to use `POST /api/review/verify`, which does not call
+the research export or receive outcome data.
+
 ---
 
 # Phase 6 — Browser chart overlays

@@ -49,7 +49,7 @@ def build_pattern_overlaps(
     cadence_seconds = _positive_int(cadence)
     cadence_ms = cadence_seconds * 1000 if cadence_seconds is not None else 0
     events = catalog.load_pattern_events(session_id, symbol=requested_symbol)
-    instances = _pattern_instances(events, cadence_ms=cadence_ms)
+    instances = pattern_instances(events, cadence_ms=cadence_ms)
 
     overlaps: list[dict[str, Any]] = []
     by_symbol: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -124,7 +124,7 @@ def write_pattern_overlaps(
     return report
 
 
-def _pattern_instances(
+def pattern_instances(
     events: Iterable[dict[str, Any]], *, cadence_ms: int
 ) -> list[dict[str, Any]]:
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)

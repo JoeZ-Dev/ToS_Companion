@@ -16,6 +16,7 @@ from momentum_companion.evaluation import (
 )
 from momentum_companion.evaluation.pattern_outcomes import build_pattern_outcomes
 from momentum_companion.evaluation.pattern_overlaps import build_pattern_overlaps
+from momentum_companion.evaluation.research_export import build_research_export
 from momentum_companion.replay import ReplayEngine
 from momentum_companion.review import ReviewAnnotationStore, ReviewCorpus
 from momentum_companion.runtime import CompanionRuntime
@@ -318,6 +319,32 @@ def create_app(
             )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/research/export")
+    def research_export(
+        session_id: str | None = None,
+        symbol: str | None = None,
+        pattern_type: str | None = None,
+        corpus_classification: str | None = None,
+        has_trigger: bool | None = None,
+        start_ms: int | None = Query(default=None, ge=0),
+        end_ms: int | None = Query(default=None, ge=0),
+        include_outcomes: bool = False,
+    ) -> dict[str, Any]:
+        try:
+            return build_research_export(
+                replay.catalog.root,
+                session_id=session_id,
+                symbol=symbol,
+                pattern_type=pattern_type,
+                corpus_classification=corpus_classification,
+                has_trigger=has_trigger,
+                start_ms=start_ms,
+                end_ms=end_ms,
+                include_outcomes=include_outcomes,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/replay/state")
     def replay_state() -> dict[str, Any]:
