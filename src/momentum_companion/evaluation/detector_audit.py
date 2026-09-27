@@ -5,14 +5,15 @@ from pathlib import Path
 from statistics import median
 from typing import Any, Callable
 
-from momentum_companion.replay.engine import ReplayEngine
-from momentum_companion.review.annotations import ReviewAnnotationStore
+from momentum_companion.evaluation.corpus_classification import CorpusClassificationStore
 from momentum_companion.evaluation.corpus_registry import (
     DEVELOPMENT_SESSIONS,
     HOLDOUT_SESSIONS,
     EVALUATION_BASELINE_REVISION,
     metadata_for,
 )
+from momentum_companion.replay.engine import ReplayEngine
+from momentum_companion.review.annotations import ReviewAnnotationStore
 
 
 DETECTOR_ALIASES: dict[str, str] = {
@@ -45,9 +46,11 @@ class DetectorAnnotationEvaluator:
         recordings_root: Path,
         annotation_store: ReviewAnnotationStore,
         replay_factory: Callable[[], ReplayEngine] | None = None,
+        corpus_store: CorpusClassificationStore | None = None,
     ) -> None:
         self.recordings_root = Path(recordings_root)
         self.annotation_store = annotation_store
+        self.corpus_store = corpus_store
         self._replay_factory = replay_factory or (
             lambda: ReplayEngine(recordings_root=self.recordings_root)
         )
@@ -119,19 +122,32 @@ class DetectorAnnotationEvaluator:
                         timeline,
                         default_lookback_ms=default_lookback_ms,
                         post_trigger_ms=post_trigger_ms,
+                        corpus_store=self.corpus_store,
                     )
                 )
 
         corpus_counts: dict[str, int] = defaultdict(int)
         for item in results:
             corpus_counts[str((item.get("corpus") or {}).get("corpus") or "unclassified")] += 1
+        persisted_classifications = (
+            self.corpus_store.list() if self.corpus_store is not None else []
+        )
+        development_sessions = set(DEVELOPMENT_SESSIONS)
+        holdout_sessions = set(HOLDOUT_SESSIONS)
+        for classification in persisted_classifications:
+            session = str(classification.get("session_id") or "")
+            if classification.get("classification") == "development" and session:
+                development_sessions.add(session)
+            if classification.get("classification") == "holdout" and session:
+                holdout_sessions.add(session)
 
         return {
             "schema_version": 1,
             "purpose": "detector_vs_verified_annotation_audit",
             "corpus_registry": {
-                "development_sessions": sorted(DEVELOPMENT_SESSIONS),
-                "holdout_sessions": sorted(HOLDOUT_SESSIONS),
+                "development_sessions": sorted(development_sessions),
+                "holdout_sessions": sorted(holdout_sessions),
+                "persisted_classifications": persisted_classifications,
                 "evaluation_baseline_revision": EVALUATION_BASELINE_REVISION,
                 "annotation_counts": dict(sorted(corpus_counts.items())),
             },
@@ -155,6 +171,7 @@ class DetectorAnnotationEvaluator:
         *,
         default_lookback_ms: int = 5 * 60 * 1000,
         post_trigger_ms: int = 2 * 60 * 1000,
+        corpus_store: CorpusClassificationStore | None = None,
     ) -> dict[str, Any]:
         setup_type = str(annotation.get("setup_type") or "").strip().lower()
         detector_type = DETECTOR_ALIASES.get(setup_type)
@@ -169,7 +186,11 @@ class DetectorAnnotationEvaluator:
         valid_at_time = bool(annotation.get("valid_at_time"))
 
         session_id = str(annotation.get("session_id") or "")
-        corpus = metadata_for(session_id, detector_type).to_dict()
+        corpus = (
+            corpus_store.metadata_for(session_id, detector_type)
+            if corpus_store is not None
+            else metadata_for(session_id, detector_type).to_dict()
+        )
 
         base = {
             "annotation_id": annotation.get("annotation_id"),
