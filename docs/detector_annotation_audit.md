@@ -35,6 +35,25 @@ Current aliases:
 
 Other verified setup types are returned as `supported_by_current_detector_registry: false`. They are not counted as detector misses.
 
+## Instance matching
+
+The evaluator matches each annotation to one detector instance before scoring it.
+
+Why this matters: the same detector can emit multiple formations for the same symbol inside a broad lookback window. Without instance matching, an older completed micro pullback can be incorrectly credited to a later annotated setup.
+
+Matching rules:
+
+- if the annotation has `setup_start_ms`, prefer a detector instance whose `started_at` is close to that timestamp
+- otherwise, prefer the most recently formed detector instance that already existed by the annotated trigger
+- once an instance is selected, only observations with that `pattern_id` are used for structure, trigger, state, and latency scoring
+- if no plausible instance matches, return `matching.status = "no_matching_instance"` instead of borrowing an older pattern
+
+Current setup-start tolerances are intentionally narrow:
+- `MICRO_PULLBACK`: 2 minutes
+- `ASCENDING_TRIANGLE`: 5 minutes
+
+These are evaluator association tolerances, not detector thresholds or trading rules.
+
 ## Structure vs trigger-state detection
 
 The audit deliberately separates two questions.
