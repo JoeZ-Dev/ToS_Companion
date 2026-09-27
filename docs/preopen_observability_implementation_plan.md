@@ -419,6 +419,22 @@ At the matched/live trigger transition persist a snapshot containing whatever is
 
 Every field must distinguish `unavailable` from zero/false.
 
+### Trigger-context contract
+
+Live `BREAKOUT` and `CONTINUATION` journal transitions carry an additive
+`trigger_context` schema-version-1 snapshot captured after calculations for the
+same completed bar. Each evidence value has `available`, `value`, and `source`
+fields, so zero and `false` remain distinct from unavailable data. The snapshot
+includes price, VWAP/distance, day change, watched-symbol relative rank,
+security/halt and borrow state, available fundamentals, session phase, current
+bar/cumulative/AE volume evidence, and available session/structural levels.
+
+`context_as_of_ts_ms` records the latest normalized quote time used and may be
+later than the bar's start timestamp because a completed bar is evaluated when
+the following stream update closes it. Missing fundamentals or levels remain
+explicitly unavailable. The snapshot is journal evidence only and is not passed
+to detectors or used as a gate.
+
 ## 3B. Reusable volume primitives
 
 Add generic structure helpers, not detector-specific gates.

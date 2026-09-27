@@ -31,8 +31,17 @@ class FakeRecorder:
     def record_payload(self, payload):
         self.payloads.append(payload)
 
-    def record_pattern_observations(self, symbol, patterns, *, observation_ts_ms):
-        self.pattern_updates.append((symbol, patterns, observation_ts_ms))
+    def record_pattern_observations(
+        self,
+        symbol,
+        patterns,
+        *,
+        observation_ts_ms,
+        trigger_context=None,
+    ):
+        self.pattern_updates.append(
+            (symbol, patterns, observation_ts_ms, trigger_context)
+        )
         return len(patterns)
 
     def add_symbol(self, symbol):
@@ -274,9 +283,15 @@ def test_completed_bar_updates_patterns_and_preserves_ae_processing():
     assert symbol_state["pattern_observations"][0]["pattern_type"] == "TEST_PATTERN"
     assert symbol_state["ae_snapshot"]["status"] == "ok"
     assert runtime.ae_engine.bars == [bar]
-    assert runtime._recorder.pattern_updates == [
-        ("AEHL", symbol_state["pattern_observations"], 10_000)
-    ]
+    update = runtime._recorder.pattern_updates[0]
+    assert update[:3] == (
+        "AEHL",
+        symbol_state["pattern_observations"],
+        10_000,
+    )
+    context = update[3]
+    assert context["price"]["value"] == 3.1
+    assert context["volume"]["completed_bar"]["value"] == 100
 
 
 def test_runtime_add_remove_recording_symbol_refreshes_stream_union(monkeypatch):
