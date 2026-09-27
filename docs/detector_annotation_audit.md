@@ -107,6 +107,15 @@ A forming/pullback observation alone is not counted as a trigger false positive.
 
 This is especially important for the current micro-pullback corpus, where several discovery candidates were rejected because the proposed trigger occurred during the pullback before continuation.
 
+## Trigger-time structure recall
+
+The audit reports both broad-window structure detection and trigger-time structure detection.
+
+- `structure_detected` means the matched detector instance appeared anywhere in the comparison window, including after the annotation trigger.
+- `structure_detected_by_trigger` means the matched detector instance had already appeared by the annotated trigger timestamp.
+
+Aggregate output therefore includes `structure_recall_at_trigger` separately from broad-window `structure_recall`. Post-trigger detections remain useful for latency analysis but are not credited as trigger-time recall.
+
 ## Aggregate report
 
 The response summary includes:
