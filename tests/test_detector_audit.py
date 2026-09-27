@@ -248,3 +248,33 @@ def test_setup_start_matching_rejects_unrelated_instance_outside_tolerance():
     assert result["structure_detected"] is False
     assert result["trigger_detected"] is False
     assert result["false_positive_on_rejected_candidate"] is False
+
+
+def test_structure_recall_at_trigger_does_not_credit_post_trigger_detection():
+    trigger = 1_800_000_000_000
+    annotation = {
+        "annotation_id": "future-structure",
+        "session_id": "session",
+        "symbol": "TEST",
+        "setup_type": "micro_pullback",
+        "trigger_ms": trigger,
+        "valid_at_time": True,
+        "outcome": "succeeded",
+    }
+    timeline = _timeline(
+        "MICRO_PULLBACK",
+        [(trigger + 10_000, "PULLBACK")],
+    )
+
+    result = DetectorAnnotationEvaluator.compare_annotation(annotation, timeline)
+
+    assert result["structure_detected"] is True
+    assert result["structure_detected_by_trigger"] is False
+    assert result["first_structure_ms"] == trigger + 10_000
+    assert result["first_structure_by_trigger_ms"] is None
+
+    summary = DetectorAnnotationEvaluator._summarize([result])
+    assert summary["structure_detected_valid"] == 1
+    assert summary["structure_detected_by_trigger_valid"] == 0
+    assert summary["per_detector"]["MICRO_PULLBACK"]["structure_recall"] == 1.0
+    assert summary["per_detector"]["MICRO_PULLBACK"]["structure_recall_at_trigger"] == 0.0
