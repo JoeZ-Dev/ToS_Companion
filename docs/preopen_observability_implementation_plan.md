@@ -475,6 +475,22 @@ Avoid recomputing session semantics independently inside named detectors.
 
 The opening-range duration must be explicit configuration, not an implied constant hidden inside a detector.
 
+### Session-level primitive contract
+
+The shared structure layer now provides a schema-version-1 session context for
+premarket high/low, regular-session HOD/LOD, opening-range high/low, prior-day
+regular-session high/low/close, and VWAP. The default opening range is an
+explicit 10-minute `SessionLevelConfig` value. The result records its timezone,
+session date, as-of timestamp, configured duration, and whether the opening
+range clock has completed.
+
+Callers may supply their canonical live VWAP; otherwise the primitive calculates
+VWAP only from available positive-volume bars. Prior-day values remain
+unavailable unless an earlier regular session is present in the supplied bars.
+Distances are percentage points from current price to each available level.
+Trigger snapshots expose these standardized values as evidence while retaining
+the existing AE open price. No detector consumes these primitives in this phase.
+
 ## Phase 3 exit criteria
 
 Any future detector can consume standardized context without duplicating session/volume calculations.
