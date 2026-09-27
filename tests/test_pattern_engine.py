@@ -134,3 +134,38 @@ def test_detectors_return_none_for_flat_noise():
 
     assert detect_ascending_triangle("FLAT", bars) is None
     assert detect_micro_pullback("FLAT", bars) is None
+
+
+def test_micro_pullback_prefers_latest_qualifying_impulse():
+    bars = [
+        bar(0, 10.00, 10.05, 10.00, 10.03),
+        bar(10, 10.03, 10.50, 10.02, 10.45),  # older stronger impulse
+        bar(20, 10.45, 10.46, 10.30, 10.34),
+        bar(30, 10.34, 10.35, 10.31, 10.33),
+        bar(40, 10.33, 10.58, 10.32, 10.56),  # newer qualifying impulse
+        bar(50, 10.56, 10.57, 10.49, 10.50),
+        bar(60, 10.50, 10.53, 10.47, 10.51),
+    ]
+
+    observation = detect_micro_pullback("ABCD", bars)
+
+    assert observation is not None
+    assert observation.evidence["impulse_selection"] == "latest_qualifying"
+    assert observation.evidence["impulse_high"] == 10.58
+    assert observation.points[0].time >= 20
+
+
+def test_micro_pullback_instance_disappears_after_prior_continuation():
+    bars = micro_pullback_bars(last_close=10.63)
+    first = detect_micro_pullback("ABCD", bars)
+
+    assert first is not None
+    assert first.state == PatternState.CONTINUATION
+
+    later = [
+        *bars,
+        bar(60, 10.62, 10.64, 10.55, 10.57),
+    ]
+    completed = detect_micro_pullback("ABCD", later)
+
+    assert completed is None or completed.id != first.id
