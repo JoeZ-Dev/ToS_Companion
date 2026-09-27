@@ -84,17 +84,28 @@ For each supported annotation the result includes:
 
 - `first_structure_ms`
 - `first_trigger_state_ms`
-- `trigger_latency_ms`
+- `matched_trigger_state_ms`
+- `first_trigger_latency_ms`
+- `matched_trigger_latency_ms`
+- `trigger_latency_ms` as a backward-compatible alias of matched trigger latency
 - `state_at_annotated_trigger`
 - `fired_by_annotated_trigger`
 - all nearby detector observations and their evidence
 
-`trigger_latency_ms` is:
+The evaluator intentionally separates lifecycle history from annotation alignment:
 
-    first detector trigger-state timestamp - annotated trigger timestamp
+    first_trigger_latency_ms =
+        first trigger-state timestamp in the matched instance
+        - annotated trigger timestamp
 
-Negative values mean the detector triggered earlier than the annotation.
-Positive values mean it triggered later.
+    matched_trigger_latency_ms =
+        trigger-state timestamp selected as closest to the annotation
+        - annotated trigger timestamp
+
+Aggregate latency metrics use `matched_trigger_latency_ms`. This prevents an earlier repeated trigger-state observation inside the same matched pattern instance from overriding the trigger observation actually used to associate that instance with the annotation.
+
+Negative values mean the matched detector trigger was earlier than the annotation.
+Positive values mean it was later.
 
 The audit reports timing. It does not automatically claim that every early trigger is wrong.
 
@@ -130,8 +141,8 @@ The response summary includes:
 - trigger detections on verified-valid labels
 - missed valid structures
 - false positives on rejected labels
-- median trigger latency
-- early/on-time/late trigger counts
+- median matched-trigger latency
+- early/on-time/late matched-trigger counts
 - per-detector structure recall
 - per-detector trigger recall
 - false-positive rate on rejected labels

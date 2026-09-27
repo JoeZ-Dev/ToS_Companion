@@ -484,3 +484,58 @@ def test_setup_start_is_left_boundary_for_later_nested_instance():
     assert result["matching"]["setup_window_start_ms"] == setup_start - 120_000
     assert result["matching"]["setup_window_end_ms"] == trigger
     assert result["trigger_latency_ms"] == -10_000
+
+
+def test_matched_trigger_latency_uses_trigger_closest_to_annotation():
+    trigger = 1_800_000_000_000
+    setup_start = trigger - 2 * 60_000
+    annotation = {
+        "annotation_id": "matched-latency",
+        "session_id": "session",
+        "symbol": "TEST",
+        "setup_type": "ascending_triangle",
+        "setup_start_ms": setup_start,
+        "trigger_ms": trigger,
+        "valid_at_time": True,
+        "outcome": "succeeded",
+    }
+    timeline = [
+        {
+            "bar_ts": (trigger - 10_000) // 1000,
+            "symbol": "TEST",
+            "pattern": {
+                "id": "TEST:ASCENDING_TRIANGLE:one",
+                "pattern_type": "ASCENDING_TRIANGLE",
+                "state": "BREAKOUT",
+                "started_at": (setup_start + 30_000) // 1000,
+                "updated_at": (trigger - 10_000) // 1000,
+                "evidence": {},
+            },
+        },
+        {
+            "bar_ts": trigger // 1000,
+            "symbol": "TEST",
+            "pattern": {
+                "id": "TEST:ASCENDING_TRIANGLE:one",
+                "pattern_type": "ASCENDING_TRIANGLE",
+                "state": "BREAKOUT",
+                "started_at": (setup_start + 30_000) // 1000,
+                "updated_at": trigger // 1000,
+                "evidence": {},
+            },
+        },
+    ]
+
+    result = DetectorAnnotationEvaluator.compare_annotation(annotation, timeline)
+
+    assert result["first_trigger_state_ms"] == trigger - 10_000
+    assert result["matched_trigger_state_ms"] == trigger
+    assert result["first_trigger_latency_ms"] == -10_000
+    assert result["matched_trigger_latency_ms"] == 0
+    assert result["trigger_latency_ms"] == 0
+    assert result["matching"]["matched_trigger_ms"] == trigger
+
+    summary = DetectorAnnotationEvaluator._summarize([result])
+    assert summary["median_trigger_latency_ms"] == 0
+    assert summary["per_detector"]["ASCENDING_TRIANGLE"]["median_trigger_latency_ms"] == 0
+    assert summary["per_detector"]["ASCENDING_TRIANGLE"]["on_time_trigger_count"] == 1
