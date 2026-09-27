@@ -20,6 +20,11 @@ TRIGGER_STATES: dict[str, set[str]] = {
     "MICRO_PULLBACK": {"CONTINUATION"},
 }
 
+INSTANCE_START_TOLERANCE_MS: dict[str, int] = {
+    "ASCENDING_TRIANGLE": 5 * 60 * 1000,
+    "MICRO_PULLBACK": 2 * 60 * 1000,
+}
+
 
 class DetectorAnnotationEvaluator:
     """Compare replay detector observations with verified review annotations.
@@ -168,6 +173,14 @@ class DetectorAnnotationEvaluator:
             return {
                 **base,
                 "supported_by_current_detector_registry": False,
+                "matching": {
+                    "status": "unsupported_setup_type",
+                    "basis": None,
+                    "pattern_id": None,
+                    "instance_started_ms": None,
+                    "start_distance_ms": None,
+                    "candidate_instance_count": 0,
+                },
                 "structure_detected": False,
                 "trigger_detected": False,
                 "fired_by_annotated_trigger": False,
@@ -179,7 +192,7 @@ class DetectorAnnotationEvaluator:
                 "nearby_observations": [],
             }
 
-        nearby: list[dict[str, Any]] = []
+        candidate_observations: list[dict[str, Any]] = []
         for item in timeline:
             pattern = item.get("pattern") or {}
             if str(pattern.get("pattern_type") or "").upper() != detector_type:
@@ -189,7 +202,7 @@ class DetectorAnnotationEvaluator:
                 continue
             updated_ms = int(updated_at) * 1000
             if window_start_ms <= updated_ms <= window_end_ms:
-                nearby.append(
+                candidate_observations.append(
                     {
                         "updated_ms": updated_ms,
                         "started_ms": (
@@ -202,7 +215,14 @@ class DetectorAnnotationEvaluator:
                         "evidence": dict(pattern.get("evidence") or {}),
                     }
                 )
-        nearby.sort(key=lambda item: item["updated_ms"])
+        candidate_observations.sort(key=lambda item: item["updated_ms"])
+
+        nearby, match = DetectorAnnotationEvaluator._match_pattern_instance(
+            candidate_observations,
+            detector_type=detector_type,
+            trigger_ms=trigger_ms,
+            setup_start_ms=(int(setup_start) if setup_start is not None else None),
+        )
 
         trigger_states = TRIGGER_STATES.get(detector_type, set())
         trigger_observations = [
@@ -221,6 +241,7 @@ class DetectorAnnotationEvaluator:
         return {
             **base,
             "supported_by_current_detector_registry": True,
+            "matching": match,
             "structure_detected": bool(nearby),
             "trigger_detected": bool(trigger_observations),
             "fired_by_annotated_trigger": bool(trigger_by_trigger),
@@ -240,6 +261,138 @@ class DetectorAnnotationEvaluator:
             ),
             "state_at_annotated_trigger": state_at_trigger,
             "nearby_observations": nearby,
+        }
+
+    @staticmethod
+    def _match_pattern_instance(
+        observations: list[dict[str, Any]],
+        *,
+        detector_type: str,
+        trigger_ms: int,
+        setup_start_ms: int | None,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Select one detector instance before scoring an annotation.
+
+        Pattern detectors can emit repeated observations for multiple formations
+        in the same broad comparison window. Matching all observations together
+        can incorrectly let an older completed setup satisfy a later annotation.
+        """
+        groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for item in observations:
+            pattern_id = str(item.get("pattern_id") or "")
+            if pattern_id:
+                groups[pattern_id].append(item)
+
+        candidates: list[dict[str, Any]] = []
+        for pattern_id, items in groups.items():
+            items.sort(key=lambda item: item["updated_ms"])
+            starts = [
+                int(item["started_ms"])
+                for item in items
+                if item.get("started_ms") is not None
+            ]
+            if not starts:
+                continue
+            started_ms = min(starts)
+            before_or_at = [
+                item for item in items if int(item["updated_ms"]) <= trigger_ms
+            ]
+            nearest_distance_ms = min(
+                abs(int(item["updated_ms"]) - trigger_ms) for item in items
+            )
+            candidates.append(
+                {
+                    "pattern_id": pattern_id,
+                    "started_ms": started_ms,
+                    "items": items,
+                    "has_observation_by_trigger": bool(before_or_at),
+                    "last_observation_by_trigger_ms": (
+                        int(before_or_at[-1]["updated_ms"]) if before_or_at else None
+                    ),
+                    "nearest_observation_distance_ms": nearest_distance_ms,
+                }
+            )
+
+        if not candidates:
+            return [], {
+                "status": "no_matching_instance",
+                "basis": None,
+                "pattern_id": None,
+                "instance_started_ms": None,
+                "start_distance_ms": None,
+                "candidate_instance_count": 0,
+            }
+
+        tolerance = INSTANCE_START_TOLERANCE_MS.get(
+            detector_type, 2 * 60 * 1000
+        )
+
+        if setup_start_ms is not None:
+            eligible = [
+                candidate
+                for candidate in candidates
+                if abs(candidate["started_ms"] - setup_start_ms) <= tolerance
+            ]
+            if not eligible:
+                return [], {
+                    "status": "no_matching_instance",
+                    "basis": "setup_start_ms",
+                    "pattern_id": None,
+                    "instance_started_ms": None,
+                    "start_distance_ms": None,
+                    "candidate_instance_count": len(candidates),
+                    "start_tolerance_ms": tolerance,
+                }
+            chosen = min(
+                eligible,
+                key=lambda candidate: (
+                    abs(candidate["started_ms"] - setup_start_ms),
+                    candidate["nearest_observation_distance_ms"],
+                    -candidate["started_ms"],
+                ),
+            )
+            basis = "setup_start_ms"
+            start_distance_ms = chosen["started_ms"] - setup_start_ms
+        else:
+            eligible = [
+                candidate
+                for candidate in candidates
+                if candidate["started_ms"] <= trigger_ms
+                and candidate["has_observation_by_trigger"]
+            ]
+            if not eligible:
+                return [], {
+                    "status": "no_matching_instance",
+                    "basis": "latest_instance_by_trigger",
+                    "pattern_id": None,
+                    "instance_started_ms": None,
+                    "start_distance_ms": None,
+                    "candidate_instance_count": len(candidates),
+                }
+            # Without a reviewer-supplied setup start, prefer the most recently
+            # formed detector instance that actually existed by the annotation
+            # trigger. This prevents older completed patterns in the lookback
+            # window from being credited to a later candidate.
+            chosen = max(
+                eligible,
+                key=lambda candidate: (
+                    candidate["started_ms"],
+                    candidate["last_observation_by_trigger_ms"] or -1,
+                ),
+            )
+            basis = "latest_instance_by_trigger"
+            start_distance_ms = chosen["started_ms"] - trigger_ms
+
+        matched = [dict(item) for item in chosen["items"]]
+        matched.sort(key=lambda item: item["updated_ms"])
+        return matched, {
+            "status": "matched",
+            "basis": basis,
+            "pattern_id": chosen["pattern_id"],
+            "instance_started_ms": chosen["started_ms"],
+            "start_distance_ms": start_distance_ms,
+            "candidate_instance_count": len(candidates),
+            "start_tolerance_ms": tolerance if setup_start_ms is not None else None,
         }
 
     @staticmethod
