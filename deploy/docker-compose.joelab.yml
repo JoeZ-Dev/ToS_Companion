@@ -3,6 +3,9 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile.web
+      args:
+        TOS_COMPANION_GIT_REVISION: ${TOS_COMPANION_GIT_REVISION:-}
+        TOS_COMPANION_GIT_WORKTREE_DIRTY: ${TOS_COMPANION_GIT_WORKTREE_DIRTY:-}
     container_name: tos-companion
     restart: unless-stopped
     environment:

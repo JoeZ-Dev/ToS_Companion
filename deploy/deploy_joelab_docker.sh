@@ -9,6 +9,14 @@ CODEX_BRIDGE_DIR="${CODEX_BRIDGE_DIR:-/srv/data/tos-companion/codex-bridge}"
 
 cd "$REPO_DIR"
 
+TOS_COMPANION_GIT_REVISION="$(git rev-parse --verify HEAD)"
+if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+  TOS_COMPANION_GIT_WORKTREE_DIRTY=true
+else
+  TOS_COMPANION_GIT_WORKTREE_DIRTY=false
+fi
+export TOS_COMPANION_GIT_REVISION TOS_COMPANION_GIT_WORKTREE_DIRTY
+
 if [[ ! -f "$COMPOSE_FILE" ]]; then
   echo "ERROR: missing $REPO_DIR/$COMPOSE_FILE" >&2
   exit 2
@@ -40,7 +48,7 @@ sudo install -d -o "$(id -u)" -g 10001 -m 2770 "$CODEX_BRIDGE_DIR"
 echo "Validating compose configuration..."
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config >/dev/null
 
-echo "Building and starting ToS_Companion..."
+echo "Building and starting ToS_Companion revision $TOS_COMPANION_GIT_REVISION (dirty=$TOS_COMPANION_GIT_WORKTREE_DIRTY)..."
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --build
 
 echo "Waiting for container health..."
