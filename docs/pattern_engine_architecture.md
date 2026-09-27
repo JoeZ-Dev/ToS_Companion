@@ -51,6 +51,7 @@ src/momentum_companion/setup_engine/
         ascending_triangle.py
         micro_pullback.py
         local_resistance_breakout.py
+        tight_consolidation_breakout.py
 ```
 
 ## Data flow
@@ -404,6 +405,27 @@ Currently emits evidence including:
 - recovery pivot and timestamp;
 - continuation level derived from the recovery pivot.
 
+### Tight consolidation breakout
+
+Consumes:
+
+- normalized bars;
+- the reusable trailing tight-range primitive.
+
+The consolidation range is measured only from bars completed before the current bar, so the breakout bar cannot expand the range boundary and hide its own breakout. The detector selects the longest trailing range that satisfies the configured width limit, emits the range high/low as chart geometry, and emits `BREAKOUT` only when the current close crosses the buffered range high from below. A downside close beyond the buffered range low invalidates the bullish setup.
+
+Its initial defaults are structural starting points and were not tuned against the existing six-session development corpus. It is registered prospectively so fresh recordings can capture behavior before any corpus-driven tuning.
+
+Currently emits evidence including:
+
+- range high/low/center;
+- range width percentage;
+- range duration;
+- number of consolidation bars;
+- breakout and breakdown levels;
+- previous/current close;
+- adaptive confirmation evidence.
+
 ### Local resistance breakout
 
 Consumes:
@@ -608,6 +630,7 @@ As of this branch:
 - ascending triangle reference detector exists;
 - micro pullback reference detector exists;
 - local resistance breakout detector exists and is prospectively registered without development-corpus tuning;
+- tight consolidation breakout detector exists and is prospectively registered without development-corpus tuning;
 - explicit default registration exists;
 - duplicate registration is rejected;
 - synthetic pattern tests exist;
