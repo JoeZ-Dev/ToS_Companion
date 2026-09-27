@@ -313,6 +313,7 @@ class DetectorAnnotationEvaluator:
                     "pattern_id": pattern_id,
                     "started_ms": started_ms,
                     "items": items,
+                    "first_observation_ms": int(items[0]["updated_ms"]),
                     "has_observation_by_trigger": bool(before_or_at),
                     "last_observation_by_trigger_ms": (
                         int(before_or_at[-1]["updated_ms"]) if before_or_at else None
@@ -391,7 +392,7 @@ class DetectorAnnotationEvaluator:
                 post_trigger = [
                     candidate
                     for candidate in candidates
-                    if candidate["started_ms"] > trigger_ms
+                    if candidate["first_observation_ms"] > trigger_ms
                 ]
                 if not post_trigger:
                     return [], {
@@ -405,7 +406,7 @@ class DetectorAnnotationEvaluator:
                 chosen = min(
                     post_trigger,
                     key=lambda candidate: (
-                        candidate["started_ms"] - trigger_ms,
+                        candidate["first_observation_ms"] - trigger_ms,
                         candidate["nearest_observation_distance_ms"],
                     ),
                 )
