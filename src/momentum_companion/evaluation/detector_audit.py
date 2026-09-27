@@ -308,6 +308,22 @@ class DetectorAnnotationEvaluator:
             nearest_distance_ms = min(
                 abs(int(item["updated_ms"]) - trigger_ms) for item in items
             )
+            detector_trigger_states = TRIGGER_STATES.get(detector_type, set())
+            trigger_items = [
+                item for item in items if item["state"] in detector_trigger_states
+            ]
+            nearest_trigger_item = (
+                min(
+                    trigger_items,
+                    key=lambda item: (
+                        abs(int(item["updated_ms"]) - trigger_ms),
+                        int(item["updated_ms"]) > trigger_ms,
+                        int(item["updated_ms"]),
+                    ),
+                )
+                if trigger_items
+                else None
+            )
             candidates.append(
                 {
                     "pattern_id": pattern_id,
@@ -319,6 +335,16 @@ class DetectorAnnotationEvaluator:
                         int(before_or_at[-1]["updated_ms"]) if before_or_at else None
                     ),
                     "nearest_observation_distance_ms": nearest_distance_ms,
+                    "nearest_trigger_ms": (
+                        int(nearest_trigger_item["updated_ms"])
+                        if nearest_trigger_item is not None
+                        else None
+                    ),
+                    "nearest_trigger_distance_ms": (
+                        int(nearest_trigger_item["updated_ms"]) - trigger_ms
+                        if nearest_trigger_item is not None
+                        else None
+                    ),
                 }
             )
 
@@ -352,15 +378,39 @@ class DetectorAnnotationEvaluator:
                     "candidate_instance_count": len(candidates),
                     "start_tolerance_ms": tolerance,
                 }
-            chosen = min(
-                eligible,
-                key=lambda candidate: (
-                    abs(candidate["started_ms"] - setup_start_ms),
-                    candidate["nearest_observation_distance_ms"],
-                    -candidate["started_ms"],
-                ),
-            )
-            basis = "setup_start_ms"
+            # setup_start_ms defines which detector instances plausibly
+            # belong to the reviewer-labeled setup window. It does not by
+            # itself decide which nested/repeated instance corresponds to the
+            # annotated trigger. Among eligible instances, prefer the one whose
+            # detector trigger state is closest to the annotated trigger. If no
+            # eligible instance reaches a trigger state, fall back to the
+            # structure observation nearest the annotated trigger.
+            with_trigger = [
+                candidate
+                for candidate in eligible
+                if candidate["nearest_trigger_ms"] is not None
+            ]
+            if with_trigger:
+                chosen = min(
+                    with_trigger,
+                    key=lambda candidate: (
+                        abs(int(candidate["nearest_trigger_distance_ms"])),
+                        int(candidate["nearest_trigger_ms"]) > trigger_ms,
+                        candidate["nearest_observation_distance_ms"],
+                        abs(candidate["started_ms"] - setup_start_ms),
+                    ),
+                )
+                basis = "setup_window_nearest_trigger"
+            else:
+                chosen = min(
+                    eligible,
+                    key=lambda candidate: (
+                        candidate["nearest_observation_distance_ms"],
+                        abs(candidate["started_ms"] - setup_start_ms),
+                        -candidate["started_ms"],
+                    ),
+                )
+                basis = "setup_window_nearest_structure"
             start_distance_ms = chosen["started_ms"] - setup_start_ms
         else:
             eligible = [
@@ -423,6 +473,8 @@ class DetectorAnnotationEvaluator:
             "start_distance_ms": start_distance_ms,
             "candidate_instance_count": len(candidates),
             "start_tolerance_ms": tolerance if setup_start_ms is not None else None,
+            "matched_trigger_distance_ms": chosen.get("nearest_trigger_distance_ms"),
+            "nearest_observation_distance_ms": chosen.get("nearest_observation_distance_ms"),
         }
 
     @staticmethod
