@@ -60,6 +60,7 @@ def build_pattern_event(
     pattern_type = str(observation.get("pattern_type") or "").strip()
     pattern_id = str(observation.get("id") or "").strip()
     started_at_ms = _as_milliseconds(observation.get("started_at"))
+    evaluated_bar_ts_ms = _as_milliseconds(observation.get("updated_at"))
     if not pattern_id and symbol and pattern_type and started_at_ms is not None:
         pattern_id = f"{symbol}:{pattern_type}:{started_at_ms // 1000}"
     if not symbol or not pattern_type or not pattern_id:
@@ -92,6 +93,7 @@ def build_pattern_event(
         "pattern_type": pattern_type,
         "state": snapshot["state"],
         "pattern_start_ts_ms": started_at_ms,
+        "evaluated_bar_ts_ms": evaluated_bar_ts_ms,
         "observation_ts_ms": int(observation_ts_ms),
         "recorded_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "evidence": snapshot["evidence"],

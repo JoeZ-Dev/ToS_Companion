@@ -287,9 +287,11 @@ def test_completed_bar_updates_patterns_and_preserves_ae_processing():
     assert update[:3] == (
         "AEHL",
         symbol_state["pattern_observations"],
-        10_000,
+        20_000,
     )
     context = update[3]
+    assert context["captured_for_observation_ts_ms"] == 20_000
+    assert context["context_as_of_ts_ms"] == 20_000
     assert context["price"]["value"] == 3.1
     assert context["volume"]["completed_bar"]["value"] == 100
 

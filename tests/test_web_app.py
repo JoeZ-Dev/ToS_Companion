@@ -683,6 +683,7 @@ def test_recording_integrity_endpoint_is_read_only_and_handles_unknown_session(t
         outcomes = client.get("/api/evaluation/pattern-outcomes/session")
         overlaps = client.get("/api/evaluation/pattern-overlaps/session")
         research = client.get("/api/research/export", params={"session_id": "session"})
+        parity = client.get("/api/evaluation/pattern-parity/session")
         invalid_research_range = client.get(
             "/api/research/export",
             params={"session_id": "session", "start_ms": 2, "end_ms": 1},
@@ -703,6 +704,8 @@ def test_recording_integrity_endpoint_is_read_only_and_handles_unknown_session(t
     assert research.json()["future_data_policy"]["outcomes_included"] is False
     assert "outcome_measurements" not in research.json()["sessions"][0]
     assert invalid_research_range.status_code == 400
+    assert parity.status_code == 200
+    assert parity.json()["symbols"][0]["status"] == "live_journal_unavailable"
     assert invalid_overlap_filter.status_code == 422
     assert missing.status_code == 404
     assert not (session / "integrity_report.json").exists()

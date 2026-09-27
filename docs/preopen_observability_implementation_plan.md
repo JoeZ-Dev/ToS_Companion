@@ -44,6 +44,20 @@ Current detector registry:
 
 The existing six sessions are development corpus. Holdout membership is explicit and currently empty.
 
+## Implementation closeout
+
+Phases 0 through 7 are implemented on the integration branch through the small
+PR sequence described below. New recordings now carry provenance and live
+pattern/status journals; derived integrity, outcome, overlap, research-export,
+and parity reports remain regenerable from canonical evidence. Corpus
+classification is persisted outside recordings, context primitives remain
+observational, and browser overlays consume detector output without feeding
+back into detection.
+
+No phase in this cycle changed a detector's thresholds, lifecycle rules,
+impulse/retracement logic, or registration. The six historical sessions remain
+development data, and no holdout has been inferred or auto-created.
+
 ---
 
 # Phase 0 — Documentation and contracts first
@@ -193,11 +207,14 @@ Replay reconstruction must remain available and should be comparable against the
 
 New recording sessions declare `pattern_events.jsonl` as a derived artifact in
 the manifest. Each schema-version-1 row records the session and symbol, stable
-pattern ID and type, detector state, pattern-start and observation timestamps in
+pattern ID and type, detector state, pattern-start, evaluated-bar, and observation timestamps in
 milliseconds, evidence, point/line geometry, detector config fingerprint and
 frozen semantic revision when defined, source mode, and deterministic event and
-snapshot fingerprints. The live observation timestamp is the completed bar that
-caused evaluation.
+snapshot fingerprints. `evaluated_bar_ts_ms` identifies the completed bar used
+by the detector. `observation_ts_ms` identifies the provider event time when
+that completed-bar result first became available; it is never backdated to the
+bar's start. Older journal rows without `evaluated_bar_ts_ms` remain readable
+under their legacy bar-start timestamp contract.
 
 The writer appends a row when state, evidence, or semantic geometry changes for
 a pattern ID. Repeated identical snapshots are skipped. Absence from a later
@@ -429,11 +446,13 @@ includes price, VWAP/distance, day change, watched-symbol relative rank,
 security/halt and borrow state, available fundamentals, session phase, current
 bar/cumulative/AE volume evidence, and available session/structural levels.
 
-`context_as_of_ts_ms` records the latest normalized quote time used and may be
-later than the bar's start timestamp because a completed bar is evaluated when
-the following stream update closes it. Missing fundamentals or levels remain
-explicitly unavailable. The snapshot is journal evidence only and is not passed
-to detectors or used as a gate.
+`context_as_of_ts_ms` equals the journal observation time. Quote and
+watchlist-relative fields are used only when their normalized quote timestamp is
+present and no later than that observation. A later or unbounded quote is not
+consumed; price falls back to the evaluated completed-bar close and affected
+fields remain unavailable. Missing fundamentals or levels remain explicitly
+unavailable. The snapshot is journal evidence only and is not passed to
+detectors or used as a gate.
 
 ## 3B. Reusable volume primitives
 
@@ -683,6 +702,28 @@ Add regression tests around all new schemas and boundaries.
 ## Exit criteria
 
 CI green, docs current, live/replay parity documented, no detector semantic drift.
+
+### Replay-parity and boundary contract
+
+`GET /api/evaluation/pattern-parity/{session_id}` replays recorded L1 evidence
+through the current shared detector path and applies the live journal's
+meaningful-change deduplication. It compares pattern ID/type, state,
+observation time, evaluated-bar time, and the state/evidence/geometry
+fingerprint. Live-only and replay-only transitions are returned explicitly.
+The report also compares recorded detector config/semantic provenance with the
+current registry. Legacy journals without evaluated-bar timestamps are compared
+under their documented bar-start timestamp convention; sessions without a live
+journal report `live_journal_unavailable` rather than claiming parity.
+
+Trigger observations are timestamped when the completed bar becomes observable,
+while `evaluated_bar_ts_ms` preserves the bar-close reference. Outcome entry
+price uses that completed bar, but excursion and invalidation evidence begins at
+or after the later observation time and strictly after the evaluated bar. This
+prevents trigger-bar extremes from becoming post-trigger outcome evidence.
+
+The hardening regression suite also covers future-dated quote exclusion from
+trigger context, explicit-status-only halt handling, repaired-candle provenance,
+active/incomplete integrity reports, and legacy manifests with unknown fields.
 
 ---
 

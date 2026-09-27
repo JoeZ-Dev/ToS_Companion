@@ -38,6 +38,7 @@ def test_journal_records_contract_and_detector_provenance(tmp_path):
     assert event["symbol"] == "AEHL"
     assert event["pattern_id"] == "AEHL:ASCENDING_TRIANGLE:10"
     assert event["pattern_start_ts_ms"] == 10_000
+    assert event["evaluated_bar_ts_ms"] == 20_000
     assert event["observation_ts_ms"] == 20_000
     assert event["geometry"]["points"][0]["role"] == "support"
     assert event["detector"]["name"] == "ASCENDING_TRIANGLE"

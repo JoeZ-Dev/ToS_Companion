@@ -135,6 +135,12 @@ def _measure_trigger(
     horizon_ms: int,
 ) -> dict[str, Any]:
     trigger_ms = int(trigger.get("observation_ts_ms") or 0)
+    has_evaluated_bar_reference = trigger.get("evaluated_bar_ts_ms") is not None
+    evaluated_bar_ms = int(
+        trigger.get("evaluated_bar_ts_ms")
+        if has_evaluated_bar_reference
+        else trigger_ms
+    )
     requested_end_ms = trigger_ms + horizon_ms
     end_ms = requested_end_ms
     truncated_end = recording_last_ms is None or int(recording_last_ms) < end_ms
@@ -162,12 +168,19 @@ def _measure_trigger(
     if halt_events:
         end_ms = min(end_ms, min(int(event["provider_ts_ms"]) for event in halt_events))
 
-    entry_bar = _bar_at_or_just_after(bars, trigger_ms)
+    entry_bar = (
+        _bar_at_exact_timestamp(bars, evaluated_bar_ms)
+        if has_evaluated_bar_reference
+        else _bar_at_or_just_after(bars, evaluated_bar_ms)
+    )
     entry_price = _float_or_none(entry_bar.get("close")) if entry_bar else None
     excursion = None
     if entry_bar is not None and entry_price is not None and entry_price > 0:
         future_bars = [
-            bar for bar in bars if int(bar.get("ts") or 0) * 1000 > trigger_ms
+            bar
+            for bar in bars
+            if int(bar.get("ts") or 0) * 1000 > evaluated_bar_ms
+            and int(bar.get("ts") or 0) * 1000 >= trigger_ms
         ]
         stats = compute_excursions(
             future_bars,
@@ -219,16 +232,29 @@ def _measure_trigger(
         "pattern_type": trigger.get("pattern_type"),
         "trigger_state": trigger.get("state"),
         "trigger_ts_ms": trigger_ms,
+        "evaluated_bar_ts_ms": evaluated_bar_ms,
         "source_mode": trigger.get("source_mode"),
         "entry_reference": {
             "available": entry_price is not None,
             "price": entry_price,
             "bar_ts_ms": int(entry_bar["ts"]) * 1000 if entry_bar else None,
-            "basis": "trigger_bar_close" if entry_price is not None else None,
+            "basis": (
+                "evaluated_completed_bar_close"
+                if entry_price is not None and evaluated_bar_ms != trigger_ms
+                else "trigger_bar_close"
+                if entry_price is not None
+                else None
+            ),
         },
         "excursion": excursion,
         "forward_returns": forward_returns,
-        "invalidation": _measure_invalidation(trigger, bars, trigger_ms, end_ms),
+        "invalidation": _measure_invalidation(
+            trigger,
+            bars,
+            trigger_ms,
+            end_ms,
+            evaluated_bar_ms=evaluated_bar_ms,
+        ),
         "measurement": {
             "requested_horizon_ms": horizon_ms,
             "requested_end_ts_ms": requested_end_ms,
@@ -262,6 +288,8 @@ def _measure_invalidation(
     bars: list[dict[str, Any]],
     trigger_ms: int,
     end_ms: int,
+    *,
+    evaluated_bar_ms: int | None = None,
 ) -> dict[str, Any]:
     evidence = trigger.get("evidence") or {}
     level = evidence.get("invalidation_level")
@@ -282,7 +310,8 @@ def _measure_invalidation(
         (
             bar
             for bar in bars
-            if trigger_ms < int(bar.get("ts") or 0) * 1000 <= end_ms
+            if int(bar.get("ts") or 0) * 1000 > int(evaluated_bar_ms or trigger_ms)
+            and trigger_ms <= int(bar.get("ts") or 0) * 1000 <= end_ms
             and _float_or_none(bar.get("close")) is not None
             and float(bar["close"]) <= level_value
         ),
@@ -307,6 +336,19 @@ def _bar_at_or_just_after(
         if target_ms <= observed_ms <= target_ms + BAR_SELECTION_TOLERANCE_MS:
             return bar
     return None
+
+
+def _bar_at_exact_timestamp(
+    bars: Iterable[dict[str, Any]], target_ms: int
+) -> dict[str, Any] | None:
+    return next(
+        (
+            bar
+            for bar in bars
+            if int(bar.get("ts") or 0) * 1000 == int(target_ms)
+        ),
+        None,
+    )
 
 
 def _float_or_none(value: Any) -> float | None:

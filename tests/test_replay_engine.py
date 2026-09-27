@@ -151,6 +151,33 @@ def test_replay_step_uses_recorded_deltas_to_build_same_ten_second_bar(tmp_path)
     assert state["session"]["symbols"]["TOPS"]["bars_10s"][0]["close"] == 0.710
 
 
+def test_replay_pattern_timeline_distinguishes_bar_from_observation_time(tmp_path):
+    session = _write_session(tmp_path)
+    engine = ReplayEngine(recordings_root=tmp_path)
+    engine.load(session.name, "TOPS")
+
+    class OnePattern:
+        def ingest_completed_bar(self, symbol, bar):
+            return [{
+                "id": f"{symbol}:TEST:{bar.ts}",
+                "symbol": symbol,
+                "pattern_type": "TEST",
+                "state": "VALID",
+                "started_at": bar.ts,
+                "updated_at": bar.ts,
+                "evidence": {},
+                "points": [],
+                "lines": [],
+            }]
+
+    engine.pattern_service = OnePattern()
+    engine.step(3)
+
+    event = engine.pattern_timeline[0]
+    assert event["bar_ts"] == 1_790_161_200
+    assert event["observation_ts_ms"] == 1_790_161_210_000
+
+
 def test_replay_seek_rebuilds_state_from_start_without_future_leakage(tmp_path):
     session = _write_session(tmp_path)
     engine = ReplayEngine(recordings_root=tmp_path)

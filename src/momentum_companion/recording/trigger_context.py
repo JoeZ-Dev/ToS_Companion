@@ -32,8 +32,7 @@ def build_trigger_context(
     bar: Mapping[str, Any],
     observation_ts_ms: int,
 ) -> dict[str, Any]:
-    quote = symbol_state.get("quote") or {}
-    market = symbol_state.get("market_context") or {}
+    raw_quote = symbol_state.get("quote") or {}
     ae = symbol_state.get("ae_snapshot") or {}
     derived = ae.get("derived") or {}
     fundamentals = ae.get("fundamentals") or {}
@@ -43,11 +42,13 @@ def build_trigger_context(
     prior_bars = completed_bars[:-1]
     recent_stats = recent_volume_stats(prior_bars, lookback=20)
     trend = volume_trend(prior_bars, lookback=20)
-    quote_ts_ms = _int_or_none(quote.get("ts_ms"))
-    context_as_of_ms = max(
-        observation_ts_ms,
-        quote_ts_ms if quote_ts_ms is not None else observation_ts_ms,
+    quote_ts_ms = _int_or_none(raw_quote.get("ts_ms"))
+    quote_is_bounded = (
+        quote_ts_ms is not None and quote_ts_ms <= int(observation_ts_ms)
     )
+    quote = raw_quote if quote_is_bounded else {}
+    market = (symbol_state.get("market_context") or {}) if quote_is_bounded else {}
+    context_as_of_ms = int(observation_ts_ms)
     last = _number_or_none(quote.get("last"))
     price_source = "normalized_quote.last"
     if last is None:

@@ -505,9 +505,23 @@ class CompanionRuntime:
         completed = aggregator.ingest_price(update)
         engine.record_quote_ts(int(ts_ms))
         if completed is not None:
-            self._handle_completed_bar(symbol, completed)
+            self._handle_completed_bar(
+                symbol,
+                completed,
+                observation_ts_ms=int(ts_ms),
+            )
 
-    def _handle_completed_bar(self, symbol: str, bar: TenSecondBar) -> None:
+    def _handle_completed_bar(
+        self,
+        symbol: str,
+        bar: TenSecondBar,
+        *,
+        observation_ts_ms: int | None = None,
+    ) -> None:
+        observed_at_ms = max(
+            int(observation_ts_ms) if observation_ts_ms is not None else 0,
+            (int(bar.ts) + 10) * 1000,
+        )
         self.session.ingest_bar(symbol, bar)
 
         patterns = None
@@ -549,12 +563,12 @@ class CompanionRuntime:
                             "close": bar.close,
                             "volume": bar.volume,
                         },
-                        observation_ts_ms=int(bar.ts) * 1000,
+                        observation_ts_ms=observed_at_ms,
                     )
                     recorder.record_pattern_observations(
                         symbol,
                         patterns,
-                        observation_ts_ms=int(bar.ts) * 1000,
+                        observation_ts_ms=observed_at_ms,
                         trigger_context=context,
                     )
             except Exception:

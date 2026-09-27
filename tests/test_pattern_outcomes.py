@@ -195,3 +195,68 @@ def test_trigger_bar_extremes_are_not_counted_as_post_trigger_excursion():
 
     assert outcome["excursion"]["mfe_price"] == 10.5
     assert outcome["excursion"]["mae_price"] == 9.8
+
+
+def test_observation_time_uses_completed_bar_reference_without_future_leakage():
+    trigger = {
+        "session_id": "session",
+        "symbol": "AEHL",
+        "pattern_id": "p1",
+        "pattern_type": "ASCENDING_TRIANGLE",
+        "state": "BREAKOUT",
+        "observation_ts_ms": 110_000,
+        "evaluated_bar_ts_ms": 100_000,
+        "evidence": {},
+        "source_mode": "live",
+    }
+    bars = [
+        {"ts": 100, "high": 20.0, "low": 5.0, "close": 10.0},
+        {"ts": 110, "high": 10.5, "low": 9.8, "close": 10.2},
+    ]
+
+    outcome = _measure_trigger(
+        trigger,
+        bars=bars,
+        status_events=[],
+        gaps=[],
+        recording_last_ms=110_000,
+        horizon_ms=900_000,
+    )
+
+    assert outcome["trigger_ts_ms"] == 110_000
+    assert outcome["evaluated_bar_ts_ms"] == 100_000
+    assert outcome["entry_reference"] == {
+        "available": True,
+        "price": 10.0,
+        "bar_ts_ms": 100_000,
+        "basis": "evaluated_completed_bar_close",
+    }
+    assert outcome["excursion"]["mfe_price"] == 10.5
+    assert outcome["excursion"]["mae_price"] == 9.8
+    assert outcome["excursion"]["time_to_mfe_ms"] == 0
+
+
+def test_missing_evaluated_bar_is_unavailable_instead_of_using_next_bar():
+    trigger = {
+        "session_id": "session",
+        "symbol": "AEHL",
+        "pattern_id": "p1",
+        "pattern_type": "ASCENDING_TRIANGLE",
+        "state": "BREAKOUT",
+        "observation_ts_ms": 110_000,
+        "evaluated_bar_ts_ms": 100_000,
+        "evidence": {},
+    }
+
+    outcome = _measure_trigger(
+        trigger,
+        bars=[{"ts": 110, "high": 10.5, "low": 9.8, "close": 10.2}],
+        status_events=[],
+        gaps=[],
+        recording_last_ms=110_000,
+        horizon_ms=900_000,
+    )
+
+    assert outcome["entry_reference"]["available"] is False
+    assert outcome["entry_reference"]["bar_ts_ms"] is None
+    assert outcome["excursion"] is None

@@ -37,7 +37,7 @@ def test_context_distinguishes_false_zero_and_unavailable_values():
             },
         },
         bar={"close": 4.25, "volume": 0},
-        observation_ts_ms=timestamp_ms - 10_000,
+        observation_ts_ms=timestamp_ms,
     )
 
     assert context["session_phase"]["value"] == "RTH"
@@ -57,6 +57,28 @@ def test_context_distinguishes_false_zero_and_unavailable_values():
         "value": 4.5,
         "source": "ae_snapshot.session.premarket_high",
     }
+
+
+def test_context_does_not_consume_quote_or_market_data_after_observation():
+    context = build_trigger_context(
+        symbol_state={
+            "quote": {
+                "ts_ms": 120_000,
+                "last": 99.0,
+                "security_status": "Halted",
+            },
+            "market_context": {"relative_strength_rank": 1},
+            "ae_snapshot": {},
+        },
+        bar={"close": 10.0, "volume": 100},
+        observation_ts_ms=110_000,
+    )
+
+    assert context["context_as_of_ts_ms"] == 110_000
+    assert context["price"]["value"] == 10.0
+    assert context["price"]["source"] == "completed_bar.close"
+    assert context["security"]["status"]["available"] is False
+    assert context["relative_strength"]["rank"]["available"] is False
 
 
 def test_context_falls_back_to_completed_bar_close_without_quote_price():
