@@ -587,10 +587,13 @@ def test_recording_integrity_endpoint_is_read_only_and_handles_unknown_session(t
 
     with TestClient(create_app(runtime, replay_engine=replay)) as client:
         response = client.get("/api/recordings/session/integrity")
+        outcomes = client.get("/api/evaluation/pattern-outcomes/session")
         missing = client.get("/api/recordings/missing/integrity")
 
     assert response.status_code == 200
     assert response.json()["symbols"]["TOPS"]["raw_event_count"] == 1
+    assert outcomes.status_code == 200
+    assert outcomes.json()["outcomes"] == []
     assert missing.status_code == 404
     assert not (session / "integrity_report.json").exists()
 

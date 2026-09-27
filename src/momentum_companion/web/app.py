@@ -14,6 +14,7 @@ from momentum_companion.evaluation import (
     CorpusClassificationStore,
     DetectorAnnotationEvaluator,
 )
+from momentum_companion.evaluation.pattern_outcomes import build_pattern_outcomes
 from momentum_companion.replay import ReplayEngine
 from momentum_companion.review import ReviewAnnotationStore, ReviewCorpus
 from momentum_companion.runtime import CompanionRuntime
@@ -284,6 +285,20 @@ def create_app(
     def recording_integrity(session_id: str) -> dict[str, Any]:
         try:
             return replay.catalog.integrity_report(session_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/evaluation/pattern-outcomes/{session_id}")
+    def pattern_outcomes(
+        session_id: str,
+        symbol: str | None = None,
+    ) -> dict[str, Any]:
+        try:
+            return build_pattern_outcomes(
+                replay.catalog.root,
+                session_id,
+                symbol=symbol,
+            )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 

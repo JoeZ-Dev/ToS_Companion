@@ -167,6 +167,7 @@ def test_default_manifest_declares_level_one_only(tmp_path: Path):
     assert manifest["services"] == ["LEVELONE_EQUITIES"]
     assert "TIMESALE_EQUITY" not in manifest["counts"]["AEHL"]
     assert (recorder.session_dir / "integrity_report.json").exists()
+    assert (recorder.session_dir / "pattern_outcomes.json").exists()
 
 
 def test_recorder_journals_patterns_only_for_active_symbols(tmp_path: Path):
