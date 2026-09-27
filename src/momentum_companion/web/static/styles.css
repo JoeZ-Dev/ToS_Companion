@@ -128,8 +128,49 @@ button:disabled {
   gap: 12px;
   flex-wrap: wrap;
   font-size: 11px;
-  pointer-events: none;
   opacity: 0.88;
+}
+
+.chart-legend > span {
+  pointer-events: none;
+}
+
+.legend-divider {
+  padding-left: 10px;
+  border-left: 1px solid #37414c;
+  color: #778492;
+}
+
+.pattern-overlay-filters {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.pattern-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #38434e;
+  border-radius: 999px;
+  padding: 2px 6px;
+  background: #12181e;
+  color: #c0c9d2;
+  font-size: 9px;
+  line-height: 1.2;
+}
+
+.pattern-filter::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--pattern-color, #8aa0b5);
+  content: "";
+}
+
+.pattern-filter[aria-pressed="false"] {
+  opacity: .42;
+  text-decoration: line-through;
 }
 
 .legend-vwap { color: #b455ff; }

@@ -16,6 +16,9 @@
     replayView: false,
     replaySnapshot: null,
     replaySessions: [],
+    patternVisibility: {},
+    patternTriggerHistory: {},
+    patternOverlayRevision: null,
   };
 
   const EASTERN_TZ = "America/New_York";
@@ -72,6 +75,9 @@
   const candleSeries = typeof chart.addCandlestickSeries === "function"
     ? chart.addCandlestickSeries({})
     : chart.addSeries(LightweightCharts.CandlestickSeries, {});
+  const patternMarkerApi = typeof LightweightCharts.createSeriesMarkers === "function"
+    ? LightweightCharts.createSeriesMarkers(candleSeries, [])
+    : null;
 
   const addLineSeries = (options) =>
     typeof chart.addLineSeries === "function"
@@ -114,6 +120,7 @@
   });
 
   let structuralPriceLines = [];
+  const patternOverlaySeries = new Map();
 
   function normalizeBar(bar) {
     return {
@@ -179,6 +186,201 @@
         );
       } catch (_error) {}
     }
+  }
+
+  function patternColor(patternType) {
+    const named = {
+      ASCENDING_TRIANGLE: "#46c2ff",
+      MICRO_PULLBACK: "#f2b84b",
+      LOCAL_RESISTANCE_BREAKOUT: "#db7cff",
+      TIGHT_CONSOLIDATION_BREAKOUT: "#5ed39a",
+    };
+    const normalized = String(patternType || "PATTERN").toUpperCase();
+    if (named[normalized]) return named[normalized];
+    const palette = ["#64b5f6", "#ff8a80", "#b39ddb", "#80cbc4", "#ffd180"];
+    let hash = 0;
+    for (const character of normalized) {
+      hash = ((hash << 5) - hash + character.charCodeAt(0)) | 0;
+    }
+    return palette[Math.abs(hash) % palette.length];
+  }
+
+  function patternLineStyle(role) {
+    const normalized = String(role || "").toLowerCase();
+    if (normalized.includes("support") || normalized.includes("pullback")) {
+      return LightweightCharts.LineStyle?.Dashed ?? 2;
+    }
+    if (normalized.includes("range") || normalized.includes("recovery")) {
+      return LightweightCharts.LineStyle?.Dotted ?? 1;
+    }
+    return LightweightCharts.LineStyle?.Solid ?? 0;
+  }
+
+  function patternOverlayDescriptors(patterns, visibility = {}) {
+    const lines = [];
+    const triggers = [];
+    for (const pattern of Array.isArray(patterns) ? patterns : []) {
+      const patternType = String(pattern?.pattern_type || "PATTERN").toUpperCase();
+      if (visibility[patternType] === false) continue;
+      const patternId = String(pattern?.id || `${patternType}:${pattern?.started_at || "unknown"}`);
+      const color = patternColor(patternType);
+      for (const [index, line] of (pattern?.lines || []).entries()) {
+        const startTime = Number(line?.start?.time);
+        const endTime = Number(line?.end?.time);
+        const startPrice = Number(line?.start?.price);
+        const endPrice = Number(line?.end?.price);
+        if (![startTime, endTime, startPrice, endPrice].every(Number.isFinite)) continue;
+        if (startTime === endTime) continue;
+        const points = [
+          { time: startTime, value: startPrice },
+          { time: endTime, value: endPrice },
+        ].sort((first, second) => first.time - second.time);
+        lines.push({
+          key: `${patternId}:${line.role || "line"}:${index}`,
+          patternId,
+          patternType,
+          role: String(line.role || "line"),
+          color,
+          lineStyle: patternLineStyle(line.role),
+          points,
+        });
+      }
+
+      const recoveryPrice = Number(pattern?.evidence?.recovery_pivot);
+      const recoveryTime = Number(pattern?.evidence?.recovery_pivot_time);
+      const updatedAt = Number(pattern?.updated_at);
+      if (
+        patternType === "MICRO_PULLBACK"
+        && [recoveryPrice, recoveryTime, updatedAt].every(Number.isFinite)
+        && updatedAt > recoveryTime
+      ) {
+        lines.push({
+          key: `${patternId}:recovery_pivot`,
+          patternId,
+          patternType,
+          role: "recovery_pivot",
+          color,
+          lineStyle: patternLineStyle("recovery"),
+          points: [
+            { time: recoveryTime, value: recoveryPrice },
+            { time: updatedAt, value: recoveryPrice },
+          ],
+        });
+      }
+
+      const patternState = String(pattern?.state || "").toUpperCase();
+      if (["BREAKOUT", "CONTINUATION"].includes(patternState) && Number.isFinite(updatedAt)) {
+        triggers.push({
+          key: `${patternId}:${patternState}:${updatedAt}`,
+          patternId,
+          patternType,
+          state: patternState,
+          time: updatedAt,
+          color,
+        });
+      }
+    }
+    return { lines, triggers };
+  }
+
+  function patternShortName(patternType) {
+    return String(patternType || "P")
+      .split("_")
+      .filter(Boolean)
+      .map((part) => part.charAt(0))
+      .join("")
+      .slice(0, 4);
+  }
+
+  function rememberPatternTriggers(chartKey, triggers) {
+    const existing = state.patternTriggerHistory[chartKey] || [];
+    const byKey = new Map(existing.map((marker) => [marker.key, marker]));
+    for (const trigger of triggers) byKey.set(trigger.key, trigger);
+    const retained = [...byKey.values()]
+      .sort((first, second) => first.time - second.time)
+      .slice(-50);
+    state.patternTriggerHistory[chartKey] = retained;
+    return retained;
+  }
+
+  function setPatternMarkers(markers) {
+    const chartMarkers = markers.map((marker) => ({
+      time: marker.time,
+      position: "aboveBar",
+      shape: "arrowDown",
+      color: marker.color,
+      text: `${patternShortName(marker.patternType)} ${marker.state}`,
+      id: marker.key,
+    }));
+    if (patternMarkerApi) {
+      patternMarkerApi.setMarkers(chartMarkers);
+    } else if (typeof candleSeries.setMarkers === "function") {
+      candleSeries.setMarkers(chartMarkers);
+    }
+  }
+
+  function renderPatternOverlayFilters(patterns, chartKey) {
+    const host = byId("pattern-overlay-filters");
+    const types = new Set(
+      (Array.isArray(patterns) ? patterns : [])
+        .map((pattern) => String(pattern?.pattern_type || "").toUpperCase())
+        .filter(Boolean)
+    );
+    for (const marker of state.patternTriggerHistory[chartKey] || []) {
+      types.add(marker.patternType);
+    }
+    host.innerHTML = [...types].sort().map((patternType) => {
+      const visible = state.patternVisibility[patternType] !== false;
+      return `<button type="button" class="pattern-filter" data-pattern-type="${escapeHtml(patternType)}" aria-pressed="${visible}" style="--pattern-color:${patternColor(patternType)}" title="Toggle ${escapeHtml(humanizePatternName(patternType))} geometry and trigger markers">${escapeHtml(patternShortName(patternType))}</button>`;
+    }).join("");
+  }
+
+  function setPatternOverlays(patterns, chartKey) {
+    const allDescriptors = patternOverlayDescriptors(patterns, {});
+    const triggerHistory = rememberPatternTriggers(chartKey, allDescriptors.triggers);
+    renderPatternOverlayFilters(patterns, chartKey);
+    const descriptors = patternOverlayDescriptors(patterns, state.patternVisibility);
+    const visibleMarkers = triggerHistory.filter(
+      (marker) => state.patternVisibility[marker.patternType] !== false
+    );
+    const revision = JSON.stringify({
+      chartKey,
+      lines: descriptors.lines,
+      markers: visibleMarkers,
+      visibility: state.patternVisibility,
+    });
+    if (revision === state.patternOverlayRevision) return;
+
+    const visibleRange = chart.timeScale().getVisibleLogicalRange?.() || null;
+    const activeKeys = new Set(descriptors.lines.map((descriptor) => descriptor.key));
+    for (const [key, series] of patternOverlaySeries.entries()) {
+      if (activeKeys.has(key)) continue;
+      try {
+        chart.removeSeries(series);
+      } catch (_error) {}
+      patternOverlaySeries.delete(key);
+    }
+    for (const descriptor of descriptors.lines) {
+      let series = patternOverlaySeries.get(descriptor.key);
+      if (!series) {
+        series = addLineSeries({
+          color: descriptor.color,
+          lineWidth: 2,
+          lineStyle: descriptor.lineStyle,
+          lastValueVisible: false,
+          priceLineVisible: false,
+          crosshairMarkerVisible: true,
+          title: `${humanizePatternName(descriptor.patternType)} · ${descriptor.role}`,
+        });
+        patternOverlaySeries.set(descriptor.key, series);
+      }
+      series.setData(descriptor.points);
+    }
+    setPatternMarkers(visibleMarkers);
+    if (visibleRange && typeof chart.timeScale().setVisibleLogicalRange === "function") {
+      chart.timeScale().setVisibleLogicalRange(visibleRange);
+    }
+    state.patternOverlayRevision = revision;
   }
 
   function mergedBars(symbolState) {
@@ -477,6 +679,19 @@
     return "warn";
   }
 
+  function patternDetailText(pattern) {
+    const started = Number(pattern?.started_at);
+    const updated = Number(pattern?.updated_at);
+    const details = [
+      `Pattern: ${humanizePatternName(pattern?.pattern_type)}`,
+      `State: ${String(pattern?.state || "--")}`,
+      `Started: ${Number.isFinite(started) ? formatEasternTime(started) : "unavailable"}`,
+      `Updated: ${Number.isFinite(updated) ? formatEasternTime(updated) : "unavailable"}`,
+      `Evidence: ${JSON.stringify(pattern?.evidence || {})}`,
+    ];
+    return details.join("\n");
+  }
+
   function renderPatterns(symbolState) {
     const patterns = Array.isArray(symbolState?.pattern_observations)
       ? symbolState.pattern_observations
@@ -484,7 +699,7 @@
     byId("pattern-count").textContent = String(patterns.length);
     byId("pattern-list").innerHTML = patterns.length
       ? patterns.map((pattern) => `
-          <div class="pattern-row">
+          <div class="pattern-row" title="${escapeHtml(patternDetailText(pattern))}">
             <span class="pattern-name">${escapeHtml(humanizePatternName(pattern.pattern_type))}</span>
             <span class="chip pattern-state ${patternTone(pattern.state)}">${escapeHtml(pattern.state || "--")}</span>
             <span class="pattern-evidence">${escapeHtml(patternEvidenceSummary(pattern) || "detected structure")}</span>
@@ -644,6 +859,7 @@
     renderAnalysisView(symbolState);
     if (!symbolState) {
       candleSeries.setData([]);
+      setPatternOverlays([], "LIVE:NONE");
       state.chartSymbol = null;
       state.chartRevision = null;
       state.chartFitSymbol = null;
@@ -676,6 +892,7 @@
         state.chartFitSymbol = symbol;
       }
     }
+    setPatternOverlays(symbolState.pattern_observations || [], `LIVE:${symbol}`);
   }
 
   function applySnapshot(snapshot) {
@@ -810,6 +1027,7 @@
       ema9Series.setData([]);
       ema20Series.setData([]);
       setStructuralLines(null);
+      setPatternOverlays([], "REPLAY:NONE");
       state.chartSymbol = null;
       state.chartRevision = null;
       return;
@@ -837,9 +1055,21 @@
         state.chartFitSymbol = chartKey;
       }
     }
+    setPatternOverlays(symbolState.pattern_observations || [], chartKey);
   }
 
   function renderReplayState(payload) {
+    const previousReplay = state.replaySnapshot?.replay || {};
+    const nextReplay = payload?.replay || {};
+    if (
+      previousReplay.session_id === nextReplay.session_id
+      && previousReplay.symbol === nextReplay.symbol
+      && Number(nextReplay.cursor || 0) < Number(previousReplay.cursor || 0)
+    ) {
+      const rewindKey = `REPLAY:${nextReplay.session_id || ""}:${nextReplay.symbol || ""}`;
+      delete state.patternTriggerHistory[rewindKey];
+      state.patternOverlayRevision = null;
+    }
     state.replaySnapshot = payload;
     const replay = payload?.replay || {};
     const status = String(replay.status || "EMPTY");
@@ -1256,6 +1486,20 @@
   });
 
   byId("view-all-setups").addEventListener("click", () => setTab("setups"));
+
+  byId("pattern-overlay-filters").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-pattern-type]");
+    if (!button) return;
+    const patternType = String(button.dataset.patternType || "").toUpperCase();
+    if (!patternType) return;
+    state.patternVisibility[patternType] = state.patternVisibility[patternType] === false;
+    state.patternOverlayRevision = null;
+    if (state.replayView) {
+      renderReplayView();
+    } else {
+      renderActive();
+    }
+  });
 
   setInterval(() => {
     if (!state.replayView) {

@@ -176,6 +176,7 @@ def create_app(
     @app.get("/app-20260922-9.js")
     @app.get("/app-20260922-10.js")
     @app.get("/app-20260922-11.js")
+    @app.get("/app-20260922-12.js")
     def app_js() -> FileResponse:
         return FileResponse(
             STATIC_DIR / "app.js",
@@ -189,6 +190,7 @@ def create_app(
     @app.get("/styles-20260922-3.css")
     @app.get("/styles-20260922-4.css")
     @app.get("/styles-20260922-5.css")
+    @app.get("/styles-20260922-6.css")
     def styles() -> FileResponse:
         return FileResponse(
             STATIC_DIR / "styles.css",
