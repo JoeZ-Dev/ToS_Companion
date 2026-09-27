@@ -138,6 +138,7 @@ def test_integrity_report_marks_legacy_unknowns_and_missing_recording(tmp_path):
         for warning in report["symbols"]["TOPS"]["replay_confidence_warnings"]
     }
     assert report["provenance"]["complete"] is False
+    assert "recording_active" in {warning["code"] for warning in report["warnings"]}
     assert "application.git_revision" in report["provenance"]["missing_fields"]
     assert "recording_file_missing" in codes
     assert "pattern_journal_unavailable" in codes

@@ -339,6 +339,10 @@ class ReplayEngine:
             self.pattern_timeline.append(
                 {
                     "bar_ts": int(bar.ts),
+                    "observation_ts_ms": max(
+                        int(self._current_ts_ms),
+                        (int(bar.ts) + 10) * 1000,
+                    ),
                     "symbol": self._symbol,
                     "pattern": dict(pattern),
                 }

@@ -45,6 +45,9 @@ src/momentum_companion/setup_engine/
         levels.py
         impulse.py
         retracement.py
+        ranges.py
+        volume.py
+        session_levels.py
 
     patterns/
         __init__.py
@@ -78,7 +81,8 @@ live Schwab events OR recorded replay events
      setup generation   UI/chart
 ```
 
-Live and replay should eventually feed the same detector pipeline.
+Live and replay feed the same `PatternEvaluationService`; parity reports
+compare the resulting meaningful transitions against the persisted live journal.
 
 ## Reusable structure primitives
 
@@ -138,6 +142,15 @@ Measures the pullback following an impulse:
 - retracement depth.
 
 This is shared infrastructure for continuation patterns rather than logic owned by `MICRO_PULLBACK`.
+
+### Ranges, volume, and session levels
+
+`structure/ranges.py` provides generic tight-range geometry.
+`structure/volume.py` provides descriptive completed-bar volume statistics,
+ratios, expansion, and trend. `structure/session_levels.py` provides explicit
+premarket, regular-session, opening-range, prior-day, and VWAP context. Volume
+and session values are observational evidence in the current engine and do not
+gate any detector.
 
 ## Pattern contract
 
@@ -247,6 +260,8 @@ def build_default_pattern_engine() -> PatternEngine:
     engine = PatternEngine()
     engine.register(AscendingTriangleDetector())
     engine.register(MicroPullbackDetector())
+    engine.register(LocalResistanceBreakoutDetector())
+    engine.register(TightConsolidationBreakoutDetector())
     return engine
 ```
 

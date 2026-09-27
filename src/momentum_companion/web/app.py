@@ -17,6 +17,7 @@ from momentum_companion.evaluation import (
 from momentum_companion.evaluation.pattern_outcomes import build_pattern_outcomes
 from momentum_companion.evaluation.pattern_overlaps import build_pattern_overlaps
 from momentum_companion.evaluation.research_export import build_research_export
+from momentum_companion.evaluation.pattern_parity import build_pattern_parity_report
 from momentum_companion.replay import ReplayEngine
 from momentum_companion.review import ReviewAnnotationStore, ReviewCorpus
 from momentum_companion.runtime import CompanionRuntime
@@ -347,6 +348,20 @@ def create_app(
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/evaluation/pattern-parity/{session_id}")
+    def pattern_parity(
+        session_id: str,
+        symbol: str | None = None,
+    ) -> dict[str, Any]:
+        try:
+            return build_pattern_parity_report(
+                replay.catalog.root,
+                session_id,
+                symbol=symbol,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.get("/api/replay/state")
     def replay_state() -> dict[str, Any]:
