@@ -154,3 +154,97 @@ def test_summary_separates_structure_recall_trigger_recall_and_rejected_false_po
     assert summary["median_trigger_latency_ms"] == 20_000
     assert summary["per_detector"]["ASCENDING_TRIANGLE"]["trigger_recall"] == 1.0
     assert summary["unsupported_setup_types"] == ["support_reclaim"]
+
+
+def test_instance_matching_does_not_credit_older_completed_pullback():
+    trigger = 1_800_000_000_000
+    annotation = {
+        "annotation_id": "later",
+        "session_id": "session",
+        "symbol": "TEST",
+        "setup_type": "micro_pullback",
+        "trigger_ms": trigger,
+        "valid_at_time": True,
+        "outcome": "succeeded",
+    }
+    timeline = [
+        {
+            "bar_ts": (trigger - 300_000) // 1000,
+            "symbol": "TEST",
+            "pattern": {
+                "id": "TEST:MICRO_PULLBACK:old",
+                "pattern_type": "MICRO_PULLBACK",
+                "state": "CONTINUATION",
+                "started_at": (trigger - 360_000) // 1000,
+                "updated_at": (trigger - 300_000) // 1000,
+                "evidence": {},
+            },
+        },
+        {
+            "bar_ts": (trigger - 40_000) // 1000,
+            "symbol": "TEST",
+            "pattern": {
+                "id": "TEST:MICRO_PULLBACK:new",
+                "pattern_type": "MICRO_PULLBACK",
+                "state": "PULLBACK",
+                "started_at": (trigger - 80_000) // 1000,
+                "updated_at": (trigger - 40_000) // 1000,
+                "evidence": {},
+            },
+        },
+        {
+            "bar_ts": (trigger + 20_000) // 1000,
+            "symbol": "TEST",
+            "pattern": {
+                "id": "TEST:MICRO_PULLBACK:new",
+                "pattern_type": "MICRO_PULLBACK",
+                "state": "CONTINUATION",
+                "started_at": (trigger - 80_000) // 1000,
+                "updated_at": (trigger + 20_000) // 1000,
+                "evidence": {},
+            },
+        },
+    ]
+
+    result = DetectorAnnotationEvaluator.compare_annotation(annotation, timeline)
+
+    assert result["matching"]["pattern_id"] == "TEST:MICRO_PULLBACK:new"
+    assert result["first_trigger_state_ms"] == trigger + 20_000
+    assert result["trigger_latency_ms"] == 20_000
+    assert result["fired_by_annotated_trigger"] is False
+
+
+def test_setup_start_matching_rejects_unrelated_instance_outside_tolerance():
+    trigger = 1_800_000_000_000
+    annotation = {
+        "annotation_id": "start-aware",
+        "session_id": "session",
+        "symbol": "TEST",
+        "setup_type": "micro_pullback",
+        "setup_start_ms": trigger - 60_000,
+        "trigger_ms": trigger,
+        "valid_at_time": True,
+        "outcome": "succeeded",
+    }
+    timeline = [
+        {
+            "bar_ts": (trigger - 10_000) // 1000,
+            "symbol": "TEST",
+            "pattern": {
+                "id": "TEST:MICRO_PULLBACK:unrelated",
+                "pattern_type": "MICRO_PULLBACK",
+                "state": "CONTINUATION",
+                "started_at": (trigger - 300_000) // 1000,
+                "updated_at": (trigger - 10_000) // 1000,
+                "evidence": {},
+            },
+        }
+    ]
+
+    result = DetectorAnnotationEvaluator.compare_annotation(annotation, timeline)
+
+    assert result["matching"]["status"] == "no_matching_instance"
+    assert result["matching"]["basis"] == "setup_start_ms"
+    assert result["structure_detected"] is False
+    assert result["trigger_detected"] is False
+    assert result["false_positive_on_rejected_candidate"] is False
