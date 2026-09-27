@@ -17,6 +17,8 @@ services:
       - tos-companion-data:/home/companion/.tos_companion
       - /srv/data/tos-companion/state:/home/companion/.local/share/MomentumTradingCompanion
       - /srv/data/tos-companion/codex-bridge:/run/tos-codex
+    ports:
+      - "127.0.0.1:4977:8787"
     networks:
       - joelab-ingress
     healthcheck:
