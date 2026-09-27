@@ -80,6 +80,73 @@ def test_recorder_routes_each_stream_entry_to_its_symbol_file(tmp_path: Path):
     assert '"symbol":"TOPS"' in tops
 
 
+def test_recorder_derives_explicit_security_status_history(tmp_path: Path):
+    recorder = MarketDayRecorder(["AEHL"], output_root=tmp_path)
+    recorder.record_payload(
+        {
+            "data": [
+                {
+                    "service": "LEVELONE_EQUITIES",
+                    "timestamp": 1_700_000_000_000,
+                    "content": [
+                        {
+                            "key": "AEHL",
+                            "1": 3.10,
+                            "2": 3.12,
+                            "3": 3.11,
+                            "8": 25_000,
+                            "32": "Halted",
+                        }
+                    ],
+                }
+            ]
+        },
+        received_at="2026-09-27T13:00:00Z",
+    )
+    recorder.close()
+
+    status_event = json.loads(
+        (recorder.session_dir / "security_status_events.jsonl").read_text()
+    )
+    manifest = json.loads((recorder.session_dir / "manifest.json").read_text())
+    assert status_event["provider_status"] == "Halted"
+    assert manifest["derived_artifacts"]["security_status_events"] == {
+        "path": "security_status_events.jsonl",
+        "schema_version": 1,
+        "event_count": 1,
+    }
+    assert recorder.state()["security_status_event_count"] == 1
+
+
+def test_status_journal_failure_does_not_block_raw_recording(tmp_path: Path, monkeypatch):
+    recorder = MarketDayRecorder(["AEHL"], output_root=tmp_path)
+
+    def fail_status_write(*args, **kwargs):
+        raise OSError("derived journal unavailable")
+
+    monkeypatch.setattr(recorder._status_journal, "append_payload", fail_status_write)
+    recorder.record_payload(
+        {
+            "service": "LEVELONE_EQUITIES",
+            "timestamp": 1_700_000_000_000,
+            "content": [
+                {
+                    "key": "AEHL",
+                    "1": 3.10,
+                    "2": 3.12,
+                    "3": 3.11,
+                    "8": 25_000,
+                    "32": "Halted",
+                }
+            ],
+        }
+    )
+    recorder.close()
+
+    raw = json.loads((recorder.session_dir / "AEHL.jsonl").read_text())
+    assert raw["raw"]["32"] == "Halted"
+
+
 def test_non_recorded_services_are_ignored(tmp_path: Path):
     recorder = MarketDayRecorder(["AEHL"], output_root=tmp_path)
     recorder.record_payload(

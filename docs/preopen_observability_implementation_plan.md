@@ -224,6 +224,20 @@ Do not infer a halt merely from absence of trades.
 
 Derived halt intervals may later be assembled from explicit status transitions.
 
+### Status-event contract
+
+New sessions declare `security_status_events.jsonl` as a derived artifact. A
+schema-version-1 event is written only when a raw `LEVELONE_EQUITIES` delta
+explicitly contains Schwab security-status field `32`, and only when its status,
+provider reason, or provider reason code differs from the last explicit value
+for that symbol. Each row keeps the provider value, optional reason/code without
+reinterpretation, the message timestamp as `provider_ts_ms`, the recorder receipt
+time as `observed_at_utc`, the timestamp source, and deterministic identity.
+
+No event or halt interval is inferred from quote silence, a data gap, or a cached
+status copied onto a normalized quote. Legacy sessions without the artifact load
+with an empty status history.
+
 ## 1D. Recording integrity report
 
 ### Objective

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from datetime import datetime, time as dt_time, timezone
 from pathlib import Path
@@ -12,6 +13,10 @@ from momentum_companion.recording.provenance import (
     MARKET_EVENT_SCHEMA_VERSION,
     build_recording_provenance,
 )
+from momentum_companion.recording.status_journal import (
+    STATUS_JOURNAL_FILENAME,
+    SecurityStatusJournal,
+)
 from momentum_companion.recording.pattern_journal import (
     PATTERN_JOURNAL_FILENAME,
     PatternEventJournal,
@@ -22,6 +27,7 @@ UTC = timezone.utc
 CUTOFF_ET = dt_time(hour=15, minute=0)
 RECORDED_SERVICES = frozenset({"TIMESALE_EQUITY", "LEVELONE_EQUITIES"})
 SCHEMA_VERSION = MARKET_EVENT_SCHEMA_VERSION
+logger = logging.getLogger(__name__)
 
 
 def normalize_symbols(symbols: Iterable[str]) -> list[str]:
@@ -132,6 +138,10 @@ class MarketDayRecorder:
             provenance=self.provenance,
             source_mode="live",
         )
+        self._status_journal = SecurityStatusJournal(
+            self.session_dir,
+            source_mode="live",
+        )
         self._files: dict[str, TextIO] = {}
         self._counts: dict[str, dict[str, int]] = {
             sym: {service: 0 for service in sorted(self.services)} for sym in self.symbols
@@ -185,6 +195,14 @@ class MarketDayRecorder:
                     handle.write(json.dumps(record, separators=(",", ":")) + "\n")
                     handle.flush()
                     self._counts[symbol][service] += 1
+            try:
+                self._status_journal.append_payload(
+                    payload,
+                    active_symbols=self._active_symbols,
+                    observed_at_utc=received,
+                )
+            except Exception:
+                logger.warning("Security-status journal write failed", exc_info=True)
 
     def add_symbol(self, symbol: str, *, changed_at: datetime | None = None) -> bool:
         normalized = str(symbol or "").strip().upper()
@@ -295,6 +313,7 @@ class MarketDayRecorder:
                     symbol: dict(counts) for symbol, counts in self._counts.items()
                 },
                 "pattern_event_count": self._pattern_journal.count,
+                "security_status_event_count": self._status_journal.count,
                 "pre7_seeds": {
                     symbol: dict(seed) for symbol, seed in self._pre7_seeds.items()
                 },
@@ -325,6 +344,7 @@ class MarketDayRecorder:
                 handle.close()
             self._files.clear()
             self._pattern_journal.close()
+            self._status_journal.close()
             self._closed = True
             self._write_manifest(
                 ended_at=ended_iso,
@@ -353,6 +373,13 @@ class MarketDayRecorder:
                         "derived_journal"
                     ),
                     "event_count": self._pattern_journal.count,
+                },
+                "security_status_events": {
+                    "path": STATUS_JOURNAL_FILENAME,
+                    "schema_version": self.provenance.get("schemas", {}).get(
+                        "derived_journal"
+                    ),
+                    "event_count": self._status_journal.count,
                 }
             },
         }
