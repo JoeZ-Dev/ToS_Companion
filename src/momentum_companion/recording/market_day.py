@@ -369,6 +369,14 @@ class MarketDayRecorder:
                 write_pattern_outcomes(self.session_dir.parent, self.session_dir.name)
             except Exception:
                 logger.warning("Pattern outcome measurement failed", exc_info=True)
+            try:
+                from momentum_companion.evaluation.pattern_overlaps import (
+                    write_pattern_overlaps,
+                )
+
+                write_pattern_overlaps(self.session_dir.parent, self.session_dir.name)
+            except Exception:
+                logger.warning("Pattern overlap analysis failed", exc_info=True)
 
     def _write_manifest(self, *, ended_at: str | None, stop_reason: str | None) -> None:
         payload = {
@@ -407,7 +415,11 @@ class MarketDayRecorder:
                 "pattern_outcomes": {
                     "path": "pattern_outcomes.json",
                     "schema_version": 1,
-                }
+                },
+                "pattern_overlaps": {
+                    "path": "pattern_overlaps.json",
+                    "schema_version": 1,
+                },
             },
         }
         (self.session_dir / "manifest.json").write_text(

@@ -6,7 +6,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -15,6 +15,7 @@ from momentum_companion.evaluation import (
     DetectorAnnotationEvaluator,
 )
 from momentum_companion.evaluation.pattern_outcomes import build_pattern_outcomes
+from momentum_companion.evaluation.pattern_overlaps import build_pattern_overlaps
 from momentum_companion.replay import ReplayEngine
 from momentum_companion.review import ReviewAnnotationStore, ReviewCorpus
 from momentum_companion.runtime import CompanionRuntime
@@ -298,6 +299,22 @@ def create_app(
                 replay.catalog.root,
                 session_id,
                 symbol=symbol,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/evaluation/pattern-overlaps/{session_id}")
+    def pattern_overlaps(
+        session_id: str,
+        symbol: str | None = None,
+        level_tolerance_pct: float = Query(default=1.0, ge=0),
+    ) -> dict[str, Any]:
+        try:
+            return build_pattern_overlaps(
+                replay.catalog.root,
+                session_id,
+                symbol=symbol,
+                level_tolerance_pct=level_tolerance_pct,
             )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

@@ -519,6 +519,26 @@ Do not suppress or merge detectors yet.
 
 This is research evidence for later taxonomy decisions.
 
+### Overlap-analysis contract
+
+`pattern_overlaps.json` schema version 1 is derived from the first-class pattern
+journal and can be regenerated without modifying raw recordings. Cross-detector
+instances overlap only during a conservative observed lifetime: from the first
+journal observation through the first explicit invalidation, or through one
+known evaluation cadence after the final journal observation. When cadence is
+unknown, no time is added. The report never infers continued activity from a
+detector's silence.
+
+Each record includes both pattern IDs/types, observed and formation timestamps,
+overlap bounds, trigger times, triggers that occurred inside the other observed
+lifetime, and structural-level comparisons. Level comparisons retain exact
+percentage-point distance and use an explicit, configurable 1% research
+tolerance for the `nearby` marker. This tolerance does not affect detectors or
+trade qualification. Reports include aggregate counts by pattern-type pair and
+are available read-only at
+`GET /api/evaluation/pattern-overlaps/{session_id}` with optional `symbol` and
+`level_tolerance_pct` query filters.
+
 ## Exit criteria
 
 We can quantify, for example, how often:
