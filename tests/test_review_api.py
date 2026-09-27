@@ -106,3 +106,44 @@ def test_annotations_are_append_only_and_separate_from_recordings(tmp_path):
     assert saved["annotation_id"]
     assert store.list(symbol="TOPS")[0]["outcome"] == "failed"
     assert not (recordings / "annotations.jsonl").exists()
+
+
+def test_review_window_before_first_event_returns_empty_availability_packet(tmp_path):
+    session = _write_session(tmp_path)
+    corpus = ReviewCorpus(tmp_path)
+    base = 1_790_161_200_000
+
+    packet = corpus.window(
+        session.name,
+        "TOPS",
+        start_ms=base - 20 * 60 * 1000,
+        end_ms=base - 10 * 60 * 1000,
+    )
+
+    assert packet["window"]["future_data_included"] is False
+    assert packet["window"]["availability"]["status"] == "before_recording"
+    assert packet["window"]["availability"]["events_in_window"] == 0
+    assert packet["bars_10s"] == []
+    assert packet["end_state"]["quote"]["last"] is None
+    assert packet["replay"]["cursor"] == 0
+
+
+def test_review_context_marks_first_five_minutes_very_high_volatility():
+    context = ReviewCorpus._review_context(1_790_170_380_000)
+
+    assert context["opening_volatility_context"] == "very_high"
+    assert context["opening_structure_rule"] is True
+
+
+def test_review_context_marks_0935_to_0945_elevated():
+    context = ReviewCorpus._review_context(1_790_170_800_000)
+
+    assert context["opening_volatility_context"] == "elevated"
+    assert context["opening_structure_rule"] is True
+
+
+def test_review_context_returns_normal_after_opening_window():
+    context = ReviewCorpus._review_context(1_790_171_400_000)
+
+    assert context["opening_volatility_context"] == "normal"
+    assert context["opening_structure_rule"] is False

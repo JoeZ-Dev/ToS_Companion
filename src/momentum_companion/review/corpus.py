@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from momentum_companion.replay.engine import ReplayEngine
 
 MAX_WINDOW_MS = 45 * 60 * 1000
 DEFAULT_WINDOW_MS = 20 * 60 * 1000
+_NY = ZoneInfo("America/New_York")
 
 
 class ReviewCorpus:
@@ -40,20 +43,62 @@ class ReviewCorpus:
                 raise ValueError("start_ms must be <= end_ms")
             if int(end_ms) - int(start_ms) > MAX_WINDOW_MS:
                 raise ValueError("review window may not exceed 45 minutes")
-        resolved_end = last_ms if end_ms is None else int(end_ms)
-        resolved_end = max(first_ms, min(resolved_end, last_ms))
-        resolved_start = (
-            max(first_ms, resolved_end - DEFAULT_WINDOW_MS)
+        requested_end = last_ms if end_ms is None else int(end_ms)
+        requested_start = (
+            requested_end - DEFAULT_WINDOW_MS
             if start_ms is None
             else int(start_ms)
         )
+
+        if requested_end < first_ms:
+            return self._packet(
+                engine,
+                start_ms=requested_start,
+                end_ms=requested_end,
+                availability={
+                    "status": "before_recording",
+                    "first_event_ms": first_ms,
+                    "last_event_ms": last_ms,
+                    "events_in_window": 0,
+                },
+            )
+
+        resolved_end = min(requested_end, last_ms)
+        resolved_start = max(requested_start, first_ms)
         if resolved_start > resolved_end:
-            raise ValueError("start_ms must be <= end_ms")
+            return self._packet(
+                engine,
+                start_ms=requested_start,
+                end_ms=requested_end,
+                availability={
+                    "status": "after_recording",
+                    "first_event_ms": first_ms,
+                    "last_event_ms": last_ms,
+                    "events_in_window": 0,
+                },
+            )
         if resolved_end - resolved_start > MAX_WINDOW_MS:
             raise ValueError("review window may not exceed 45 minutes")
 
         engine.seek(engine.cursor_for_timestamp(resolved_end))
-        return self._packet(engine, start_ms=resolved_start, end_ms=resolved_end)
+        events_in_window = sum(
+            1
+            for event in engine._events
+            if resolved_start <= int(event["stream_ts_ms"]) <= resolved_end
+        )
+        return self._packet(
+            engine,
+            start_ms=resolved_start,
+            end_ms=resolved_end,
+            availability={
+                "status": "available",
+                "first_event_ms": first_ms,
+                "last_event_ms": last_ms,
+                "events_in_window": events_in_window,
+                "requested_start_ms": requested_start,
+                "requested_end_ms": requested_end,
+            },
+        )
 
     def verification_window(
         self,
@@ -74,11 +119,36 @@ class ReviewCorpus:
         )
 
     @staticmethod
+    def _review_context(end_ms: int | None) -> dict[str, Any]:
+        if end_ms is None:
+            return {
+                "opening_volatility_context": "unknown",
+                "opening_structure_rule": False,
+            }
+        local = datetime.fromtimestamp(int(end_ms) / 1000.0, tz=_NY)
+        minute_of_day = local.hour * 60 + local.minute
+        if 9 * 60 + 30 <= minute_of_day < 9 * 60 + 35:
+            context = "very_high"
+            structure_rule = True
+        elif 9 * 60 + 35 <= minute_of_day < 9 * 60 + 45:
+            context = "elevated"
+            structure_rule = True
+        else:
+            context = "normal"
+            structure_rule = False
+        return {
+            "opening_volatility_context": context,
+            "opening_structure_rule": structure_rule,
+            "timestamp_et": local.isoformat(),
+        }
+
+    @staticmethod
     def _packet(
         engine: ReplayEngine,
         *,
         start_ms: int | None,
         end_ms: int | None,
+        availability: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         snapshot = engine.snapshot()
         replay = snapshot["replay"]
@@ -107,7 +177,9 @@ class ReviewCorpus:
                 "start_ms": start_ms,
                 "end_ms": end_ms,
                 "future_data_included": False,
+                "availability": dict(availability or {}),
             },
+            "review_context": ReviewCorpus._review_context(end_ms),
             "bars_10s": bars,
             "vwap_points": vwap,
             "end_state": {
