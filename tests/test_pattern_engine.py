@@ -6,6 +6,9 @@ from momentum_companion.setup_engine.patterns.micro_pullback import detect_micro
 from momentum_companion.setup_engine.patterns.local_resistance_breakout import (
     detect_local_resistance_breakout,
 )
+from momentum_companion.setup_engine.patterns.tight_consolidation_breakout import (
+    detect_tight_consolidation_breakout,
+)
 
 
 def bar(t, o, h, l, c, v=1000):
@@ -334,3 +337,66 @@ def test_local_resistance_returns_none_for_single_high():
     ]
 
     assert detect_local_resistance_breakout("ABCD", bars) is None
+
+
+def tight_consolidation_bars(last_close=10.02):
+    return [
+        bar(0, 9.95, 10.04, 9.93, 10.00),
+        bar(10, 10.00, 10.05, 9.96, 10.02),
+        bar(20, 10.02, 10.06, 9.97, 10.01),
+        bar(30, 10.01, 10.05, 9.98, 10.03),
+        bar(40, 10.03, 10.06, 9.99, 10.02),
+        bar(50, 10.02, max(10.08, last_close), 10.00, last_close),
+    ]
+
+
+def test_detects_tight_consolidation_geometry():
+    observation = detect_tight_consolidation_breakout(
+        "abcd",
+        tight_consolidation_bars(last_close=10.04),
+    )
+
+    assert observation is not None
+    assert observation.pattern_type == "TIGHT_CONSOLIDATION_BREAKOUT"
+    assert observation.evidence["consolidation_bars"] >= 4
+    assert observation.evidence["range_width_pct"] <= 0.03
+    assert observation.evidence["range_selection"] == "longest_trailing_tight_range"
+    assert {line.role for line in observation.lines} == {"range_high", "range_low"}
+
+
+def test_tight_consolidation_breakout_requires_current_close_cross():
+    observation = detect_tight_consolidation_breakout(
+        "ABCD",
+        tight_consolidation_bars(last_close=10.09),
+    )
+
+    assert observation is not None
+    assert observation.state == PatternState.BREAKOUT
+    assert observation.evidence["crossed_now"] is True
+    assert observation.evidence["previous_close"] < observation.evidence["breakout_level"]
+    assert observation.evidence["last_close"] >= observation.evidence["breakout_level"]
+
+
+def test_tight_consolidation_rejects_range_that_is_too_wide():
+    bars = [
+        bar(0, 10.00, 10.20, 9.80, 10.05),
+        bar(10, 10.05, 10.18, 9.82, 9.95),
+        bar(20, 9.95, 10.17, 9.83, 10.02),
+        bar(30, 10.02, 10.19, 9.81, 9.98),
+        bar(40, 9.98, 10.10, 9.90, 10.03),
+    ]
+
+    assert detect_tight_consolidation_breakout("ABCD", bars) is None
+
+
+def test_tight_consolidation_rejects_bullish_setup_after_downside_break():
+    bars = [
+        bar(0, 9.95, 10.04, 9.93, 10.00),
+        bar(10, 10.00, 10.05, 9.96, 10.02),
+        bar(20, 10.02, 10.06, 9.97, 10.01),
+        bar(30, 10.01, 10.05, 9.98, 10.03),
+        bar(40, 10.03, 10.06, 9.99, 10.02),
+        bar(50, 10.02, 10.03, 9.85, 9.86),
+    ]
+
+    assert detect_tight_consolidation_breakout("ABCD", bars) is None

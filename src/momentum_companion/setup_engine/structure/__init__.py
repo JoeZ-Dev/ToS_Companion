@@ -3,6 +3,7 @@ from momentum_companion.setup_engine.structure.swings import SwingPoint, swing_h
 from momentum_companion.setup_engine.structure.levels import LevelCluster, cluster_levels
 from momentum_companion.setup_engine.structure.impulse import ImpulseLeg, latest_bullish_impulse, strongest_bullish_impulse
 from momentum_companion.setup_engine.structure.retracement import Retracement, first_confirmed_retracement, measure_retracement
+from momentum_companion.setup_engine.structure.ranges import PriceRange, tight_range_suffix
 
 __all__ = [
     "NormalizedBar",
@@ -18,4 +19,6 @@ __all__ = [
     "Retracement",
     "first_confirmed_retracement",
     "measure_retracement",
+    "PriceRange",
+    "tight_range_suffix",
 ]
