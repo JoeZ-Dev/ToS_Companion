@@ -391,7 +391,7 @@ Consumes:
 - the latest qualifying local bullish impulse, anchored between local swing highs;
 - measured retracement.
 
-A micro-pullback is treated as a single local impulse -> retracement -> continuation lifecycle. Once an earlier post-impulse bar has already closed through the continuation level, that detector instance is complete and is not allowed to drift back into PULLBACK/TURNING on later bars.
+A micro-pullback is treated as a single local impulse -> retracement -> recovery -> continuation lifecycle. Continuation is defined from the post-pullback recovery structure, not simply from reclaiming the old impulse high: after the pullback low, at least one completed recovery bar must establish a recovery pivot, and a later bar must close through that pivot plus the existing continuation buffer. Once an earlier bar has already completed that recovery-pivot break, the detector instance is complete and is not allowed to drift back into PULLBACK/TURNING on later bars.
 
 Currently emits evidence including:
 
@@ -400,7 +400,8 @@ Currently emits evidence including:
 - pullback low;
 - duration;
 - retracement depth;
-- continuation level.
+- recovery pivot and timestamp;
+- continuation level derived from the recovery pivot.
 
 These two detectors are reference implementations for the framework, not special cases built into it.
 
