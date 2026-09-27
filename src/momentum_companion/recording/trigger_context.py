@@ -4,6 +4,12 @@ from datetime import datetime
 from typing import Any, Mapping
 from zoneinfo import ZoneInfo
 
+from momentum_companion.setup_engine.structure.volume import (
+    current_volume_expansion,
+    recent_volume_stats,
+    volume_trend,
+)
+
 ET = ZoneInfo("America/New_York")
 TRIGGER_STATES = frozenset({"BREAKOUT", "CONTINUATION"})
 
@@ -29,6 +35,10 @@ def build_trigger_context(
     fundamentals = ae.get("fundamentals") or {}
     session_levels = ae.get("session") or {}
     structural_levels = ae.get("levels") or {}
+    completed_bars = list(symbol_state.get("bars_10s") or [])
+    prior_bars = completed_bars[:-1]
+    recent_stats = recent_volume_stats(prior_bars, lookback=20)
+    trend = volume_trend(prior_bars, lookback=20)
     quote_ts_ms = _int_or_none(quote.get("ts_ms"))
     context_as_of_ms = max(
         observation_ts_ms,
@@ -128,6 +138,26 @@ def build_trigger_context(
             "ae_volume_multiple": evidence_value(
                 _number_or_none((ae.get("volume") or {}).get("volume_multiple")),
                 source="ae_snapshot.volume.volume_multiple",
+            ),
+            "recent_mean_20": evidence_value(
+                recent_stats["mean"],
+                source="volume_primitive.recent_mean_20",
+            ),
+            "recent_median_20": evidence_value(
+                recent_stats["median"],
+                source="volume_primitive.recent_median_20",
+            ),
+            "current_expansion_ratio_20": evidence_value(
+                current_volume_expansion(bar, prior_bars, lookback=20),
+                source="volume_primitive.current_expansion_ratio_20",
+            ),
+            "trend_slope_20": evidence_value(
+                trend["slope_per_bar"],
+                source="volume_primitive.trend_slope_20",
+            ),
+            "trend_direction_20": evidence_value(
+                trend["direction"],
+                source="volume_primitive.trend_direction_20",
             ),
         },
         "session_levels": {

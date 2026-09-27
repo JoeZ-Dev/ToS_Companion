@@ -451,6 +451,15 @@ Expose evidence first.
 
 Do not require volume confirmation for any current detector in this phase.
 
+### Volume-primitive contract
+
+The shared structure layer provides completed-bar volume extraction, recent
+mean/median, generic segment-to-baseline contraction ratio, current-bar expansion
+ratio, and least-squares volume trend. Invalid or absent observations are
+unavailable; recorded zero volume remains zero. Trigger context exposes the
+20-bar recent statistics, current expansion, and trend as evidence. No detector
+calls these values and no volume threshold gates a setup.
+
 ## 3C. Session-level primitives
 
 Create one reusable session context provider for:
