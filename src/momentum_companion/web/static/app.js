@@ -309,7 +309,10 @@
       position: "aboveBar",
       shape: "arrowDown",
       color: marker.color,
-      text: `${patternShortName(marker.patternType)} ${marker.state}`,
+      // Keep trigger markers compact. Pattern type/state remain available in
+      // the Patterns panel and filter legend, while text here obscures price
+      // action when several detectors trigger close together.
+      text: "",
       id: marker.key,
     }));
     if (patternMarkerApi) {
@@ -672,7 +675,14 @@
       return parts.join(" · ");
     }
     const keys = Object.keys(evidence).slice(0, 3);
-    return keys.map((key) => `${key.replaceAll("_", " ")}: ${String(evidence[key])}`).join(" · ");
+    return keys.map((key) => {
+      const value = evidence[key];
+      const numeric = Number(value);
+      const display = Number.isFinite(numeric)
+        ? numeric.toLocaleString("en-US", { maximumFractionDigits: 4, useGrouping: false })
+        : String(value);
+      return `${key.replaceAll("_", " ")}: ${display}`;
+    }).join(" · ");
   }
 
   function patternTone(patternState) {
