@@ -309,7 +309,10 @@
       position: "aboveBar",
       shape: "arrowDown",
       color: marker.color,
-      text: `${patternShortName(marker.patternType)} ${marker.state}`,
+      // Keep trigger markers compact. Pattern type/state remain available in
+      // the Patterns panel and filter legend, while text here obscures price
+      // action when several detectors trigger close together.
+      text: "",
       id: marker.key,
     }));
     if (patternMarkerApi) {
