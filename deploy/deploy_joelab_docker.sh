@@ -74,6 +74,19 @@ if [[ "$status" != "healthy" ]]; then
   exit 6
 fi
 
+echo "Verifying deployment provenance..."
+container_revision="$(docker exec tos-companion printenv TOS_COMPANION_GIT_REVISION 2>/dev/null || true)"
+container_dirty="$(docker exec tos-companion printenv TOS_COMPANION_GIT_WORKTREE_DIRTY 2>/dev/null || true)"
+if [[ "$container_revision" != "$TOS_COMPANION_GIT_REVISION" ]]; then
+  echo "ERROR: container git revision provenance mismatch: got '$container_revision', expected '$TOS_COMPANION_GIT_REVISION'." >&2
+  exit 7
+fi
+if [[ "$container_dirty" != "$TOS_COMPANION_GIT_WORKTREE_DIRTY" ]]; then
+  echo "ERROR: container dirty-state provenance mismatch: got '$container_dirty', expected '$TOS_COMPANION_GIT_WORKTREE_DIRTY'." >&2
+  exit 8
+fi
+echo "Deployment provenance verified: revision=$container_revision dirty=$container_dirty"
+
 echo "Verifying persistent mounts..."
 mounts_json="$(docker inspect tos-companion --format '{{json .Mounts}}')"
 python3 - "$STATE_DIR" "$CODEX_BRIDGE_DIR" "$mounts_json" <<'PY'
