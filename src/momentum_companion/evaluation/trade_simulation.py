@@ -41,7 +41,8 @@ class TradeSimulationPolicy:
             "target_rule": "entry + target_r * (entry - stop)",
             "same_move_rule": (
                 "merge first trigger per pattern instance when trigger observations "
-                "fall within signal_merge_window_ms; reject later candidates during cooldown"
+                "fall within signal_merge_window_ms of the candidate start; reject later "
+                "candidates during cooldown or while a simulated position remains open"
             ),
             "stop_fill_slippage_bps": self.stop_fill_slippage_bps,
             "target_fill_slippage_bps": self.target_fill_slippage_bps,
@@ -120,8 +121,9 @@ def build_trade_simulation(
             candidates.append(result)
             if result["status"] == "SIMULATED":
                 trades.append(result["simulation"])
-                cooldown_until = (
-                    int(candidate["trigger_ts_ms"]) + active_policy.cooldown_ms
+                cooldown_until = max(
+                    int(candidate["trigger_ts_ms"]) + active_policy.cooldown_ms,
+                    int(result["simulation"]["exit_ts_ms"]),
                 )
             elif result["status"] == "DATA_QUALITY_BLOCKED":
                 cooldown_until = (
@@ -191,11 +193,11 @@ def _merge_trigger_candidates(
         if not groups:
             groups.append([trigger])
             continue
-        previous_ms = int(groups[-1][-1].get("observation_ts_ms") or 0)
+        group_start_ms = int(groups[-1][0].get("observation_ts_ms") or 0)
         same_symbol = str(groups[-1][0].get("symbol") or "") == str(
             trigger.get("symbol") or ""
         )
-        if same_symbol and trigger_ms - previous_ms <= window_ms:
+        if same_symbol and trigger_ms - group_start_ms <= window_ms:
             groups[-1].append(trigger)
         else:
             groups.append([trigger])
