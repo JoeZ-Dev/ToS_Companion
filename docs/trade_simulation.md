@@ -17,7 +17,7 @@ The response contains the frozen policy, every consolidated candidate, simulated
 The defaults are intentionally explicit and conservative:
 
 - Trigger source: first `BREAKOUT` or `CONTINUATION` observation for each pattern instance.
-- Signal consolidation: triggers on the same symbol are merged transitively when adjacent trigger observations are within 15 seconds. The contributing detector IDs/types are retained.
+- Signal consolidation: triggers on the same symbol are merged when they occur within 15 seconds of the candidate's first trigger. The contributing detector IDs/types are retained; chained triggers outside that fixed window do not extend the candidate.
 - Entry: first complete recorded L1 quote at or after the observable trigger, within 10 seconds.
 - Long entry price: recorded ask.
 - Stop: closest detector-supported invalidation level below the entry. A Tight Consolidation Breakout may use `evidence.breakdown_level`.
@@ -25,7 +25,7 @@ The defaults are intentionally explicit and conservative:
 - Target: 2R, where `R = entry - stop`.
 - Long exit price: recorded bid.
 - Exit ordering: first recorded bid to touch/cross stop or target wins. Otherwise exit on the last recorded bid at or before the 15-minute timeout.
-- Cooldown: 120 seconds from an accepted candidate trigger. Later candidates during cooldown are not separate simulated trades.
+- Cooldown: at least 120 seconds from an accepted candidate trigger, and never shorter than the simulated position's lifetime. Later candidates during cooldown or while that position is open are not separate simulated trades.
 - Position sizing: normalized 1R only. No account size or share count is assumed.
 - Slippage: v1 uses the actual recorded ask for entry and bid for exit. Additional configurable stop/target slippage defaults to 0 bps.
 - Spread: entry spread and spread percentage are recorded.
