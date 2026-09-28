@@ -59,6 +59,8 @@ jobs:
         run: |
           cp deploy/joelab.env.example deploy/joelab.env
           sed -i 's/^INTERNAL_AUTH_SECRET=.*/INTERNAL_AUTH_SECRET=ci-test-secret/' deploy/joelab.env
+          export TOS_COMPANION_GIT_REVISION="$(git rev-parse --verify HEAD)"
+          export TOS_COMPANION_GIT_WORKTREE_DIRTY=false
           docker network create joelab-ingress >/dev/null
           docker compose --env-file deploy/joelab.env -f deploy/docker-compose.joelab.yml config >/dev/null
       - name: Smoke boot browser server

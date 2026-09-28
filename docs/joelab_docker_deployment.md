@@ -50,10 +50,7 @@ git checkout feature/browser-server-foundation
 git pull --ff-only
 
 cp -n deploy/joelab.env.example deploy/joelab.env
-docker compose \
-  --env-file deploy/joelab.env \
-  -f deploy/docker-compose.joelab.yml \
-  up -d --build
+bash deploy/deploy_joelab_docker.sh
 ```
 
 Check status:
@@ -120,12 +117,12 @@ Once deployed, code updates are:
 ```bash
 cd /srv/apps/ToS_Companion
 git pull --ff-only
-
-docker compose \
-  --env-file deploy/joelab.env \
-  -f deploy/docker-compose.joelab.yml \
-  up -d --build
+bash deploy/deploy_joelab_docker.sh
 ```
+
+The deployment helper derives the exact checked-out Git revision and dirty-worktree state, exports them into the Compose build/runtime environment, and verifies that the running container received the same values. This keeps recording provenance complete even though the production image intentionally does not contain the repository's `.git` directory.
+
+Direct `docker compose up --build` is intentionally guarded against silently building without revision provenance. Use the deployment helper for joelab updates.
 
 Then refresh the browser.
 
