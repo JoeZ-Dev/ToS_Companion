@@ -913,11 +913,18 @@ def _summarize_exit_policies(trades: list[dict[str, Any]]) -> dict[str, Any]:
         available = [row for row in rows if row.get("available")]
         realized_rs = [float(row["realized_r"]) for row in available]
         realized_pcts = [float(row["realized_pct"]) for row in available]
-        captures = [
-            float(row["capture_efficiency"])
-            for row in available
-            if row.get("capture_efficiency") is not None
-        ]
+        captures = []
+        for trade in trades:
+            row = (trade.get("exit_policy_results") or {}).get(name)
+            path = trade.get("full_path") or {}
+            if not row or not row.get("available"):
+                continue
+            mfe_pct = path.get("mfe_pct")
+            realized_pct = row.get("realized_pct")
+            if mfe_pct is not None and float(mfe_pct) > 0 and realized_pct is not None:
+                captures.append(
+                    max(0.0, float(realized_pct)) / float(mfe_pct)
+                )
         summary[name] = {
             "evaluated_trade_count": len(rows),
             "available_trade_count": len(available),
