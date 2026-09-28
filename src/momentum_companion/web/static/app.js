@@ -675,7 +675,14 @@
       return parts.join(" · ");
     }
     const keys = Object.keys(evidence).slice(0, 3);
-    return keys.map((key) => `${key.replaceAll("_", " ")}: ${String(evidence[key])}`).join(" · ");
+    return keys.map((key) => {
+      const value = evidence[key];
+      const numeric = Number(value);
+      const display = Number.isFinite(numeric)
+        ? numeric.toLocaleString("en-US", { maximumFractionDigits: 4, useGrouping: false })
+        : String(value);
+      return `${key.replaceAll("_", " ")}: ${display}`;
+    }).join(" · ");
   }
 
   function patternTone(patternState) {
