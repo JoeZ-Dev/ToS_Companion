@@ -69,6 +69,13 @@ def _session(tmp_path, *, include_stop=True):
             "kind": "market_event",
             "service": "LEVELONE_EQUITIES",
             "symbol": "TEST",
+            "stream_ts_ms": 80_000,
+            "raw": {"key": "TEST", "1": 11.70, "2": 11.75, "3": 11.72, "8": 1550},
+        },
+        {
+            "kind": "market_event",
+            "service": "LEVELONE_EQUITIES",
+            "symbol": "TEST",
             "stream_ts_ms": 130_000,
             "raw": {"key": "TEST", "1": 10.20, "2": 10.25, "3": 10.22, "8": 1600},
         },
