@@ -10,7 +10,7 @@ from momentum_companion.recording.integrity import build_integrity_report
 from momentum_companion.replay.catalog import RecordingCatalog
 
 
-SIMULATION_SCHEMA_VERSION = 1
+SIMULATION_SCHEMA_VERSION = 2
 TRIGGER_STATES = frozenset({"BREAKOUT", "CONTINUATION"})
 UTC = timezone.utc
 
@@ -22,6 +22,7 @@ class TradeSimulationPolicy:
     entry_wait_ms: int = 10_000
     max_hold_ms: int = 15 * 60 * 1000
     target_r: float = 2.0
+    trailing_retrace_fractions: tuple[float, ...] = (0.15, 0.20, 0.25)
     stop_fill_slippage_bps: float = 0.0
     target_fill_slippage_bps: float = 0.0
 
@@ -39,6 +40,19 @@ class TradeSimulationPolicy:
                 "TIGHT_CONSOLIDATION_BREAKOUT may use evidence.breakdown_level"
             ),
             "target_rule": "entry + target_r * (entry - stop)",
+            "exit_policy_comparison": {
+                "baseline": "fixed_2r",
+                "runner_activation": "after recorded bid reaches the baseline 2R target",
+                "trailing_retrace_fractions": list(self.trailing_retrace_fractions),
+                "trailing_rule": (
+                    "after activation, exit when recorded bid gives back the configured "
+                    "fraction of peak gain above entry"
+                ),
+                "comparison_scope": (
+                    "same accepted baseline trades and same entry/stop; alternate exits "
+                    "do not change candidate selection or cooldown"
+                ),
+            },
             "same_move_rule": (
                 "merge first trigger per pattern instance when trigger observations "
                 "fall within signal_merge_window_ms of the candidate start; reject later "
@@ -154,6 +168,10 @@ def _validate_policy(policy: TradeSimulationPolicy) -> None:
         raise ValueError("max_hold_ms must be positive")
     if policy.target_r <= 0:
         raise ValueError("target_r must be positive")
+    if not policy.trailing_retrace_fractions:
+        raise ValueError("trailing_retrace_fractions must not be empty")
+    if any(value <= 0 or value >= 1 for value in policy.trailing_retrace_fractions):
+        raise ValueError("trailing_retrace_fractions must be between 0 and 1")
     if policy.stop_fill_slippage_bps < 0 or policy.target_fill_slippage_bps < 0:
         raise ValueError("slippage bps must be non-negative")
 
@@ -325,6 +343,16 @@ def _simulate_candidate(
         and _positive_float(quote.get("bid")) is not None
     ]
 
+    full_path = _full_path_metrics(
+        entry_price=entry_price,
+        entry_bid=entry_bid,
+        entry_ts_ms=entry_ts_ms,
+        risk_per_share=risk_per_share,
+        path=path,
+        requested_end_ms=natural_end_ms,
+        barrier=barrier,
+    )
+
     exit_reason = None
     exit_quote = None
     for quote in path:
@@ -397,6 +425,31 @@ def _simulate_candidate(
         else None
     )
 
+    exit_policy_results = {
+        "fixed_2r": _policy_result(
+            name="fixed_2r",
+            entry_price=entry_price,
+            risk_per_share=risk_per_share,
+            exit_quote=exit_quote,
+            exit_reason=exit_reason,
+            full_path=full_path,
+        )
+    }
+    for retrace_fraction in policy.trailing_retrace_fractions:
+        name = f"trail_after_2r_retrace_{round(retrace_fraction * 100):02d}pct"
+        exit_policy_results[name] = _simulate_trailing_runner(
+            name=name,
+            retrace_fraction=retrace_fraction,
+            entry_price=entry_price,
+            entry_ts_ms=entry_ts_ms,
+            stop_price=stop_price,
+            target_price=target_price,
+            risk_per_share=risk_per_share,
+            path=path,
+            natural_end_ms=natural_end_ms,
+            barrier=barrier,
+        )
+
     simulation = {
         "session_id": candidate["session_id"],
         "symbol": candidate["symbol"],
@@ -423,6 +476,8 @@ def _simulate_candidate(
         "realized_r": realized_r,
         "mae_pct_l1_bid": mae_pct,
         "mfe_pct_l1_bid": mfe_pct,
+        "full_path": full_path,
+        "exit_policy_results": exit_policy_results,
         "pattern_types": list(candidate["pattern_types"]),
         "contributors": list(candidate["contributors"]),
         "data_quality": {"blocked": False, "barrier": barrier},
@@ -432,6 +487,206 @@ def _simulate_candidate(
         "status": "SIMULATED",
         "reason": None,
         "simulation": simulation,
+    }
+
+
+def _full_path_metrics(
+    *,
+    entry_price: float,
+    entry_bid: float,
+    entry_ts_ms: int,
+    risk_per_share: float,
+    path: list[dict[str, Any]],
+    requested_end_ms: int,
+    barrier: dict[str, Any] | None,
+) -> dict[str, Any]:
+    observations = [
+        {"ts_ms": entry_ts_ms, "bid": entry_bid},
+        *[
+            {"ts_ms": int(quote["ts_ms"]), "bid": float(quote["bid"])}
+            for quote in path
+            if _positive_float(quote.get("bid")) is not None
+        ],
+    ]
+    peak = max(observations, key=lambda item: item["bid"])
+    trough = min(observations, key=lambda item: item["bid"])
+    mfe_pct = (peak["bid"] - entry_price) / entry_price * 100.0
+    mae_pct = (trough["bid"] - entry_price) / entry_price * 100.0
+    observed_end_ms = observations[-1]["ts_ms"]
+    complete = barrier is None and observed_end_ms <= requested_end_ms
+    return {
+        "requested_end_ts_ms": requested_end_ms,
+        "observed_end_ts_ms": observed_end_ms,
+        "complete": complete,
+        "barrier": barrier,
+        "peak_bid": peak["bid"],
+        "peak_ts_ms": peak["ts_ms"],
+        "trough_bid": trough["bid"],
+        "trough_ts_ms": trough["ts_ms"],
+        "mfe_pct": mfe_pct,
+        "mae_pct": mae_pct,
+        "mfe_r": (peak["bid"] - entry_price) / risk_per_share,
+        "mae_r": (trough["bid"] - entry_price) / risk_per_share,
+    }
+
+
+def _policy_result(
+    *,
+    name: str,
+    entry_price: float,
+    risk_per_share: float,
+    exit_quote: dict[str, Any],
+    exit_reason: str,
+    full_path: dict[str, Any],
+) -> dict[str, Any]:
+    exit_price = float(exit_quote["bid"])
+    realized_per_share = exit_price - entry_price
+    realized_pct = realized_per_share / entry_price * 100.0
+    realized_r = realized_per_share / risk_per_share
+    mfe_pct = float(full_path["mfe_pct"])
+    capture_efficiency = (
+        max(0.0, realized_pct) / mfe_pct
+        if mfe_pct > 0
+        else None
+    )
+    return {
+        "name": name,
+        "available": True,
+        "exit_ts_ms": int(exit_quote["ts_ms"]),
+        "exit_price": exit_price,
+        "exit_reason": exit_reason,
+        "realized_pct": realized_pct,
+        "realized_r": realized_r,
+        "capture_efficiency": capture_efficiency,
+    }
+
+
+def _simulate_trailing_runner(
+    *,
+    name: str,
+    retrace_fraction: float,
+    entry_price: float,
+    entry_ts_ms: int,
+    stop_price: float,
+    target_price: float,
+    risk_per_share: float,
+    path: list[dict[str, Any]],
+    natural_end_ms: int,
+    barrier: dict[str, Any] | None,
+) -> dict[str, Any]:
+    activated = False
+    activation_ts_ms = None
+    peak_bid = None
+    trailing_floor = None
+
+    for quote in path:
+        bid = float(quote["bid"])
+        ts_ms = int(quote["ts_ms"])
+        if not activated:
+            if bid <= stop_price:
+                return _runner_exit_result(
+                    name=name,
+                    retrace_fraction=retrace_fraction,
+                    entry_price=entry_price,
+                    risk_per_share=risk_per_share,
+                    quote=quote,
+                    reason="STOP",
+                    activation_ts_ms=None,
+                    peak_bid=None,
+                    trailing_floor=None,
+                )
+            if bid >= target_price:
+                activated = True
+                activation_ts_ms = ts_ms
+                peak_bid = bid
+                trailing_floor = entry_price + (peak_bid - entry_price) * (
+                    1.0 - retrace_fraction
+                )
+                continue
+        else:
+            if bid > float(peak_bid):
+                peak_bid = bid
+                trailing_floor = entry_price + (peak_bid - entry_price) * (
+                    1.0 - retrace_fraction
+                )
+                continue
+            if bid <= float(trailing_floor):
+                return _runner_exit_result(
+                    name=name,
+                    retrace_fraction=retrace_fraction,
+                    entry_price=entry_price,
+                    risk_per_share=risk_per_share,
+                    quote=quote,
+                    reason="TRAIL",
+                    activation_ts_ms=activation_ts_ms,
+                    peak_bid=peak_bid,
+                    trailing_floor=trailing_floor,
+                )
+
+    if barrier is not None and int(barrier["ts_ms"]) <= natural_end_ms:
+        return {
+            "name": name,
+            "available": False,
+            "reason": barrier["reason"],
+            "activated": activated,
+            "activation_ts_ms": activation_ts_ms,
+            "peak_bid": peak_bid,
+            "trailing_floor": trailing_floor,
+            "retrace_fraction": retrace_fraction,
+        }
+
+    if not path:
+        return {
+            "name": name,
+            "available": False,
+            "reason": "no_exit_quote_before_timeout",
+            "activated": activated,
+            "activation_ts_ms": activation_ts_ms,
+            "peak_bid": peak_bid,
+            "trailing_floor": trailing_floor,
+            "retrace_fraction": retrace_fraction,
+        }
+
+    return _runner_exit_result(
+        name=name,
+        retrace_fraction=retrace_fraction,
+        entry_price=entry_price,
+        risk_per_share=risk_per_share,
+        quote=path[-1],
+        reason="TIMEOUT",
+        activation_ts_ms=activation_ts_ms,
+        peak_bid=peak_bid,
+        trailing_floor=trailing_floor,
+    )
+
+
+def _runner_exit_result(
+    *,
+    name: str,
+    retrace_fraction: float,
+    entry_price: float,
+    risk_per_share: float,
+    quote: dict[str, Any],
+    reason: str,
+    activation_ts_ms: int | None,
+    peak_bid: float | None,
+    trailing_floor: float | None,
+) -> dict[str, Any]:
+    exit_price = float(quote["bid"])
+    realized_per_share = exit_price - entry_price
+    return {
+        "name": name,
+        "available": True,
+        "retrace_fraction": retrace_fraction,
+        "activated": activation_ts_ms is not None,
+        "activation_ts_ms": activation_ts_ms,
+        "peak_bid": peak_bid,
+        "trailing_floor": trailing_floor,
+        "exit_ts_ms": int(quote["ts_ms"]),
+        "exit_price": exit_price,
+        "exit_reason": reason,
+        "realized_pct": realized_per_share / entry_price * 100.0,
+        "realized_r": realized_per_share / risk_per_share,
     }
 
 
@@ -601,7 +856,96 @@ def _summarize(
         "average_realized_pct": (
             sum(realized_pcts) / len(realized_pcts) if realized_pcts else None
         ),
+        "full_path": _summarize_full_path(trades),
+        "exit_policy_comparison": _summarize_exit_policies(trades),
         "interpretation": (
             "diagnostic execution-policy output; not validated expectancy and not a live trading recommendation"
         ),
     }
+
+
+
+def _summarize_full_path(trades: list[dict[str, Any]]) -> dict[str, Any]:
+    complete = [
+        trade["full_path"]
+        for trade in trades
+        if isinstance(trade.get("full_path"), dict)
+    ]
+    if not complete:
+        return {
+            "trade_count": 0,
+            "complete_path_count": 0,
+            "average_mfe_pct": None,
+            "average_mfe_r": None,
+            "fixed_exit_left_5pct_or_more_on_table_count": 0,
+        }
+    extra_five = 0
+    for trade in trades:
+        path = trade.get("full_path") or {}
+        if path.get("mfe_pct") is None:
+            continue
+        if float(path["mfe_pct"]) - max(0.0, float(trade["realized_pct"])) >= 5.0:
+            extra_five += 1
+    return {
+        "trade_count": len(complete),
+        "complete_path_count": sum(bool(item.get("complete")) for item in complete),
+        "average_mfe_pct": sum(float(item["mfe_pct"]) for item in complete) / len(complete),
+        "average_mfe_r": sum(float(item["mfe_r"]) for item in complete) / len(complete),
+        "fixed_exit_left_5pct_or_more_on_table_count": extra_five,
+    }
+
+
+def _summarize_exit_policies(trades: list[dict[str, Any]]) -> dict[str, Any]:
+    names = sorted(
+        {
+            name
+            for trade in trades
+            for name in (trade.get("exit_policy_results") or {})
+        }
+    )
+    summary: dict[str, Any] = {}
+    for name in names:
+        rows = [
+            trade["exit_policy_results"][name]
+            for trade in trades
+            if name in (trade.get("exit_policy_results") or {})
+        ]
+        available = [row for row in rows if row.get("available")]
+        realized_rs = [float(row["realized_r"]) for row in available]
+        realized_pcts = [float(row["realized_pct"]) for row in available]
+        captures = []
+        for trade in trades:
+            row = (trade.get("exit_policy_results") or {}).get(name)
+            path = trade.get("full_path") or {}
+            if not row or not row.get("available"):
+                continue
+            mfe_pct = path.get("mfe_pct")
+            realized_pct = row.get("realized_pct")
+            if mfe_pct is not None and float(mfe_pct) > 0 and realized_pct is not None:
+                captures.append(
+                    max(0.0, float(realized_pct)) / float(mfe_pct)
+                )
+        summary[name] = {
+            "evaluated_trade_count": len(rows),
+            "available_trade_count": len(available),
+            "blocked_trade_count": len(rows) - len(available),
+            "wins": sum(value > 0 for value in realized_rs),
+            "losses": sum(value < 0 for value in realized_rs),
+            "flats": sum(value == 0 for value in realized_rs),
+            "win_rate": (
+                sum(value > 0 for value in realized_rs) / len(realized_rs)
+                if realized_rs
+                else None
+            ),
+            "net_r": sum(realized_rs),
+            "average_r": (
+                sum(realized_rs) / len(realized_rs) if realized_rs else None
+            ),
+            "average_realized_pct": (
+                sum(realized_pcts) / len(realized_pcts) if realized_pcts else None
+            ),
+            "average_capture_efficiency": (
+                sum(captures) / len(captures) if captures else None
+            ),
+        }
+    return summary

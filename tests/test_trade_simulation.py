@@ -76,6 +76,20 @@ def _session(tmp_path, *, include_stop=True):
             "kind": "market_event",
             "service": "LEVELONE_EQUITIES",
             "symbol": "TEST",
+            "stream_ts_ms": 90_000,
+            "raw": {"key": "TEST", "1": 11.40, "2": 11.45, "3": 11.42, "8": 1575},
+        },
+        {
+            "kind": "market_event",
+            "service": "LEVELONE_EQUITIES",
+            "symbol": "TEST",
+            "stream_ts_ms": 100_000,
+            "raw": {"key": "TEST", "1": 11.25, "2": 11.30, "3": 11.27, "8": 1590},
+        },
+        {
+            "kind": "market_event",
+            "service": "LEVELONE_EQUITIES",
+            "symbol": "TEST",
             "stream_ts_ms": 130_000,
             "raw": {"key": "TEST", "1": 10.20, "2": 10.25, "3": 10.22, "8": 1600},
         },
@@ -165,6 +179,22 @@ def test_simulator_merges_colliding_detectors_and_uses_recorded_ask_bid(tmp_path
     assert trade["realized_r"] > 2.0
     assert report["summary"]["wins"] == 1
     assert report["summary"]["losses"] == 0
+    assert trade["full_path"]["mfe_pct"] > 15.0
+    assert trade["full_path"]["peak_bid"] == 11.70
+    fixed = trade["exit_policy_results"]["fixed_2r"]
+    trail_15 = trade["exit_policy_results"]["trail_after_2r_retrace_15pct"]
+    trail_20 = trade["exit_policy_results"]["trail_after_2r_retrace_20pct"]
+    trail_25 = trade["exit_policy_results"]["trail_after_2r_retrace_25pct"]
+    assert fixed["exit_ts_ms"] == 30_000
+    assert trail_15["exit_ts_ms"] == 90_000
+    assert trail_15["exit_reason"] == "TRAIL"
+    assert trail_20["exit_ts_ms"] == 100_000
+    assert trail_25["exit_ts_ms"] == 100_000
+    assert trail_15["realized_r"] > fixed["realized_r"]
+    assert trail_20["realized_r"] > fixed["realized_r"]
+    comparison = report["summary"]["exit_policy_comparison"]
+    assert comparison["trail_after_2r_retrace_15pct"]["net_r"] > comparison["fixed_2r"]["net_r"]
+    assert report["summary"]["full_path"]["fixed_exit_left_5pct_or_more_on_table_count"] == 1
 
 
 def test_simulator_keeps_missing_stop_candidate_but_does_not_score_trade(tmp_path):
