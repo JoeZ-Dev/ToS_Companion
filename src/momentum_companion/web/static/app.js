@@ -370,7 +370,10 @@
           lastValueVisible: false,
           priceLineVisible: false,
           crosshairMarkerVisible: true,
-          title: `${humanizePatternName(descriptor.patternType)} · ${descriptor.role}`,
+          // Keep pattern geometry visually lightweight. Lightweight Charts
+          // renders non-empty series titles as in-pane labels, which can
+          // obscure candles when several detector levels are close together.
+          title: "",
         });
         patternOverlaySeries.set(descriptor.key, series);
       }
