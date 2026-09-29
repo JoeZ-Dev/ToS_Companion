@@ -1,4 +1,6 @@
 import json
+
+import pytest
 from pathlib import Path
 
 from momentum_companion.review import ReviewAnnotationStore, ReviewCorpus
@@ -171,7 +173,7 @@ def test_l1_window_carries_forward_prior_quote_state(tmp_path):
     assert packet["frames"][0]["ask"] == 1.02
     assert packet["frames"][0]["last"] == 1.03
     assert packet["frames"][1]["last"] == 1.05
-    assert packet["frames"][1]["spread"] == 0.02
+    assert packet["frames"][1]["spread"] == pytest.approx(0.02)
 
 
 def test_l1_window_never_includes_event_after_requested_end(tmp_path):
