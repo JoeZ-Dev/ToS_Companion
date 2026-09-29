@@ -56,3 +56,7 @@ The five deliverables are `counterfactual-results.json`,
 `counterfactual-trades.csv`, `counterfactual-summary.md`,
 `policy-definitions.json`, and `artifact-hashes.json`. Capture hashes are taken
 before and after the run and serialized into both the results and hash manifest.
+
+The prospective unseen-data phase for `confirmed_detector_stop` is separately
+locked in [confirmed_detector_stop_holdout.md](confirmed_detector_stop_holdout.md).
+Historical artifacts from this comparison are not inputs to its success test.
