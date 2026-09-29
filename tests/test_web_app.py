@@ -760,3 +760,50 @@ def test_corpus_classification_api_defaults_reserves_and_protects_holdout(tmp_pa
     assert unknown.status_code == 404
     persisted = json.loads((tmp_path / "corpus_classifications.json").read_text())
     assert persisted["sessions"]["future-session"]["classification"] == "development"
+
+
+def test_historical_l1_review_endpoint_is_stateless_and_carries_quote(tmp_path):
+    from momentum_companion.replay.engine import ReplayEngine
+
+    session = tmp_path / "2026-09-23_070000_session"
+    session.mkdir(parents=True)
+    (session / "manifest.json").write_text(__import__("json").dumps({
+        "kind": "market_day_recording",
+        "symbols": ["TOPS"],
+        "services": ["LEVELONE_EQUITIES"],
+        "counts": {"TOPS": {"LEVELONE_EQUITIES": 3}},
+    }))
+    rows = [
+        {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"TOPS","stream_ts_ms":1000,
+         "raw":{"key":"TOPS","1":1.0,"2":1.02,"3":1.01,"4":1000,"5":900,"8":100}},
+        {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"TOPS","stream_ts_ms":2000,
+         "raw":{"key":"TOPS","3":1.015,"8":120}},
+        {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"TOPS","stream_ts_ms":3000,
+         "raw":{"key":"TOPS","1":1.01,"2":1.03,"3":1.02,"4":1500,"5":600,"8":150}},
+    ]
+    with (session / "TOPS.jsonl").open("w") as handle:
+        for row in rows:
+            handle.write(__import__("json").dumps(row) + "\n")
+
+    runtime = FakeRuntime()
+    shared = ReplayEngine(recordings_root=tmp_path)
+
+    with TestClient(create_app(runtime, replay_engine=shared)) as client:
+        response = client.post(
+            "/api/review/l1-window",
+            json={
+                "session_id": session.name,
+                "symbol": "TOPS",
+                "start_ms": 2000,
+                "end_ms": 3000,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["window"]["future_data_included"] is False
+    assert payload["frames"][0]["timestamp_ms"] == 2000
+    assert payload["frames"][0]["bid"] == 1.0
+    assert payload["frames"][0]["ask"] == 1.02
+    assert payload["frames"][1]["bid"] == 1.01
+    assert shared.snapshot()["replay"]["status"] == "EMPTY"
