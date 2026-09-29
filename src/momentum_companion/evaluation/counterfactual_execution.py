@@ -960,20 +960,49 @@ def _render_summary(result: Mapping[str, Any]) -> str:
 
 
 def _interpretation(result: Mapping[str, Any]) -> str:
-    baseline = result["policy_results"]["production_baseline"]["portfolio"]
-    candidates = []
+    baseline_report = result["policy_results"]["production_baseline"]
+    baseline = baseline_report["portfolio"]
+    baseline_dates = {row["date"]: row for row in baseline_report["by"]["date"]}
+    baseline_symbols = {row["symbol"]: row for row in baseline_report["by"]["symbol"]}
+    candidates: list[tuple[int, int, float, str]] = []
     for policy in POLICY_ORDER[1:]:
         report = result["policy_results"][policy]
         portfolio = report["portfolio"]
-        dates = report["by"]["date"]
-        positive_dates = sum((item.get("net_r") or 0) > 0 for item in dates)
-        candidates.append((positive_dates, portfolio["net_r"], policy, portfolio))
+        improved_dates = sum(
+            row["average_r"] is not None
+            and baseline_dates[row["date"]]["average_r"] is not None
+            and row["average_r"] > baseline_dates[row["date"]]["average_r"]
+            for row in report["by"]["date"]
+        )
+        comparable_symbols = [
+            row for row in report["by"]["symbol"]
+            if row["average_r"] is not None
+            and baseline_symbols[row["symbol"]]["average_r"] is not None
+        ]
+        improved_symbols = sum(
+            row["average_r"] > baseline_symbols[row["symbol"]]["average_r"]
+            for row in comparable_symbols
+        )
+        if (
+            portfolio["average_r"] is not None
+            and baseline["average_r"] is not None
+            and portfolio["average_r"] > baseline["average_r"]
+            and improved_dates >= 3
+            and improved_symbols > len(comparable_symbols) / 2
+        ):
+            candidates.append(
+                (improved_dates, improved_symbols, portfolio["average_r"], policy)
+            )
     candidates.sort(reverse=True)
-    credible = [item for item in candidates if item[0] >= 3 and item[1] > baseline["net_r"]]
-    if not credible:
-        return "No policy shows a sufficiently consistent improvement across dates to recommend as a winner. Preserve the baseline and carry no more than the two strongest mechanistic hypotheses into an unseen-data holdout only if their symbol concentration is acceptable."
-    names = [item[2] for item in credible[:2]]
-    return "For a future unseen-data holdout, test " + " and ".join(names) + ". This recommendation is based on cross-date consistency plus aggregate direction, not aggregate net R alone; symbol-level concentration must still be reviewed."
+    if not candidates:
+        return "No policy shows a credible relative improvement across dates and symbols. Recommend no candidate for an unseen-data holdout from this matrix."
+    names = [item[3] for item in candidates[:2]]
+    return (
+        "For a future unseen-data holdout, test " + " and ".join(names) +
+        ". The candidate improved average R on at least three dates and a majority "
+        "of comparable symbols, but remained historically loss-making; this is a "
+        "mechanistic hypothesis, not a selected winner."
+    )
 
 
 def _recording_hashes(
