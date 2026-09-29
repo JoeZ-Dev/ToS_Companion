@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_DIR="${REPO_DIR:-/srv/apps/ToS_Companion}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_REPO_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+
+REPO_DIR="${REPO_DIR:-$DEFAULT_REPO_DIR}"
 COMPOSE_FILE="${COMPOSE_FILE:-deploy/docker-compose.joelab.yml}"
 ENV_FILE="${ENV_FILE:-deploy/joelab.env}"
 STATE_DIR="${STATE_DIR:-/srv/data/tos-companion/state}"
