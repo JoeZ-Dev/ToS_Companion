@@ -77,6 +77,43 @@ Use this for the second-pass question:
 
 This is the primary hindsight-bias guard.
 
+### POST /api/review/l1-window
+
+Returns reconstructed carried-forward Level 1 quote state for a tightly bounded
+historical interval. This is intended for execution-confirmation research around
+a candidate trigger, not for bulk whole-session transfer.
+
+Request:
+
+    {
+      "session_id": "2026-09-23_070000_session",
+      "symbol": "TOPS",
+      "start_ms": 1790161790000,
+      "end_ms": 1790161810000
+    }
+
+The interval may not exceed 120 seconds.
+
+The response contains one frame per recorded L1 event in the requested interval.
+Each frame contains the quote state known immediately after that event:
+
+- timestamp_ms
+- bid / ask / last
+- bid_size / ask_size / last_size when captured
+- cumulative volume
+- spread
+- source timestamp type / raw source when available
+
+Because Schwab L1 messages are deltas, the endpoint first reconstructs state
+through the event immediately before the requested window. Fields such as bid
+and ask therefore carry forward correctly when an in-window event updates only
+last price or volume.
+
+The endpoint is read-only, does not alter the browser replay, and includes
+future_data_included: false. Callers choose the requested end timestamp; WAMO
+should keep pre-trigger setup evidence separate from explicitly post-trigger
+execution-response horizons.
+
 ### POST /api/review/annotations
 
 Example:
