@@ -467,6 +467,13 @@ def create_app(
         except (ValueError, RuntimeError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @app.get("/api/review/session/{session_id}/{symbol}")
+    def review_full_session(session_id: str, symbol: str) -> dict[str, Any]:
+        try:
+            return review_corpus.full_session(session_id, symbol)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.post("/api/review/l1-window")
     def review_l1_window(request: ReviewL1WindowRequest) -> dict[str, Any]:
         try:
