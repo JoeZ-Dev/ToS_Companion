@@ -227,3 +227,42 @@ def test_full_session_review_replays_recording_once_and_returns_all_bars(tmp_pat
     assert packet["window"]["availability"]["events_in_window"] == packet["replay"]["total_events"]
     assert packet["bars_10s"]
     assert packet["vwap_points"]
+
+
+def test_full_session_review_can_retain_more_than_default_replay_bar_limit(tmp_path):
+    session = tmp_path / "2026-09-23_070000_session"
+    session.mkdir(parents=True)
+    base = 1_790_161_200_000
+    event_count = 700
+    (session / "manifest.json").write_text(json.dumps({
+        "schema_version": 1,
+        "kind": "market_day_recording",
+        "symbols": ["TOPS"],
+        "services": ["LEVELONE_EQUITIES"],
+        "started_at_et": "2026-09-23T07:00:00-04:00",
+        "ended_at_et": "2026-09-23T09:00:00-04:00",
+        "counts": {"TOPS": {"LEVELONE_EQUITIES": event_count}},
+    }))
+    with (session / "TOPS.jsonl").open("w", encoding="utf-8") as handle:
+        volume = 1000
+        for index in range(event_count):
+            volume += 10
+            handle.write(json.dumps({
+                "kind": "market_event",
+                "service": "LEVELONE_EQUITIES",
+                "symbol": "TOPS",
+                "stream_ts_ms": base + index * 10_000,
+                "raw": {
+                    "key": "TOPS",
+                    "1": 1.00,
+                    "2": 1.02,
+                    "3": 1.01 + index * 0.0001,
+                    "8": volume,
+                },
+            }) + "\n")
+
+    packet = ReviewCorpus(tmp_path).full_session(session.name, "TOPS")
+
+    assert len(packet["bars_10s"]) > 600
+    assert packet["window"]["full_session"] is True
+    assert packet["window"]["future_data_included"] is False
