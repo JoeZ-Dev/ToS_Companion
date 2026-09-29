@@ -101,6 +101,42 @@ class ReviewCorpus:
             },
         )
 
+    def full_session(
+        self,
+        session_id: str,
+        symbol: str,
+    ) -> dict[str, Any]:
+        """Return compact causal review data for the entire recorded symbol in one pass."""
+
+        engine = ReplayEngine(recordings_root=self.recordings_root)
+        replay = engine.load(session_id, symbol)
+        total = int(replay.get("total_events") or 0)
+        normalized = str(symbol or "").strip().upper()
+
+        if total == 0:
+            return self._packet(engine, start_ms=None, end_ms=None)
+
+        first_ms = int(engine._events[0]["stream_ts_ms"])
+        last_ms = int(engine._events[-1]["stream_ts_ms"])
+
+        # One seek to the end reconstructs the complete symbol exactly once.
+        engine.seek(total)
+        packet = self._packet(
+            engine,
+            start_ms=first_ms,
+            end_ms=last_ms,
+            availability={
+                "status": "available",
+                "first_event_ms": first_ms,
+                "last_event_ms": last_ms,
+                "events_in_window": total,
+                "full_session": True,
+            },
+        )
+        packet["purpose"] = "momentum_full_session_review"
+        packet["window"]["full_session"] = True
+        return packet
+
     def l1_window(
         self,
         session_id: str,

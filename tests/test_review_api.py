@@ -211,3 +211,19 @@ def test_l1_window_rejects_more_than_two_minutes(tmp_path):
         assert "120 seconds" in str(exc)
     else:
         raise AssertionError("oversized L1 review window must be rejected")
+
+
+def test_full_session_review_replays_recording_once_and_returns_all_bars(tmp_path):
+    session = _write_session(tmp_path)
+    corpus = ReviewCorpus(tmp_path)
+
+    packet = corpus.full_session(session.name, "TOPS")
+
+    assert packet["purpose"] == "momentum_full_session_review"
+    assert packet["window"]["full_session"] is True
+    assert packet["window"]["future_data_included"] is False
+    assert packet["window"]["availability"]["full_session"] is True
+    assert packet["replay"]["cursor"] == packet["replay"]["total_events"]
+    assert packet["window"]["availability"]["events_in_window"] == packet["replay"]["total_events"]
+    assert packet["bars_10s"]
+    assert packet["vwap_points"]
