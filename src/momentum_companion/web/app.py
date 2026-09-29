@@ -78,6 +78,13 @@ class ReviewVerificationRequest(BaseModel):
     lookback_ms: int = 10 * 60 * 1000
 
 
+class ReviewL1WindowRequest(BaseModel):
+    session_id: str
+    symbol: str
+    start_ms: int
+    end_ms: int
+
+
 class DetectorAuditRequest(BaseModel):
     session_id: str | None = None
     symbol: str | None = None
@@ -456,6 +463,18 @@ def create_app(
                 request.symbol,
                 trigger_ms=request.trigger_ms,
                 lookback_ms=request.lookback_ms,
+            )
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/review/l1-window")
+    def review_l1_window(request: ReviewL1WindowRequest) -> dict[str, Any]:
+        try:
+            return review_corpus.l1_window(
+                request.session_id,
+                request.symbol,
+                start_ms=request.start_ms,
+                end_ms=request.end_ms,
             )
         except (ValueError, RuntimeError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
