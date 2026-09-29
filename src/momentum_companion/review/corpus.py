@@ -108,7 +108,11 @@ class ReviewCorpus:
     ) -> dict[str, Any]:
         """Return compact causal review data for the entire recorded symbol in one pass."""
 
-        engine = ReplayEngine(recordings_root=self.recordings_root)
+        engine = ReplayEngine(
+            recordings_root=self.recordings_root,
+            max_bars_per_symbol=10_000,
+            evaluate_patterns=False,
+        )
         replay = engine.load(session_id, symbol)
         total = int(replay.get("total_events") or 0)
         normalized = str(symbol or "").strip().upper()
@@ -119,8 +123,9 @@ class ReviewCorpus:
         first_ms = int(engine._events[0]["stream_ts_ms"])
         last_ms = int(engine._events[-1]["stream_ts_ms"])
 
-        # One seek to the end reconstructs the complete symbol exactly once.
-        engine.seek(total)
+        # The engine is already freshly loaded at cursor zero. Step through the
+        # immutable event stream once; do not seek, which would reset/reseed it.
+        engine.step(total)
         packet = self._packet(
             engine,
             start_ms=first_ms,
