@@ -27,9 +27,11 @@ class ReplayEngine:
         *,
         recordings_root: Path,
         max_bars_per_symbol: int = 600,
+        evaluate_patterns: bool = True,
     ) -> None:
         self.catalog = RecordingCatalog(recordings_root)
         self._max_bars_per_symbol = int(max_bars_per_symbol)
+        self._evaluate_patterns = bool(evaluate_patterns)
         self._lock = threading.RLock()
         self._events: list[dict[str, Any]] = []
         self._session_id: str | None = None
@@ -334,20 +336,22 @@ class ReplayEngine:
     def _handle_completed_bar(self, bar: TenSecondBar) -> None:
         assert self._symbol is not None
         self.session.ingest_bar(self._symbol, bar)
-        patterns = self.pattern_service.ingest_completed_bar(self._symbol, bar)
-        for pattern in patterns:
-            self.pattern_timeline.append(
-                {
-                    "bar_ts": int(bar.ts),
-                    "observation_ts_ms": max(
-                        int(self._current_ts_ms),
-                        (int(bar.ts) + 10) * 1000,
-                    ),
-                    "symbol": self._symbol,
-                    "pattern": dict(pattern),
-                }
-            )
-        self.session.update_pattern_observations(self._symbol, patterns)
+        patterns = []
+        if self._evaluate_patterns:
+            patterns = self.pattern_service.ingest_completed_bar(self._symbol, bar)
+            for pattern in patterns:
+                self.pattern_timeline.append(
+                    {
+                        "bar_ts": int(bar.ts),
+                        "observation_ts_ms": max(
+                            int(self._current_ts_ms),
+                            (int(bar.ts) + 10) * 1000,
+                        ),
+                        "symbol": self._symbol,
+                        "pattern": dict(pattern),
+                    }
+                )
+            self.session.update_pattern_observations(self._symbol, patterns)
         snapshot = self.ae_engine.ingest_10s_bar(bar)
         self.session.set_vwap_points(self._symbol, self.ae_engine.vwap_points)
         if snapshot is not None:
