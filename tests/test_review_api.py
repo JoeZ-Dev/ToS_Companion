@@ -147,3 +147,65 @@ def test_review_context_returns_normal_after_opening_window():
 
     assert context["opening_volatility_context"] == "normal"
     assert context["opening_structure_rule"] is False
+
+
+def test_l1_window_carries_forward_prior_quote_state(tmp_path):
+    session = _write_session(tmp_path)
+    corpus = ReviewCorpus(tmp_path)
+    base = 1_790_161_200_000
+
+    packet = corpus.l1_window(
+        session.name,
+        "TOPS",
+        start_ms=base + 10_000,
+        end_ms=base + 20_000,
+    )
+
+    assert packet["window"]["future_data_included"] is False
+    assert packet["window"]["events_in_window"] == 2
+    assert [frame["timestamp_ms"] for frame in packet["frames"]] == [
+        base + 10_000,
+        base + 20_000,
+    ]
+    assert packet["frames"][0]["bid"] == 1.00
+    assert packet["frames"][0]["ask"] == 1.02
+    assert packet["frames"][0]["last"] == 1.03
+    assert packet["frames"][1]["last"] == 1.05
+    assert packet["frames"][1]["spread"] == 0.02
+
+
+def test_l1_window_never_includes_event_after_requested_end(tmp_path):
+    session = _write_session(tmp_path)
+    corpus = ReviewCorpus(tmp_path)
+    base = 1_790_161_200_000
+
+    packet = corpus.l1_window(
+        session.name,
+        "TOPS",
+        start_ms=base,
+        end_ms=base + 20_000,
+    )
+
+    assert all(
+        frame["timestamp_ms"] <= base + 20_000
+        for frame in packet["frames"]
+    )
+    assert all(frame["last"] != 0.98 for frame in packet["frames"])
+
+
+def test_l1_window_rejects_more_than_two_minutes(tmp_path):
+    session = _write_session(tmp_path)
+    corpus = ReviewCorpus(tmp_path)
+    base = 1_790_161_200_000
+
+    try:
+        corpus.l1_window(
+            session.name,
+            "TOPS",
+            start_ms=base,
+            end_ms=base + 121_000,
+        )
+    except ValueError as exc:
+        assert "120 seconds" in str(exc)
+    else:
+        raise AssertionError("oversized L1 review window must be rejected")
