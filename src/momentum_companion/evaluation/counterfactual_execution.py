@@ -40,6 +40,18 @@ POLICY_ORDER = (
     "confirmed_volatility_stop",
     "confirmed_structural_one_reentry",
 )
+LOCKED_PRIOR_FINDINGS = {
+    "reviewed_triggers": 50,
+    "human_validity_counts": {"clear": 9, "uncertain": 8, "rejected": 33},
+    "blinded_controls": 10,
+    "simulated_trades": 35,
+    "simulated_net_r": -25.35,
+    "all_simulations_included_tight_consolidation_breakout": True,
+    "all_simulations_used_breakdown_level_stop": True,
+    "stopped_then_later_reached_2r": 5,
+    "fixed_2r_beat_tested_trailing_policies": True,
+    "runner_optimization_paused": True,
+}
 
 
 @dataclass(frozen=True)
@@ -77,6 +89,7 @@ def policy_definitions(config: CounterfactualConfig) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
         "research_classification": "exploratory_historical_comparison_not_validation",
+        "locked_prior_findings": LOCKED_PRIOR_FINDINGS,
         "constants_locked_before_aggregate_inspection": True,
         "constants": asdict(config),
         "shared_execution": {
@@ -879,6 +892,11 @@ def _label_diagnostic(opportunities: list[dict[str, Any]], labels: Mapping[str, 
         "expected_locked_label_count": labels["expected_count"],
         "loaded_locked_label_count": labels["loaded_count"],
         "locked_class_counts": labels["class_counts"],
+        "known_locked_aggregate_counts": LOCKED_PRIOR_FINDINGS[
+            "human_validity_counts"
+        ],
+        "known_locked_control_count": LOCKED_PRIOR_FINDINGS["blinded_controls"],
+        "aggregate_counts_not_reverse_assigned_to_items": True,
         "missing_labels_explicit": labels["loaded_count"] != labels["expected_count"],
         "by_validity_class": classes,
     }
@@ -952,6 +970,11 @@ def _render_summary(result: Mapping[str, Any]) -> str:
     if labels["missing_labels_explicit"]:
         lines.append(
             f"The configured label input contained {labels['loaded_locked_label_count']} of {labels['expected_locked_label_count']} locked labels. Per-class results remain explicit and empty; aggregate label counts were not reverse-assigned to review items."
+        )
+        lines.append(
+            "Locked aggregate context is preserved as 9 clear, 8 uncertain, 33 "
+            "rejected triggered reviews and 10 controls. Item-level policy behavior "
+            "by class requires the filled review-ID label file."
         )
     else:
         lines.append("Clear, uncertain, and rejected labels are reported separately and were not used to alter any trade.")
