@@ -22,7 +22,7 @@ def test_pattern_overlay_descriptors_render_geometry_recovery_and_triggers():
     script = Path(__file__).resolve().parents[1] / "src/momentum_companion/web/static/app.js"
     source = script.read_text()
     helpers = source[
-        source.index("  function patternColor("):
+        source.index("  const PATTERN_MARKER_SERIES_CONFIG"):
         source.index("  function patternShortName(")
     ]
     patterns = [
@@ -90,6 +90,82 @@ def test_pattern_overlay_descriptors_render_geometry_recovery_and_triggers():
         line["patternType"] != "MICRO_PULLBACK"
         for line in payload["hidden"]["lines"]
     )
+
+
+def test_pattern_marker_legend_tooltips_explain_detector_and_cooldown_semantics():
+    script = Path(__file__).resolve().parents[1] / "src/momentum_companion/web/static/app.js"
+    source = script.read_text()
+    helpers = source[
+        source.index("  const PATTERN_MARKER_SERIES_CONFIG"):
+        source.index("  function patternLineStyle(")
+    ]
+    pattern_types = [
+        "ASCENDING_TRIANGLE",
+        "MICRO_PULLBACK",
+        "LOCAL_RESISTANCE_BREAKOUT",
+        "TIGHT_CONSOLIDATION_BREAKOUT",
+    ]
+    javascript = (
+        helpers
+        + "\nconst types="
+        + json.dumps(pattern_types)
+        + ";\nconsole.log(JSON.stringify(types.map((type) => ({"
+        + "definition:patternMarkerDefinition(type),tooltip:patternMarkerTooltip(type)}))));"
+    )
+    result = subprocess.run(
+        ["node", "-e", javascript],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+
+    expected = {
+        "ASCENDING_TRIANGLE": ("Ascending Triangle", "#46c2ff"),
+        "MICRO_PULLBACK": ("Micro Pullback", "#f2b84b"),
+        "LOCAL_RESISTANCE_BREAKOUT": ("Local Resistance Breakout", "#db7cff"),
+        "TIGHT_CONSOLIDATION_BREAKOUT": (
+            "Tight Consolidation Breakout",
+            "#5ed39a",
+        ),
+    }
+    shared_help = (
+        "Markers point to the candle they annotate. "
+        "A downward-pointing marker does not mean sell or bearish."
+    )
+    for item in payload:
+        definition = item["definition"]
+        detector_name, color = expected[definition["patternType"]]
+        tooltip = item["tooltip"]
+        assert definition["detectorName"] == detector_name
+        assert definition["color"] == color
+        assert definition["eventType"] == "detector transition"
+        assert detector_name in tooltip
+        assert color in tooltip
+        assert "Event type: detector transition" in tooltip
+        assert "opportunity-start" in tooltip
+        assert "repeated-signal" in tooltip
+        assert "other-event" in tooltip
+        assert "first eligible candidate as the opportunity start" in tooltip
+        assert "suppressed by the existing cooldown" in tooltip
+        assert shared_help in tooltip
+
+
+def test_pattern_marker_legend_uses_tooltip_for_title_and_accessible_label():
+    app_js = (
+        Path(__file__).resolve().parents[1]
+        / "src/momentum_companion/web/static/app.js"
+    ).read_text()
+    render = app_js[
+        app_js.index("  function renderPatternOverlayFilters("):
+        app_js.index("  function setPatternOverlays(")
+    ]
+
+    assert "const marker = patternMarkerDefinition(patternType)" in render
+    assert "const tooltip = patternMarkerTooltip(patternType)" in render
+    assert 'aria-label="${escapeHtml(tooltip)}"' in render
+    assert 'title="${escapeHtml(tooltip)}"' in render
+    assert 'style="--pattern-color:${marker.color}"' in render
 
 
 def test_pattern_overlay_updates_preserve_viewport_and_expose_family_controls():

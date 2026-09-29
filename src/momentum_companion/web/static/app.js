@@ -188,21 +188,83 @@
     }
   }
 
-  function patternColor(patternType) {
-    const named = {
-      ASCENDING_TRIANGLE: "#46c2ff",
-      MICRO_PULLBACK: "#f2b84b",
-      LOCAL_RESISTANCE_BREAKOUT: "#db7cff",
-      TIGHT_CONSOLIDATION_BREAKOUT: "#5ed39a",
-    };
+  const PATTERN_MARKER_SERIES_CONFIG = Object.freeze({
+    position: "aboveBar",
+    shape: "arrowDown",
+    detectors: Object.freeze({
+      ASCENDING_TRIANGLE: Object.freeze({
+        color: "#46c2ff",
+        name: "Ascending Triangle",
+      }),
+      MICRO_PULLBACK: Object.freeze({
+        color: "#f2b84b",
+        name: "Micro Pullback",
+      }),
+      LOCAL_RESISTANCE_BREAKOUT: Object.freeze({
+        color: "#db7cff",
+        name: "Local Resistance Breakout",
+      }),
+      TIGHT_CONSOLIDATION_BREAKOUT: Object.freeze({
+        color: "#5ed39a",
+        name: "Tight Consolidation Breakout",
+      }),
+    }),
+    fallbackPalette: Object.freeze([
+      "#64b5f6",
+      "#ff8a80",
+      "#b39ddb",
+      "#80cbc4",
+      "#ffd180",
+    ]),
+  });
+
+  const PATTERN_MARKER_SHARED_HELP =
+    "Markers point to the candle they annotate. A downward-pointing marker does not mean sell or bearish.";
+
+  function patternMarkerDefinition(patternType) {
     const normalized = String(patternType || "PATTERN").toUpperCase();
-    if (named[normalized]) return named[normalized];
-    const palette = ["#64b5f6", "#ff8a80", "#b39ddb", "#80cbc4", "#ffd180"];
+    const configured = PATTERN_MARKER_SERIES_CONFIG.detectors[normalized];
+    if (configured) {
+      return {
+        patternType: normalized,
+        detectorName: configured.name,
+        color: configured.color,
+        eventType: "detector transition",
+      };
+    }
     let hash = 0;
     for (const character of normalized) {
       hash = ((hash << 5) - hash + character.charCodeAt(0)) | 0;
     }
-    return palette[Math.abs(hash) % palette.length];
+    const detectorName = normalized
+      .toLowerCase()
+      .split("_")
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
+    return {
+      patternType: normalized,
+      detectorName,
+      color: PATTERN_MARKER_SERIES_CONFIG.fallbackPalette[
+        Math.abs(hash) % PATTERN_MARKER_SERIES_CONFIG.fallbackPalette.length
+      ],
+      eventType: "detector transition",
+    };
+  }
+
+  function patternColor(patternType) {
+    return patternMarkerDefinition(patternType).color;
+  }
+
+  function patternMarkerTooltip(patternType) {
+    const marker = patternMarkerDefinition(patternType);
+    return [
+      `${marker.detectorName}: ${marker.color} identifies transitions emitted by this detector.`,
+      "Event type: detector transition (BREAKOUT or CONTINUATION), not an opportunity-start, repeated-signal, or other-event marker.",
+      PATTERN_MARKER_SHARED_HELP,
+      "Production cooldown grouping treats the first eligible candidate as the opportunity start and attaches candidates suppressed by the existing cooldown to that opportunity as repeated signals; grouping does not change this marker's color, position, or behavior.",
+      `Click to toggle ${marker.detectorName} geometry and trigger markers.`,
+    ].join(" ");
   }
 
   function patternLineStyle(role) {
@@ -306,8 +368,8 @@
   function setPatternMarkers(markers) {
     const chartMarkers = markers.map((marker) => ({
       time: marker.time,
-      position: "aboveBar",
-      shape: "arrowDown",
+      position: PATTERN_MARKER_SERIES_CONFIG.position,
+      shape: PATTERN_MARKER_SERIES_CONFIG.shape,
       color: marker.color,
       // Keep trigger markers compact. Pattern type/state remain available in
       // the Patterns panel and filter legend, while text here obscures price
@@ -334,7 +396,9 @@
     }
     host.innerHTML = [...types].sort().map((patternType) => {
       const visible = state.patternVisibility[patternType] !== false;
-      return `<button type="button" class="pattern-filter" data-pattern-type="${escapeHtml(patternType)}" aria-pressed="${visible}" style="--pattern-color:${patternColor(patternType)}" title="Toggle ${escapeHtml(humanizePatternName(patternType))} geometry and trigger markers">${escapeHtml(patternShortName(patternType))}</button>`;
+      const marker = patternMarkerDefinition(patternType);
+      const tooltip = patternMarkerTooltip(patternType);
+      return `<button type="button" class="pattern-filter" data-pattern-type="${escapeHtml(patternType)}" aria-pressed="${visible}" aria-label="${escapeHtml(tooltip)}" style="--pattern-color:${marker.color}" title="${escapeHtml(tooltip)}">${escapeHtml(patternShortName(patternType))}</button>`;
     }).join("");
   }
 
