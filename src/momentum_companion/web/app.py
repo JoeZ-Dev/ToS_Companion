@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+import os
 import threading
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ from momentum_companion.evaluation.pattern_overlaps import build_pattern_overlap
 from momentum_companion.evaluation.research_export import build_research_export
 from momentum_companion.evaluation.pattern_parity import build_pattern_parity_report
 from momentum_companion.evaluation.trade_simulation import build_trade_simulation
+from momentum_companion.evaluation.trade_review import TradeReviewStore
 from momentum_companion.replay import ReplayEngine
 from momentum_companion.review import ReviewAnnotationStore, ReviewCorpus
 from momentum_companion.runtime import CompanionRuntime
@@ -119,6 +121,7 @@ def create_app(
     runtime: CompanionRuntime | None = None,
     *,
     replay_engine: ReplayEngine | None = None,
+    research_output_root: Path | None = None,
 ) -> FastAPI:
     companion = runtime or CompanionRuntime()
     replay = replay_engine or ReplayEngine(
@@ -132,6 +135,11 @@ def create_app(
         )
     )
     review_corpus = ReviewCorpus(recordings_root)
+    configured_research_root = research_output_root
+    if configured_research_root is None:
+        configured = os.environ.get("TOS_RESEARCH_OUTPUT_DIR", "").strip()
+        configured_research_root = Path(configured) if configured else None
+    trade_review = TradeReviewStore(configured_research_root, review_corpus)
     review_annotations = ReviewAnnotationStore(
         recordings_root.parent / "review_annotations"
     )
@@ -179,6 +187,7 @@ def create_app(
     @app.get("/app-20260922-10.js")
     @app.get("/app-20260922-11.js")
     @app.get("/app-20260922-12.js")
+    @app.get("/app-20260922-13.js")
     def app_js() -> FileResponse:
         return FileResponse(
             STATIC_DIR / "app.js",
@@ -193,6 +202,7 @@ def create_app(
     @app.get("/styles-20260922-4.css")
     @app.get("/styles-20260922-5.css")
     @app.get("/styles-20260922-6.css")
+    @app.get("/styles-20260922-7.css")
     def styles() -> FileResponse:
         return FileResponse(
             STATIC_DIR / "styles.css",
@@ -349,6 +359,38 @@ def create_app(
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/trade-review/runs")
+    def trade_review_runs() -> dict[str, Any]: return trade_review.runs()
+
+    @app.get("/api/trade-review/opportunities")
+    def trade_review_opportunities(run_id: str, trading_date: str | None = None,
+        symbol: str | None = None, policy: str = "confirmed_detector_stop",
+        outcome: str | None = None, eligibility: str | None = None) -> dict[str, Any]:
+        try:
+            return trade_review.opportunities(run_id=run_id, trading_date=trading_date,
+                symbol=symbol, policy=policy, outcome=outcome, eligibility=eligibility)
+        except ValueError as exc: raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/trade-review/opportunities/{opportunity_id}")
+    def trade_review_detail(opportunity_id: str, run_id: str) -> dict[str, Any]:
+        try: return trade_review.detail(run_id, opportunity_id)
+        except ValueError as exc: raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/trade-review/paired")
+    def trade_review_paired(run_id: str) -> dict[str, Any]:
+        try: return trade_review.paired(run_id)
+        except ValueError as exc: raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/trade-review/chart/{opportunity_id}")
+    def trade_review_chart(opportunity_id: str, run_id: str) -> dict[str, Any]:
+        try: return trade_review.chart(run_id, opportunity_id)
+        except ValueError as exc: raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/trade-review/eligibility/{opportunity_id}")
+    def trade_review_eligibility(opportunity_id: str, run_id: str) -> dict[str, Any]:
+        try: return trade_review.eligibility(run_id, opportunity_id)
+        except ValueError as exc: raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.get("/api/evaluation/pattern-parity/{session_id}")
     def pattern_parity(

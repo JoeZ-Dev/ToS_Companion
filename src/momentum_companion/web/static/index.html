@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ToS Companion</title>
-  <link rel="stylesheet" href="/styles-20260922-6.css">
+  <link rel="stylesheet" href="/styles-20260922-7.css">
   <script src="/vendor/lightweight-charts-20260922.js"></script>
 </head>
 <body>
@@ -52,6 +52,7 @@
             <button class="tab-button" type="button" data-tab="setups">Setups</button>
             <button class="tab-button" type="button" data-tab="recording">Recording</button>
             <button class="tab-button" type="button" data-tab="replay">Replay</button>
+            <button class="tab-button" type="button" data-tab="trade-review">Trade Review</button>
             <button class="tab-button" type="button" data-tab="raw">Raw</button>
           </div>
           <button id="llm-run" class="run-llm" type="button">Run LLM</button>
@@ -206,6 +207,26 @@
           </section>
         </section>
 
+        <section id="tab-trade-review" class="tab-panel" aria-label="Trade Review research artifacts">
+          <section class="analysis-card">
+            <div class="section-heading-row"><div class="section-title">Trade Review</div><span class="recording-status inactive">READ ONLY</span></div>
+            <div id="trade-review-empty" class="auth-note">Loading configured research artifacts…</div>
+            <div class="trade-review-filters" aria-label="Trade review filters">
+              <label>Run<select id="trade-review-run" aria-label="Evaluation run"></select></label>
+              <label>Date<input id="trade-review-date" type="date" aria-label="Trading date filter"></label>
+              <label>Symbol<input id="trade-review-symbol" maxlength="10" aria-label="Symbol filter" placeholder="ALL"></label>
+              <label>Policy<select id="trade-review-policy" aria-label="Policy filter"><option value="production_baseline">Production baseline</option><option value="confirmed_detector_stop" selected>Confirmed detector stop</option><option value="confirmed_detector_stop_momentum_eligible">Confirmed + momentum eligibility</option></select></label>
+              <label>Outcome<select id="trade-review-outcome" aria-label="Outcome filter"><option value="">All</option><option>STOP</option><option>TARGET</option><option>TIMEOUT</option><option>SKIPPED</option><option>UNAVAILABLE</option></select></label>
+              <label>Eligibility<select id="trade-review-eligibility" aria-label="Eligibility filter"><option value="">All</option><option value="trade_candidate">Trade candidate</option><option value="preferred_candidate">Preferred candidate</option><option value="monitor_only">Monitor only</option><option value="unavailable">Unavailable</option></select></label>
+            </div>
+          </section>
+          <section class="analysis-card"><div class="section-heading-row"><div class="section-title">Opportunities</div><div id="trade-review-count" class="count-badge">0</div></div><div id="trade-review-list" class="trade-review-list" role="listbox" aria-label="Recorded opportunities"></div></section>
+          <section class="analysis-card"><div class="section-title">Outcome</div><div id="trade-review-outcome-panel" class="trade-review-grid muted-copy">Select an opportunity.</div></section>
+          <section class="analysis-card"><div class="section-title">Paired Comparison</div><div id="trade-review-paired" class="trade-review-grid muted-copy">Select an opportunity.</div></section>
+          <section class="analysis-card"><div class="section-title">Momentum Eligibility</div><div id="trade-review-eligibility-panel" class="trade-review-grid muted-copy">Select an opportunity.</div></section>
+          <section class="analysis-card"><div class="section-title">Chart Markers</div><div id="trade-review-markers" class="marker-accessibility" aria-live="polite"></div><div class="auth-note"><strong>Detector transition only. This does not imply a trade.</strong></div></section>
+        </section>
+
         <section id="tab-raw" class="tab-panel">
           <section class="analysis-card">
             <div class="section-title">Analysis Engine JSON</div>
@@ -232,6 +253,6 @@
     </section>
   </main>
 
-  <script src="/app-20260922-12.js"></script>
+  <script src="/app-20260922-13.js"></script>
 </body>
 </html>
