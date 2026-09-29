@@ -427,7 +427,8 @@ def _run_policy(
         choices = [
             (value, basis, evidence_ms)
             for value, basis, evidence_ms in production_stops
-            if value < entry and evidence_ms <= decision_ms
+            if value < entry
+            and (policy == "production_baseline" or evidence_ms <= decision_ms)
         ]
         if not choices:
             return _unavailable(policy, "no_detector_supported_stop_below_entry")
