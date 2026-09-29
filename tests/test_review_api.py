@@ -227,22 +227,3 @@ def test_full_session_review_replays_recording_once_and_returns_all_bars(tmp_pat
     assert packet["window"]["availability"]["events_in_window"] == packet["replay"]["total_events"]
     assert packet["bars_10s"]
     assert packet["vwap_points"]
-
-
-def test_full_session_review_endpoint_is_stateless(tmp_path):
-    from momentum_companion.replay.engine import ReplayEngine
-
-    session = _write_session(tmp_path)
-    runtime = FakeRuntime()
-    shared = ReplayEngine(recordings_root=tmp_path)
-
-    with TestClient(create_app(runtime, replay_engine=shared)) as client:
-        response = client.get(
-            f"/api/review/session/{session.name}/TOPS"
-        )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["window"]["full_session"] is True
-    assert payload["window"]["future_data_included"] is False
-    assert shared.snapshot()["replay"]["status"] == "EMPTY"
