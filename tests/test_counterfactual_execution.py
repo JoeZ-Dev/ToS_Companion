@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-import math
 from copy import deepcopy
+import csv
+import json
+import math
 
 from momentum_companion.evaluation.counterfactual_execution import (
     CounterfactualConfig,
@@ -10,6 +12,9 @@ from momentum_companion.evaluation.counterfactual_execution import (
     _evaluate_opportunity,
     _find_confirmation,
     _find_retest,
+    _interpretation,
+    _load_labels,
+    _paired_policy_report,
     _policy_report,
     _structural_stop,
     _volatility_stop,
@@ -198,3 +203,95 @@ def test_breakout_levels_are_stable_and_detector_specific() -> None:
         ("LOCAL_RESISTANCE_BREAKOUT", 10.1),
         ("MICRO_PULLBACK", 10.2),
     ]
+
+
+def test_locked_label_schema_normalizes_and_excludes_controls(tmp_path) -> None:
+    review_ids = [f"CTL-{index:02d}" for index in range(10)] + [
+        f"TRG-{index:02d}" for index in range(50)
+    ]
+    manifest = {"items": [
+        {"review_id": review_id, "kind": "control" if review_id.startswith("CTL") else "triggered"}
+        for review_id in review_ids
+    ]}
+    evidence = {
+        review_id: (
+            {"kind": "control"}
+            if review_id.startswith("CTL")
+            else {"kind": "triggered", "opportunity_id": f"OPP-{review_id[4:]}"}
+        )
+        for review_id in review_ids
+    }
+    manifest_path = tmp_path / "review-manifest.json"
+    evidence_path = tmp_path / "machine-evidence.json"
+    labels_path = tmp_path / "labels.csv"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
+    fields = [
+        "review_id", "valid_setup", "human_pattern_types", "timing",
+        "entry_quality", "stop_structure_visible", "notes",
+    ]
+    trigger_values = ["yes"] * 9 + ["uncertain"] * 8 + ["no"] * 33
+    with labels_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        for review_id in review_ids[:10]:
+            writer.writerow({"review_id": review_id, "valid_setup": "no"})
+        for review_id, value in zip(review_ids[10:], trigger_values):
+            writer.writerow({"review_id": review_id, "valid_setup": value})
+
+    loaded = _load_labels(manifest_path, labels_path)
+
+    assert loaded["loaded_count"] == 60
+    assert loaded["control_count"] == 10
+    assert loaded["class_counts"] == {"clear": 9, "uncertain": 8, "rejected": 33}
+    assert len(loaded["by_opportunity"]) == 50
+    assert set(loaded["by_opportunity"].values()) == {"clear", "uncertain", "rejected"}
+    assert all(row["opportunity_id"] is None for row in loaded["rows"][:10])
+
+
+def test_paired_report_separates_selection_from_execution() -> None:
+    def result(value: float | None) -> dict:
+        if value is None:
+            return {"available": False, "reason": "none", "legs": []}
+        return {"available": True, "reason": None, "legs": [
+            {"status": "TRADE", "realized_r": value}
+        ]}
+
+    opportunities = []
+    values = [(1.0, 0.5), (-1.0, None), (None, 2.0), (None, None)]
+    for index, (baseline, confirmed) in enumerate(values):
+        opportunities.append({
+            "trading_date": "2026-09-23",
+            "symbol": f"S{index}",
+            "policy_results": {
+                "production_baseline": result(baseline),
+                "confirmed_detector_stop": result(confirmed),
+            },
+        })
+
+    report = _paired_policy_report(opportunities)["overall"]
+
+    assert report["both_policies_traded"] == 1
+    assert report["baseline_only"] == 1
+    assert report["confirmed_only"] == 1
+    assert report["neither"] == 1
+    assert report["delayed_entry_execution_effect_r"] == -0.5
+    assert report["selection_effect_r"] == 3.0
+    assert report["aggregate_net_r_delta_reconciled"] == 2.5
+    assert (report["confirmed_better"], report["baseline_better"], report["equal"]) == (0, 1, 0)
+
+
+def test_interpretation_reports_locked_paired_conclusion() -> None:
+    text = _interpretation({
+        "paired_production_vs_confirmed_detector_stop": {
+            "overall": {
+                "both_policies_traded": 518,
+                "delayed_entry_execution_effect_r": -12.833764788,
+            }
+        }
+    })
+    assert "skipping weak baseline trades" in text
+    assert "518 common opportunities" in text
+    assert "12.834R worse" in text
+    assert "future holdout eligibility hypothesis" in text
+    assert "No policy is approved for deployment" in text

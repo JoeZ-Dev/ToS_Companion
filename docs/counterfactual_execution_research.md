@@ -38,13 +38,14 @@ for OUTPUT in /tmp/tos-counterfactual-a /tmp/tos-counterfactual-b; do
     -v /srv/apps/ToS_Companion:/workspace:ro \
     -v /tmp/tos-replay-final-a.89jl1q/overlays/inclusive_exploratory:/baseline:ro \
     -v /tmp/tos-opportunity-final-a.YSSp6o:/review:ro \
+    -v /tmp/locked-opportunity-labels.csv:/labels.csv:ro \
     -v "${OUTPUT}:/output" \
     deploy-tos-companion \
     python -m momentum_companion.evaluation.counterfactual_execution \
       /data/recordings /baseline /output \
       --code-revision "${REVISION}" \
       --review-manifest /review/review-manifest.json \
-      --labels-csv /review/labels.csv
+      --labels-csv /labels.csv
 done
 
 diff -qr /tmp/tos-counterfactual-a /tmp/tos-counterfactual-b

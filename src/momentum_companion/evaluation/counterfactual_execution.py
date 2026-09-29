@@ -252,6 +252,11 @@ def build_counterfactual_research(
             "average_r_delta": _difference(metrics["average_r"], baseline_metrics["average_r"]),
             "win_rate_delta": _difference(metrics["win_rate"], baseline_metrics["win_rate"]),
         }
+    paired = _paired_policy_report(opportunities)
+    if paired["overall"]["both_policies_traded"] != 518:
+        raise RuntimeError("expected 518 paired baseline/confirmation opportunities")
+    if round(paired["overall"]["delayed_entry_execution_effect_r"], 3) != -12.834:
+        raise RuntimeError("locked paired execution delta changed")
     result = {
         "schema_version": SCHEMA_VERSION,
         "kind": "offline_counterfactual_execution_research",
@@ -269,6 +274,7 @@ def build_counterfactual_research(
         },
         "policy_order": list(POLICY_ORDER),
         "policy_results": summaries,
+        "paired_production_vs_confirmed_detector_stop": paired,
         "human_label_diagnostic": _label_diagnostic(opportunities, labels),
         "opportunities": [_compact_opportunity(item) for item in opportunities],
         "interpretation_guardrails": {
@@ -853,29 +859,154 @@ def _metrics(items: list[dict[str, Any]], policy: str, trades: list[dict[str, An
     }
 
 
+def _paired_policy_report(opportunities: list[dict[str, Any]]) -> dict[str, Any]:
+    def summarize(items: list[dict[str, Any]]) -> dict[str, Any]:
+        both: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        baseline_only: list[dict[str, Any]] = []
+        confirmed_only: list[dict[str, Any]] = []
+        neither = 0
+        for item in items:
+            baseline = _first_trade(item, "production_baseline")
+            confirmed = _first_trade(item, "confirmed_detector_stop")
+            if baseline is not None and confirmed is not None:
+                both.append((baseline, confirmed))
+            elif baseline is not None:
+                baseline_only.append(baseline)
+            elif confirmed is not None:
+                confirmed_only.append(confirmed)
+            else:
+                neither += 1
+        baseline_paired = [float(pair[0]["realized_r"]) for pair in both]
+        confirmed_paired = [float(pair[1]["realized_r"]) for pair in both]
+        deltas = [confirmed - baseline for baseline, confirmed in zip(
+            baseline_paired, confirmed_paired
+        )]
+        baseline_only_r = sum(float(item["realized_r"]) for item in baseline_only)
+        confirmed_only_r = sum(float(item["realized_r"]) for item in confirmed_only)
+        paired_delta = sum(deltas)
+        selection_effect = confirmed_only_r - baseline_only_r
+        return {
+            "opportunities": len(items),
+            "both_policies_traded": len(both),
+            "baseline_only": len(baseline_only),
+            "confirmed_only": len(confirmed_only),
+            "neither": neither,
+            "paired_baseline_net_r": sum(baseline_paired),
+            "paired_baseline_average_r": (
+                sum(baseline_paired) / len(baseline_paired) if baseline_paired else None
+            ),
+            "paired_confirmed_net_r": sum(confirmed_paired),
+            "paired_confirmed_average_r": (
+                sum(confirmed_paired) / len(confirmed_paired) if confirmed_paired else None
+            ),
+            "paired_mean_delta_r": sum(deltas) / len(deltas) if deltas else None,
+            "confirmed_better": sum(delta > 0 for delta in deltas),
+            "baseline_better": sum(delta < 0 for delta in deltas),
+            "equal": sum(delta == 0 for delta in deltas),
+            "baseline_only_net_r": baseline_only_r,
+            "confirmed_only_net_r": confirmed_only_r,
+            "selection_effect_r": selection_effect,
+            "delayed_entry_execution_effect_r": paired_delta,
+            "aggregate_net_r_delta_reconciled": selection_effect + paired_delta,
+        }
+
+    return {
+        "definitions": {
+            "selection_effect_r": "confirmed-only net R minus baseline-only net R; positive means confirmation avoided net losing baseline selections",
+            "delayed_entry_execution_effect_r": "confirmed net R minus baseline net R on opportunities traded by both policies",
+        },
+        "overall": summarize(opportunities),
+        "by_date": [
+            {"date": value, **summarize([
+                item for item in opportunities if item["trading_date"] == value
+            ])}
+            for value in sorted({item["trading_date"] for item in opportunities})
+        ],
+        "by_symbol": [
+            {"symbol": value, **summarize([
+                item for item in opportunities if item["symbol"] == value
+            ])}
+            for value in sorted({item["symbol"] for item in opportunities})
+        ],
+    }
+
+
+def _first_trade(item: Mapping[str, Any], policy: str) -> dict[str, Any] | None:
+    return next(
+        (
+            leg for leg in item["policy_results"][policy]["legs"]
+            if leg.get("status") == "TRADE"
+        ),
+        None,
+    )
+
+
 def _load_labels(manifest_path: Path | None, labels_path: Path | None) -> dict[str, Any]:
-    result = {"expected_count": 60, "loaded_count": 0, "by_opportunity": {}, "class_counts": {}, "rows": []}
+    result = {
+        "expected_count": 60, "loaded_count": 0, "by_opportunity": {},
+        "class_counts": {}, "control_count": 0, "rows": [],
+    }
     if manifest_path is None or labels_path is None:
         return result
     manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
-    review_to_opportunity = {
-        item["review_id"]: item.get("opportunity_id")
-        for item in manifest.get("items") or []
+    manifest_items = {
+        str(item["review_id"]): item for item in manifest.get("items") or []
     }
+    evidence_path = Path(manifest_path).with_name("machine-evidence.json")
+    if not evidence_path.is_file():
+        raise ValueError(f"review evidence not found: {evidence_path}")
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
     rows = list(csv.DictReader(Path(labels_path).open(encoding="utf-8", newline="")))
-    counts = Counter()
+    required = {
+        "review_id", "valid_setup", "human_pattern_types", "timing",
+        "entry_quality", "stop_structure_visible", "notes",
+    }
+    if not rows or not required.issubset(rows[0]):
+        raise ValueError("locked labels CSV does not match the required schema")
+    if len(rows) != 60:
+        raise ValueError(f"expected 60 locked label rows, found {len(rows)}")
+    normalization = {"yes": "clear", "uncertain": "uncertain", "no": "rejected"}
+    counts: Counter[str] = Counter()
+    control_count = 0
+    seen: set[str] = set()
     for row in rows:
-        raw = str(row.get("valid_setup") or row.get("validity_class") or "").strip().lower()
-        if raw not in {"clear", "uncertain", "rejected"}:
-            continue
         review_id = str(row.get("review_id") or "")
-        opportunity_id = review_to_opportunity.get(review_id)
-        counts[raw] += 1
-        result["rows"].append({"review_id": review_id, "opportunity_id": opportunity_id, "validity_class": raw})
-        if opportunity_id:
-            result["by_opportunity"][opportunity_id] = raw
-    result["loaded_count"] = sum(counts.values())
+        if review_id in seen or review_id not in manifest_items or review_id not in evidence:
+            raise ValueError(f"unknown or duplicate locked review_id: {review_id}")
+        seen.add(review_id)
+        raw = str(row.get("valid_setup") or "").strip().lower()
+        if raw not in normalization:
+            raise ValueError(f"unsupported valid_setup value for {review_id}: {raw}")
+        normalized = normalization[raw]
+        kind = str(evidence[review_id].get("kind") or "")
+        opportunity_id = evidence[review_id].get("opportunity_id")
+        if kind == "control":
+            control_count += 1
+            if opportunity_id is not None:
+                raise ValueError(f"control unexpectedly maps to opportunity: {review_id}")
+        elif kind == "triggered":
+            if not opportunity_id:
+                raise ValueError(f"triggered review lacks opportunity_id: {review_id}")
+            counts[normalized] += 1
+            result["by_opportunity"][str(opportunity_id)] = normalized
+        else:
+            raise ValueError(f"unsupported review evidence kind for {review_id}: {kind}")
+        result["rows"].append({
+            **{key: str(row.get(key) or "") for key in sorted(required)},
+            "opportunity_id": opportunity_id,
+            "validity_class": normalized,
+            "excluded_control": kind == "control",
+        })
+    expected = {"clear": 9, "uncertain": 8, "rejected": 33}
+    if dict(counts) != expected:
+        raise ValueError(f"locked triggered label counts changed: {dict(counts)}")
+    if control_count != 10:
+        raise ValueError(f"expected 10 excluded controls, found {control_count}")
+    if len(result["by_opportunity"]) != 50:
+        raise ValueError("expected 50 triggered review-to-opportunity mappings")
+    result["loaded_count"] = len(rows)
     result["class_counts"] = dict(sorted(counts.items()))
+    result["control_count"] = control_count
     return result
 
 
@@ -893,11 +1024,12 @@ def _label_diagnostic(opportunities: list[dict[str, Any]], labels: Mapping[str, 
         "expected_locked_label_count": labels["expected_count"],
         "loaded_locked_label_count": labels["loaded_count"],
         "locked_class_counts": labels["class_counts"],
+        "excluded_control_count": labels["control_count"],
         "known_locked_aggregate_counts": LOCKED_PRIOR_FINDINGS[
             "human_validity_counts"
         ],
         "known_locked_control_count": LOCKED_PRIOR_FINDINGS["blinded_controls"],
-        "aggregate_counts_not_reverse_assigned_to_items": True,
+        "aggregate_counts_not_reverse_assigned_to_items": False,
         "missing_labels_explicit": labels["loaded_count"] != labels["expected_count"],
         "by_validity_class": classes,
     }
@@ -978,54 +1110,38 @@ def _render_summary(result: Mapping[str, Any]) -> str:
             "by class requires the filled review-ID label file."
         )
     else:
-        lines.append("Clear, uncertain, and rejected labels are reported separately and were not used to alter any trade.")
+        lines.append(
+            "All 60 locked reviews loaded: 9 clear, 8 uncertain, and 33 "
+            "rejected triggered opportunities; 10 controls were excluded from "
+            "opportunity-policy results. Labels did not alter any trade."
+        )
+    paired = result["paired_production_vs_confirmed_detector_stop"]["overall"]
+    lines += [
+        "", "## Paired baseline versus confirmation", "",
+        "| Both | Baseline only | Confirmed only | Neither | Paired baseline R | Paired confirmed R | Paired delta R | Selection effect R |",
+        "|---:|---:|---:|---:|---:|---:|---:|---:|",
+        (
+            f"| {paired['both_policies_traded']} | {paired['baseline_only']} | "
+            f"{paired['confirmed_only']} | {paired['neither']} | "
+            f"{paired['paired_baseline_net_r']:.3f} | "
+            f"{paired['paired_confirmed_net_r']:.3f} | "
+            f"{paired['delayed_entry_execution_effect_r']:.3f} | "
+            f"{paired['selection_effect_r']:.3f} |"
+        ),
+    ]
     lines += ["", "## Interpretation", "", _interpretation(result), ""]
     return "\n".join(lines)
 
 
 def _interpretation(result: Mapping[str, Any]) -> str:
-    baseline_report = result["policy_results"]["production_baseline"]
-    baseline = baseline_report["portfolio"]
-    baseline_dates = {row["date"]: row for row in baseline_report["by"]["date"]}
-    baseline_symbols = {row["symbol"]: row for row in baseline_report["by"]["symbol"]}
-    candidates: list[tuple[int, int, float, str]] = []
-    for policy in POLICY_ORDER[1:]:
-        report = result["policy_results"][policy]
-        portfolio = report["portfolio"]
-        improved_dates = sum(
-            row["average_r"] is not None
-            and baseline_dates[row["date"]]["average_r"] is not None
-            and row["average_r"] > baseline_dates[row["date"]]["average_r"]
-            for row in report["by"]["date"]
-        )
-        comparable_symbols = [
-            row for row in report["by"]["symbol"]
-            if row["average_r"] is not None
-            and baseline_symbols[row["symbol"]]["average_r"] is not None
-        ]
-        improved_symbols = sum(
-            row["average_r"] > baseline_symbols[row["symbol"]]["average_r"]
-            for row in comparable_symbols
-        )
-        if (
-            portfolio["average_r"] is not None
-            and baseline["average_r"] is not None
-            and portfolio["average_r"] > baseline["average_r"]
-            and improved_dates >= 3
-            and improved_symbols > len(comparable_symbols) / 2
-        ):
-            candidates.append(
-                (improved_dates, improved_symbols, portfolio["average_r"], policy)
-            )
-    candidates.sort(reverse=True)
-    if not candidates:
-        return "No policy shows a credible relative improvement across dates and symbols. Recommend no candidate for an unseen-data holdout from this matrix."
-    names = [item[3] for item in candidates[:2]]
+    paired = result["paired_production_vs_confirmed_detector_stop"]["overall"]
     return (
-        "For a future unseen-data holdout, test " + " and ".join(names) +
-        ". The candidate improved average R on at least three dates and a majority "
-        "of comparable symbols, but remained historically loss-making; this is a "
-        "mechanistic hypothesis, not a selected winner."
+        "Confirmation's historical aggregate improvement came from skipping weak "
+        "baseline trades, not superior execution on shared selections. On "
+        f"{paired['both_policies_traded']} common opportunities, confirmation was "
+        f"{abs(paired['delayed_entry_execution_effect_r']):.3f}R worse. Confirmed "
+        "entry with the existing detector stop is only a future holdout eligibility "
+        "hypothesis. No policy is approved for deployment."
     )
 
 
