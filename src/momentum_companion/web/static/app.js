@@ -14,6 +14,7 @@
     chartRevision: null,
     chartFitSymbol: null,
     replayView: false,
+    tradeReviewView: false,
     replaySnapshot: null,
     replaySessions: [],
     patternVisibility: {},
@@ -120,6 +121,7 @@
   });
 
   let structuralPriceLines = [];
+  let tradeReviewDurationSeries = [];
   const patternOverlaySeries = new Map();
 
   function normalizeBar(bar) {
@@ -188,21 +190,83 @@
     }
   }
 
-  function patternColor(patternType) {
-    const named = {
-      ASCENDING_TRIANGLE: "#46c2ff",
-      MICRO_PULLBACK: "#f2b84b",
-      LOCAL_RESISTANCE_BREAKOUT: "#db7cff",
-      TIGHT_CONSOLIDATION_BREAKOUT: "#5ed39a",
-    };
+  const PATTERN_MARKER_SERIES_CONFIG = Object.freeze({
+    position: "aboveBar",
+    shape: "arrowDown",
+    detectors: Object.freeze({
+      ASCENDING_TRIANGLE: Object.freeze({
+        color: "#46c2ff",
+        name: "Ascending Triangle",
+      }),
+      MICRO_PULLBACK: Object.freeze({
+        color: "#f2b84b",
+        name: "Micro Pullback",
+      }),
+      LOCAL_RESISTANCE_BREAKOUT: Object.freeze({
+        color: "#db7cff",
+        name: "Local Resistance Breakout",
+      }),
+      TIGHT_CONSOLIDATION_BREAKOUT: Object.freeze({
+        color: "#5ed39a",
+        name: "Tight Consolidation Breakout",
+      }),
+    }),
+    fallbackPalette: Object.freeze([
+      "#64b5f6",
+      "#ff8a80",
+      "#b39ddb",
+      "#80cbc4",
+      "#ffd180",
+    ]),
+  });
+
+  const PATTERN_MARKER_SHARED_HELP =
+    "Markers point to the candle they annotate. A downward-pointing marker does not mean sell or bearish.";
+
+  function patternMarkerDefinition(patternType) {
     const normalized = String(patternType || "PATTERN").toUpperCase();
-    if (named[normalized]) return named[normalized];
-    const palette = ["#64b5f6", "#ff8a80", "#b39ddb", "#80cbc4", "#ffd180"];
+    const configured = PATTERN_MARKER_SERIES_CONFIG.detectors[normalized];
+    if (configured) {
+      return {
+        patternType: normalized,
+        detectorName: configured.name,
+        color: configured.color,
+        eventType: "detector transition",
+      };
+    }
     let hash = 0;
     for (const character of normalized) {
       hash = ((hash << 5) - hash + character.charCodeAt(0)) | 0;
     }
-    return palette[Math.abs(hash) % palette.length];
+    const detectorName = normalized
+      .toLowerCase()
+      .split("_")
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
+    return {
+      patternType: normalized,
+      detectorName,
+      color: PATTERN_MARKER_SERIES_CONFIG.fallbackPalette[
+        Math.abs(hash) % PATTERN_MARKER_SERIES_CONFIG.fallbackPalette.length
+      ],
+      eventType: "detector transition",
+    };
+  }
+
+  function patternColor(patternType) {
+    return patternMarkerDefinition(patternType).color;
+  }
+
+  function patternMarkerTooltip(patternType) {
+    const marker = patternMarkerDefinition(patternType);
+    return [
+      `${marker.detectorName}: ${marker.color} identifies transitions emitted by this detector.`,
+      "Event type: detector transition (BREAKOUT or CONTINUATION), not an opportunity-start, repeated-signal, or other-event marker.",
+      PATTERN_MARKER_SHARED_HELP,
+      "Production cooldown grouping treats the first eligible candidate as the opportunity start and attaches candidates suppressed by the existing cooldown to that opportunity as repeated signals; grouping does not change this marker's color, position, or behavior.",
+      `Click to toggle ${marker.detectorName} geometry and trigger markers.`,
+    ].join(" ");
   }
 
   function patternLineStyle(role) {
@@ -306,8 +370,8 @@
   function setPatternMarkers(markers) {
     const chartMarkers = markers.map((marker) => ({
       time: marker.time,
-      position: "aboveBar",
-      shape: "arrowDown",
+      position: PATTERN_MARKER_SERIES_CONFIG.position,
+      shape: PATTERN_MARKER_SERIES_CONFIG.shape,
       color: marker.color,
       // Keep trigger markers compact. Pattern type/state remain available in
       // the Patterns panel and filter legend, while text here obscures price
@@ -334,7 +398,9 @@
     }
     host.innerHTML = [...types].sort().map((patternType) => {
       const visible = state.patternVisibility[patternType] !== false;
-      return `<button type="button" class="pattern-filter" data-pattern-type="${escapeHtml(patternType)}" aria-pressed="${visible}" style="--pattern-color:${patternColor(patternType)}" title="Toggle ${escapeHtml(humanizePatternName(patternType))} geometry and trigger markers">${escapeHtml(patternShortName(patternType))}</button>`;
+      const marker = patternMarkerDefinition(patternType);
+      const tooltip = patternMarkerTooltip(patternType);
+      return `<button type="button" class="pattern-filter" data-pattern-type="${escapeHtml(patternType)}" aria-pressed="${visible}" aria-label="${escapeHtml(tooltip)}" style="--pattern-color:${marker.color}" title="${escapeHtml(tooltip)}">${escapeHtml(patternShortName(patternType))}</button>`;
     }).join("");
   }
 
@@ -438,7 +504,9 @@
 
   function setTab(name) {
     const wasReplay = state.replayView;
+    const wasTradeReview = state.tradeReviewView;
     state.replayView = name === "replay";
+    state.tradeReviewView = name === "trade-review";
     document.querySelectorAll(".tab-button").forEach((button) => {
       button.classList.toggle("active", button.dataset.tab === name);
     });
@@ -447,7 +515,9 @@
     });
     if (state.replayView) {
       void refreshReplayState();
-    } else if (wasReplay) {
+    } else if (state.tradeReviewView) {
+      void loadTradeReviewRuns();
+    } else if (wasReplay || wasTradeReview) {
       state.chartSymbol = null;
       state.chartRevision = null;
       state.chartFitSymbol = null;
@@ -919,7 +989,7 @@
     });
     byId("connection-state").textContent = snapshot.connection_state || "UNKNOWN";
     renderRecorderState(snapshot.recorder_state || {});
-    if (!state.replayView) renderActive({ chartChanged: true });
+    if (!state.replayView && !state.tradeReviewView) renderActive({ chartChanged: true });
   }
 
   function applyEvent(event) {
@@ -939,7 +1009,7 @@
         state.chartFitSymbol = null;
       }
       state.activeSymbol = nextSymbol;
-      if (!state.replayView) renderActive();
+      if (!state.replayView && !state.tradeReviewView) renderActive();
       return;
     }
 
@@ -1008,7 +1078,7 @@
       renderRecorderState(event.payload || {});
     }
 
-    if (!state.replayView && (!symbol || symbol === state.activeSymbol)) {
+    if (!state.replayView && !state.tradeReviewView && (!symbol || symbol === state.activeSymbol)) {
       renderActive({ chartChanged });
     }
   }
@@ -1227,6 +1297,49 @@
         `Server returned non-JSON response (HTTP ${response.status}): ${preview}`
       );
     }
+  }
+
+  function tradeReviewQuery() {
+    const values={run_id:byId("trade-review-run").value,trading_date:byId("trade-review-date").value,symbol:byId("trade-review-symbol").value.trim().toUpperCase(),policy:byId("trade-review-policy").value,outcome:byId("trade-review-outcome").value,eligibility:byId("trade-review-eligibility").value};
+    const query=new URLSearchParams(); Object.entries(values).forEach(([key,value])=>{if(value)query.set(key,value);}); return query;
+  }
+
+  async function loadTradeReviewRuns() {
+    try {
+      const response=await fetch("/api/trade-review/runs",{cache:"no-store"}); const payload=await parseResponse(response);
+      const select=byId("trade-review-run"), previous=select.value; select.replaceChildren();
+      for(const run of payload.runs||[]){const option=document.createElement("option");option.value=run.run_id;option.textContent=`${run.run_id} · ${Number(run.opportunity_count).toLocaleString()} opportunities`;select.appendChild(option);}
+      if(previous&&[...select.options].some(option=>option.value===previous))select.value=previous;
+      byId("trade-review-empty").textContent=payload.available?"Historical research display only. Nothing on this tab changes live trading.":payload.empty_state;
+      if(payload.available)await loadTradeReviewList();else{byId("trade-review-list").innerHTML='<div class="muted-copy">No research artifacts available.</div>';byId("trade-review-count").textContent="0";}
+    } catch(error){byId("trade-review-empty").textContent=error.message;byId("trade-review-empty").classList.add("error");}
+  }
+
+  async function loadTradeReviewList() {
+    const query=tradeReviewQuery();if(!query.get("run_id"))return;
+    const response=await fetch(`/api/trade-review/opportunities?${query}`,{cache:"no-store"});const payload=await parseResponse(response);if(!response.ok)throw new Error(payload.detail||"Unable to load opportunities");
+    const list=byId("trade-review-list");list.replaceChildren();byId("trade-review-count").textContent=String(payload.count||0);
+    for(const row of payload.opportunities||[]){const button=document.createElement("button");button.type="button";button.className="trade-review-row";button.setAttribute("role","option");button.setAttribute("aria-label",`${row.trading_date} ${row.symbol} ${row.pattern} ${row.policy_outcome} ${row.realized_r??"no R result"}`);const r=row.realized_r==null?"--":`${Number(row.realized_r).toFixed(3)}R`;button.innerHTML=`<span><strong>${escapeHtml(row.symbol)}</strong> ${escapeHtml(row.trading_date)} ${escapeHtml(formatEasternTime(Number(row.review_ts_ms)/1000))}</span><span>${escapeHtml(row.pattern)}</span><span>${escapeHtml(row.policy_outcome)} · ${escapeHtml(r)} · ${escapeHtml(row.eligibility)}</span>`;button.addEventListener("click",()=>void loadTradeReviewDetail(row.opportunity_id));list.appendChild(button);}
+    if(!(payload.opportunities||[]).length)list.innerHTML='<div class="muted-copy">No opportunities match these filters.</div>';
+  }
+
+  function reviewField(label,value){const shown=value==null||value===""?"--":value;return `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(shown)}</strong></div>`;}
+
+  async function loadTradeReviewDetail(id) {
+    const suffix=`?run_id=${encodeURIComponent(byId("trade-review-run").value)}`;
+    const [dr,cr]=await Promise.all([fetch(`/api/trade-review/opportunities/${encodeURIComponent(id)}${suffix}`),fetch(`/api/trade-review/chart/${encodeURIComponent(id)}${suffix}`)]);const detail=await parseResponse(dr), chartPayload=await parseResponse(cr);if(!dr.ok||!cr.ok)throw new Error(detail.detail||chartPayload.detail||"Unable to load detail");
+    const outcome=detail.outcomes?.[byId("trade-review-policy").value]||{entered:false};
+    byId("trade-review-outcome-panel").innerHTML=[reviewField("Entered",outcome.entered?"Yes":"No"),reviewField("Entry",outcome.entry_price==null?"--":`${fmtPrice(outcome.entry_price)} · ${formatEasternTime(Number(outcome.entry_ts_ms)/1000)}`),reviewField("Initial stop",fmtPrice(outcome.stop_price)),reviewField("Target",fmtPrice(outcome.target_price)),reviewField("Exit",outcome.exit_price==null?"--":`${fmtPrice(outcome.exit_price)} · ${formatEasternTime(Number(outcome.exit_ts_ms)/1000)}`),reviewField("Exit reason",outcome.exit_reason||outcome.reason),reviewField("Realized R",outcome.realized_r),reviewField("Return",outcome.realized_pct==null?"--":`${Number(outcome.realized_pct).toFixed(3)}%`),reviewField("MFE / MAE",outcome.mfe_r==null?"--":`${Number(outcome.mfe_r).toFixed(3)}R / ${Number(outcome.mae_r).toFixed(3)}R`),reviewField("Duration",outcome.trade_duration_ms==null?"--":`${(Number(outcome.trade_duration_ms)/1000).toFixed(0)}s`),reviewField("Human label",detail.human_label||"not available")].join("");
+    const pair=detail.paired_comparison||{};byId("trade-review-paired").innerHTML=[reviewField("Baseline",pair.baseline_entered?"Entered":"Skipped"),reviewField("Confirmed",pair.confirmed_entered?"Entered":"Skipped"),reviewField("Baseline entry",pair.baseline?.entry_price==null?"--":`${fmtPrice(pair.baseline.entry_price)} · ${formatEasternTime(Number(pair.baseline.entry_ts_ms)/1000)}`),reviewField("Confirmed entry",pair.confirmed?.entry_price==null?"--":`${fmtPrice(pair.confirmed.entry_price)} · ${formatEasternTime(Number(pair.confirmed.entry_ts_ms)/1000)}`),reviewField("Baseline outcome",pair.baseline?.exit_reason||pair.baseline?.reason),reviewField("Confirmed outcome",pair.confirmed?.exit_reason||pair.confirmed?.reason),reviewField("Paired R delta",pair.paired_r_delta==null?"--":`${Number(pair.paired_r_delta).toFixed(3)}R`),reviewField("Effect",pair.decomposition?.replaceAll("_"," "))].join("");
+    const e=detail.eligibility||{},g=e.gates||{};byId("trade-review-eligibility-panel").innerHTML=[reviewField("Classification",e.classification),reviewField("Breakout room",e.breakout_room_pct==null?"unavailable":`${Number(e.breakout_room_pct).toFixed(2)}%`),reviewField("Limiting resistance",e.limiting_resistance_type?`${e.limiting_resistance_type} · ${fmtPrice(e.limiting_resistance_price)}`:"--"),reviewField("Time-adjusted RVOL",e.time_adjusted_rvol==null?"unavailable":`${Number(e.time_adjusted_rvol).toFixed(2)}×`),reviewField("Structure gate",g.valid_detector_structure?.passed?"Pass":"Fail / unavailable"),`<p class="trade-review-explanation">${escapeHtml(e.explanation)}</p>`].join("");renderTradeReviewChart(chartPayload);
+  }
+
+  function renderTradeReviewChart(payload) {
+    const bars=(payload.candles||[]).map(normalizeBar).filter(bar=>Number.isFinite(bar.time));candleSeries.setData(bars);volumeSeries.setData(bars.map(bar=>({time:bar.time,value:bar.volume,color:bar.close>=bar.open?"#235a48":"#6b3036"})));vwapSeries.setData([]);ema9Series.setData([]);ema20Series.setData([]);
+    for(const line of structuralPriceLines){try{candleSeries.removePriceLine(line);}catch(_error){}}structuralPriceLines=[];for(const level of payload.price_levels||[])structuralPriceLines.push(candleSeries.createPriceLine({price:Number(level.price),title:level.label,color:level.color,axisLabelVisible:true,lineStyle:LightweightCharts.LineStyle?.Dashed??2}));
+    for(const series of tradeReviewDurationSeries){try{chart.removeSeries(series);}catch(_error){}}tradeReviewDurationSeries=[];for(const duration of payload.trade_durations||[]){const series=addLineSeries({color:`${duration.color}66`,lineWidth:4,lastValueVisible:false,priceLineVisible:false});series.setData(bars.filter(bar=>bar.time*1000>=duration.start_ms&&bar.time*1000<=duration.end_ms).map(bar=>({time:bar.time,value:bar.close})));tradeReviewDurationSeries.push(series);}
+    const markers=(payload.markers||[]).map(marker=>({time:Math.floor(Number(marker.time_ms)/1000),position:marker.position,shape:marker.shape,color:marker.color,text:marker.kind==="detector_transition"?"D":marker.kind==="entry"?"E":"X"}));if(patternMarkerApi)patternMarkerApi.setMarkers(markers);else candleSeries.setMarkers(markers);
+    byId("trade-review-markers").innerHTML=(payload.markers||[]).map(marker=>`<div tabindex="0" role="note" title="${escapeHtml(marker.tooltip)}" aria-label="${escapeHtml(marker.accessible_label)}"><span style="--marker-color:${escapeHtml(marker.color)}"></span>${escapeHtml(marker.label)} · ${escapeHtml(formatEasternTime(Number(marker.time_ms)/1000))}</div>`).join("");byId("pattern-overlay-filters").innerHTML=`<span class="auth-note">${escapeHtml(payload.detector_marker_disclaimer)}</span>`;chart.timeScale().fitContent();
   }
 
 
@@ -1500,6 +1613,10 @@
 
   byId("view-all-setups").addEventListener("click", () => setTab("setups"));
 
+  ["trade-review-run","trade-review-date","trade-review-symbol","trade-review-policy","trade-review-outcome","trade-review-eligibility"].forEach((id)=>{
+    byId(id).addEventListener(id==="trade-review-symbol"?"input":"change",()=>{if(state.tradeReviewView)void loadTradeReviewList();});
+  });
+
   byId("pattern-overlay-filters").addEventListener("click", (event) => {
     const button = event.target.closest("[data-pattern-type]");
     if (!button) return;
@@ -1515,7 +1632,7 @@
   });
 
   setInterval(() => {
-    if (!state.replayView) {
+    if (!state.replayView && !state.tradeReviewView) {
       const symbolState = state.activeSymbol ? state.symbols[state.activeSymbol] : null;
       renderFreshness(symbolState);
     }

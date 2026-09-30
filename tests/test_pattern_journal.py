@@ -1,6 +1,6 @@
 import json
 
-from momentum_companion.recording.pattern_journal import PatternEventJournal
+from momentum_companion.recording.pattern_journal import PatternEventJournal, build_pattern_event
 from momentum_companion.recording.provenance import build_recording_provenance
 from momentum_companion.replay.catalog import RecordingCatalog
 
@@ -89,7 +89,25 @@ def test_trigger_state_event_persists_context_without_adding_it_to_forming_event
         for line in (session / "pattern_events.jsonl").read_text().splitlines()
     ]
     assert "trigger_context" not in events[0]
-    assert events[1]["trigger_context"] == context
+    assert events[1]["trigger_context"]["price"] == context["price"]
+    assert "resistance_registry" in events[1]["trigger_context"]
+
+
+def test_additive_recording_evidence_does_not_change_detector_snapshot_output():
+    provenance = build_recording_provenance()
+    plain, plain_fingerprint = build_pattern_event(
+        session_id="session", observation=observation(state="BREAKOUT"),
+        observation_ts_ms=30_000, provenance=provenance, source_mode="live",
+    )
+    enriched, enriched_fingerprint = build_pattern_event(
+        session_id="session", observation=observation(state="BREAKOUT"),
+        observation_ts_ms=30_000, provenance=provenance, source_mode="live",
+        trigger_context={"price":{"available":True,"value":4.25,"source":"quote"}},
+    )
+    assert plain_fingerprint == enriched_fingerprint
+    assert plain["snapshot_fingerprint"] == enriched["snapshot_fingerprint"]
+    assert plain["evidence"] == enriched["evidence"]
+    assert plain["geometry"] == enriched["geometry"]
 
 
 def test_catalog_loads_pattern_journal_and_legacy_session_without_one(tmp_path):
