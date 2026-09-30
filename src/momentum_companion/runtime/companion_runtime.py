@@ -678,7 +678,7 @@ class CompanionRuntime:
         return state
 
     def _collect_rvol_enrollment_evidence(self, symbol: str) -> None:
-        collector = self._rvol_evidence_collector
+        collector = getattr(self, "_rvol_evidence_collector", None)
         if collector is None:
             return
 
