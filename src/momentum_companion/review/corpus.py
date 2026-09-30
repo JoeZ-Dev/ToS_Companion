@@ -9,6 +9,7 @@ from momentum_companion.replay.engine import ReplayEngine
 
 MAX_WINDOW_MS = 45 * 60 * 1000
 DEFAULT_WINDOW_MS = 20 * 60 * 1000
+MAX_L1_WINDOW_MS = 2 * 60 * 1000
 _NY = ZoneInfo("America/New_York")
 
 
@@ -99,6 +100,178 @@ class ReviewCorpus:
                 "requested_end_ms": requested_end,
             },
         )
+
+    def full_session(
+        self,
+        session_id: str,
+        symbol: str,
+    ) -> dict[str, Any]:
+        """Return compact causal review data for the entire recorded symbol in one pass."""
+
+        engine = ReplayEngine(
+            recordings_root=self.recordings_root,
+            max_bars_per_symbol=10_000,
+            evaluate_patterns=False,
+        )
+        replay = engine.load(session_id, symbol)
+        total = int(replay.get("total_events") or 0)
+        normalized = str(symbol or "").strip().upper()
+
+        if total == 0:
+            return self._packet(engine, start_ms=None, end_ms=None)
+
+        first_ms = int(engine._events[0]["stream_ts_ms"])
+        last_ms = int(engine._events[-1]["stream_ts_ms"])
+
+        # The engine is already freshly loaded at cursor zero. Step through the
+        # immutable event stream once; do not seek, which would reset/reseed it.
+        engine.step(total)
+        packet = self._packet(
+            engine,
+            start_ms=first_ms,
+            end_ms=last_ms,
+            availability={
+                "status": "available",
+                "first_event_ms": first_ms,
+                "last_event_ms": last_ms,
+                "events_in_window": total,
+                "full_session": True,
+            },
+        )
+        packet["purpose"] = "momentum_full_session_review"
+        packet["window"]["full_session"] = True
+        return packet
+
+    def l1_window(
+        self,
+        session_id: str,
+        symbol: str,
+        *,
+        start_ms: int,
+        end_ms: int,
+    ) -> dict[str, Any]:
+        """Return carried-forward historical L1 state for a tightly bounded window."""
+
+        requested_start = int(start_ms)
+        requested_end = int(end_ms)
+        if requested_start > requested_end:
+            raise ValueError("start_ms must be <= end_ms")
+        if requested_end - requested_start > MAX_L1_WINDOW_MS:
+            raise ValueError("L1 review window may not exceed 120 seconds")
+
+        engine = ReplayEngine(recordings_root=self.recordings_root)
+        replay = engine.load(session_id, symbol)
+        total = int(replay.get("total_events") or 0)
+        normalized = str(symbol or "").strip().upper()
+
+        if total == 0:
+            return {
+                "schema_version": 1,
+                "purpose": "historical_l1_review",
+                "session_id": session_id,
+                "symbol": normalized,
+                "window": {
+                    "start_ms": requested_start,
+                    "end_ms": requested_end,
+                    "future_data_included": False,
+                    "events_in_window": 0,
+                },
+                "frames": [],
+            }
+
+        events = engine._events
+        first_ms = int(events[0]["stream_ts_ms"])
+        last_ms = int(events[-1]["stream_ts_ms"])
+
+        resolved_start = max(requested_start, first_ms)
+        resolved_end = min(requested_end, last_ms)
+        if resolved_start > resolved_end:
+            status = "before_recording" if requested_end < first_ms else "after_recording"
+            return {
+                "schema_version": 1,
+                "purpose": "historical_l1_review",
+                "session_id": session_id,
+                "symbol": normalized,
+                "window": {
+                    "start_ms": requested_start,
+                    "end_ms": requested_end,
+                    "future_data_included": False,
+                    "availability": {
+                        "status": status,
+                        "first_event_ms": first_ms,
+                        "last_event_ms": last_ms,
+                    },
+                    "events_in_window": 0,
+                },
+                "frames": [],
+            }
+
+        # Establish the carried-forward quote immediately before the requested
+        # window, then advance one immutable recorded event at a time.
+        prior_cursor = engine.cursor_for_timestamp(resolved_start - 1)
+        engine.seek(prior_cursor)
+
+        frames: list[dict[str, Any]] = []
+        cursor = prior_cursor
+        while cursor < len(events):
+            event = events[cursor]
+            event_ms = int(event["stream_ts_ms"])
+            if event_ms > resolved_end:
+                break
+
+            engine.step(1)
+            cursor += 1
+            if event_ms < resolved_start:
+                continue
+
+            snapshot = engine.snapshot()
+            state = (
+                snapshot.get("session", {})
+                .get("symbols", {})
+                .get(normalized, {})
+            )
+            quote = dict(state.get("quote") or {})
+            bid = quote.get("bid")
+            ask = quote.get("ask")
+
+            frames.append({
+                "timestamp_ms": event_ms,
+                "bid": bid,
+                "ask": ask,
+                "last": quote.get("last"),
+                "bid_size": quote.get("bid_size"),
+                "ask_size": quote.get("ask_size"),
+                "last_size": quote.get("last_size"),
+                "volume": quote.get("volume"),
+                "spread": (
+                    float(ask) - float(bid)
+                    if bid is not None and ask is not None
+                    else None
+                ),
+                "source_ts_type": quote.get("source_ts_type"),
+                "raw_source": quote.get("raw_source"),
+            })
+
+        return {
+            "schema_version": 1,
+            "purpose": "historical_l1_review",
+            "session_id": session_id,
+            "symbol": normalized,
+            "window": {
+                "start_ms": resolved_start,
+                "end_ms": resolved_end,
+                "requested_start_ms": requested_start,
+                "requested_end_ms": requested_end,
+                "future_data_included": False,
+                "availability": {
+                    "status": "available",
+                    "first_event_ms": first_ms,
+                    "last_event_ms": last_ms,
+                },
+                "events_in_window": len(frames),
+            },
+            "frames": frames,
+        }
 
     def verification_window(
         self,

@@ -1,4 +1,6 @@
 import json
+
+import pytest
 from pathlib import Path
 
 from momentum_companion.review import ReviewAnnotationStore, ReviewCorpus
@@ -147,3 +149,120 @@ def test_review_context_returns_normal_after_opening_window():
 
     assert context["opening_volatility_context"] == "normal"
     assert context["opening_structure_rule"] is False
+
+
+def test_l1_window_carries_forward_prior_quote_state(tmp_path):
+    session = _write_session(tmp_path)
+    corpus = ReviewCorpus(tmp_path)
+    base = 1_790_161_200_000
+
+    packet = corpus.l1_window(
+        session.name,
+        "TOPS",
+        start_ms=base + 10_000,
+        end_ms=base + 20_000,
+    )
+
+    assert packet["window"]["future_data_included"] is False
+    assert packet["window"]["events_in_window"] == 2
+    assert [frame["timestamp_ms"] for frame in packet["frames"]] == [
+        base + 10_000,
+        base + 20_000,
+    ]
+    assert packet["frames"][0]["bid"] == 1.00
+    assert packet["frames"][0]["ask"] == 1.02
+    assert packet["frames"][0]["last"] == 1.03
+    assert packet["frames"][1]["last"] == 1.05
+    assert packet["frames"][1]["spread"] == pytest.approx(0.02)
+
+
+def test_l1_window_never_includes_event_after_requested_end(tmp_path):
+    session = _write_session(tmp_path)
+    corpus = ReviewCorpus(tmp_path)
+    base = 1_790_161_200_000
+
+    packet = corpus.l1_window(
+        session.name,
+        "TOPS",
+        start_ms=base,
+        end_ms=base + 20_000,
+    )
+
+    assert all(
+        frame["timestamp_ms"] <= base + 20_000
+        for frame in packet["frames"]
+    )
+    assert all(frame["last"] != 0.98 for frame in packet["frames"])
+
+
+def test_l1_window_rejects_more_than_two_minutes(tmp_path):
+    session = _write_session(tmp_path)
+    corpus = ReviewCorpus(tmp_path)
+    base = 1_790_161_200_000
+
+    try:
+        corpus.l1_window(
+            session.name,
+            "TOPS",
+            start_ms=base,
+            end_ms=base + 121_000,
+        )
+    except ValueError as exc:
+        assert "120 seconds" in str(exc)
+    else:
+        raise AssertionError("oversized L1 review window must be rejected")
+
+
+def test_full_session_review_replays_recording_once_and_returns_all_bars(tmp_path):
+    session = _write_session(tmp_path)
+    corpus = ReviewCorpus(tmp_path)
+
+    packet = corpus.full_session(session.name, "TOPS")
+
+    assert packet["purpose"] == "momentum_full_session_review"
+    assert packet["window"]["full_session"] is True
+    assert packet["window"]["future_data_included"] is False
+    assert packet["window"]["availability"]["full_session"] is True
+    assert packet["replay"]["cursor"] == packet["replay"]["total_events"]
+    assert packet["window"]["availability"]["events_in_window"] == packet["replay"]["total_events"]
+    assert packet["bars_10s"]
+    assert packet["vwap_points"]
+
+
+def test_full_session_review_can_retain_more_than_default_replay_bar_limit(tmp_path):
+    session = tmp_path / "2026-09-23_070000_session"
+    session.mkdir(parents=True)
+    base = 1_790_161_200_000
+    event_count = 700
+    (session / "manifest.json").write_text(json.dumps({
+        "schema_version": 1,
+        "kind": "market_day_recording",
+        "symbols": ["TOPS"],
+        "services": ["LEVELONE_EQUITIES"],
+        "started_at_et": "2026-09-23T07:00:00-04:00",
+        "ended_at_et": "2026-09-23T09:00:00-04:00",
+        "counts": {"TOPS": {"LEVELONE_EQUITIES": event_count}},
+    }))
+    with (session / "TOPS.jsonl").open("w", encoding="utf-8") as handle:
+        volume = 1000
+        for index in range(event_count):
+            volume += 10
+            handle.write(json.dumps({
+                "kind": "market_event",
+                "service": "LEVELONE_EQUITIES",
+                "symbol": "TOPS",
+                "stream_ts_ms": base + index * 10_000,
+                "raw": {
+                    "key": "TOPS",
+                    "1": 1.00,
+                    "2": 1.02,
+                    "3": 1.01 + index * 0.0001,
+                    "8": volume,
+                },
+            }) + "\n")
+
+    packet = ReviewCorpus(tmp_path).full_session(session.name, "TOPS")
+
+    assert len(packet["bars_10s"]) > 600
+    assert packet["window"]["full_session"] is True
+    assert packet["window"]["future_data_included"] is False

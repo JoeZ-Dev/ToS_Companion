@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from momentum_companion.evaluation.trade_simulation import (
     TradeSimulationPolicy,
     build_trade_simulation,
@@ -172,7 +174,7 @@ def test_simulator_merges_colliding_detectors_and_uses_recorded_ask_bid(tmp_path
     assert trade["entry_price"] == 10.10
     assert trade["entry_bid"] == 10.00
     assert trade["stop_price"] == 9.90
-    assert trade["target_price"] == 10.50
+    assert trade["target_price"] == pytest.approx(10.50)
     assert trade["exit_ts_ms"] == 30_000
     assert trade["exit_price"] == 10.55
     assert trade["exit_reason"] == "TARGET"

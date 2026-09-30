@@ -22,7 +22,7 @@ def test_pattern_overlay_descriptors_render_geometry_recovery_and_triggers():
     script = Path(__file__).resolve().parents[1] / "src/momentum_companion/web/static/app.js"
     source = script.read_text()
     helpers = source[
-        source.index("  function patternColor("):
+        source.index("  const PATTERN_MARKER_SERIES_CONFIG"):
         source.index("  function patternShortName(")
     ]
     patterns = [
@@ -90,6 +90,82 @@ def test_pattern_overlay_descriptors_render_geometry_recovery_and_triggers():
         line["patternType"] != "MICRO_PULLBACK"
         for line in payload["hidden"]["lines"]
     )
+
+
+def test_pattern_marker_legend_tooltips_explain_detector_and_cooldown_semantics():
+    script = Path(__file__).resolve().parents[1] / "src/momentum_companion/web/static/app.js"
+    source = script.read_text()
+    helpers = source[
+        source.index("  const PATTERN_MARKER_SERIES_CONFIG"):
+        source.index("  function patternLineStyle(")
+    ]
+    pattern_types = [
+        "ASCENDING_TRIANGLE",
+        "MICRO_PULLBACK",
+        "LOCAL_RESISTANCE_BREAKOUT",
+        "TIGHT_CONSOLIDATION_BREAKOUT",
+    ]
+    javascript = (
+        helpers
+        + "\nconst types="
+        + json.dumps(pattern_types)
+        + ";\nconsole.log(JSON.stringify(types.map((type) => ({"
+        + "definition:patternMarkerDefinition(type),tooltip:patternMarkerTooltip(type)}))));"
+    )
+    result = subprocess.run(
+        ["node", "-e", javascript],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+
+    expected = {
+        "ASCENDING_TRIANGLE": ("Ascending Triangle", "#46c2ff"),
+        "MICRO_PULLBACK": ("Micro Pullback", "#f2b84b"),
+        "LOCAL_RESISTANCE_BREAKOUT": ("Local Resistance Breakout", "#db7cff"),
+        "TIGHT_CONSOLIDATION_BREAKOUT": (
+            "Tight Consolidation Breakout",
+            "#5ed39a",
+        ),
+    }
+    shared_help = (
+        "Markers point to the candle they annotate. "
+        "A downward-pointing marker does not mean sell or bearish."
+    )
+    for item in payload:
+        definition = item["definition"]
+        detector_name, color = expected[definition["patternType"]]
+        tooltip = item["tooltip"]
+        assert definition["detectorName"] == detector_name
+        assert definition["color"] == color
+        assert definition["eventType"] == "detector transition"
+        assert detector_name in tooltip
+        assert color in tooltip
+        assert "Event type: detector transition" in tooltip
+        assert "opportunity-start" in tooltip
+        assert "repeated-signal" in tooltip
+        assert "other-event" in tooltip
+        assert "first eligible candidate as the opportunity start" in tooltip
+        assert "suppressed by the existing cooldown" in tooltip
+        assert shared_help in tooltip
+
+
+def test_pattern_marker_legend_uses_tooltip_for_title_and_accessible_label():
+    app_js = (
+        Path(__file__).resolve().parents[1]
+        / "src/momentum_companion/web/static/app.js"
+    ).read_text()
+    render = app_js[
+        app_js.index("  function renderPatternOverlayFilters("):
+        app_js.index("  function setPatternOverlays(")
+    ]
+
+    assert "const marker = patternMarkerDefinition(patternType)" in render
+    assert "const tooltip = patternMarkerTooltip(patternType)" in render
+    assert 'aria-label="${escapeHtml(tooltip)}"' in render
+    assert 'title="${escapeHtml(tooltip)}"' in render
+    assert 'style="--pattern-color:${marker.color}"' in render
 
 
 def test_pattern_overlay_updates_preserve_viewport_and_expose_family_controls():
@@ -760,3 +836,50 @@ def test_corpus_classification_api_defaults_reserves_and_protects_holdout(tmp_pa
     assert unknown.status_code == 404
     persisted = json.loads((tmp_path / "corpus_classifications.json").read_text())
     assert persisted["sessions"]["future-session"]["classification"] == "development"
+
+
+def test_historical_l1_review_endpoint_is_stateless_and_carries_quote(tmp_path):
+    from momentum_companion.replay.engine import ReplayEngine
+
+    session = tmp_path / "2026-09-23_070000_session"
+    session.mkdir(parents=True)
+    (session / "manifest.json").write_text(__import__("json").dumps({
+        "kind": "market_day_recording",
+        "symbols": ["TOPS"],
+        "services": ["LEVELONE_EQUITIES"],
+        "counts": {"TOPS": {"LEVELONE_EQUITIES": 3}},
+    }))
+    rows = [
+        {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"TOPS","stream_ts_ms":1000,
+         "raw":{"key":"TOPS","1":1.0,"2":1.02,"3":1.01,"4":1000,"5":900,"8":100}},
+        {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"TOPS","stream_ts_ms":2000,
+         "raw":{"key":"TOPS","3":1.015,"8":120}},
+        {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"TOPS","stream_ts_ms":3000,
+         "raw":{"key":"TOPS","1":1.01,"2":1.03,"3":1.02,"4":1500,"5":600,"8":150}},
+    ]
+    with (session / "TOPS.jsonl").open("w") as handle:
+        for row in rows:
+            handle.write(__import__("json").dumps(row) + "\n")
+
+    runtime = FakeRuntime()
+    shared = ReplayEngine(recordings_root=tmp_path)
+
+    with TestClient(create_app(runtime, replay_engine=shared)) as client:
+        response = client.post(
+            "/api/review/l1-window",
+            json={
+                "session_id": session.name,
+                "symbol": "TOPS",
+                "start_ms": 2000,
+                "end_ms": 3000,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["window"]["future_data_included"] is False
+    assert payload["frames"][0]["timestamp_ms"] == 2000
+    assert payload["frames"][0]["bid"] == 1.0
+    assert payload["frames"][0]["ask"] == 1.02
+    assert payload["frames"][1]["bid"] == 1.01
+    assert shared.snapshot()["replay"]["status"] == "EMPTY"
