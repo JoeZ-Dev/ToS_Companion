@@ -33,3 +33,19 @@ def test_rvol_requires_twenty_prior_same_phase_observations():
     history=[RvolObservation(f"2026-08-{day:02d}","premarket",60,100) for day in range(1,20)]
     result=calculate_time_adjusted_rvol(trading_date="2026-09-29",market_phase="premarket",phase_offset_seconds=60,cumulative_volume=200,history=history)
     assert result["status"]=="unavailable" and "requires 20" in result["explanation"]
+
+def test_duplicate_recordings_on_one_symbol_date_count_once():
+    history=[]
+    for day in range(1,21):
+        history.append(RvolObservation(f"2026-08-{day:02d}","regular",60,100))
+    history.append(RvolObservation("2026-08-20","regular",60,200))
+    result=calculate_time_adjusted_rvol(trading_date="2026-09-29",market_phase="regular",phase_offset_seconds=60,cumulative_volume=200,history=history)
+    assert result["status"]=="available"
+    assert result["history_sessions"]==20
+    assert result["median_prior_cumulative_volume"]==100
+
+def test_distinct_dates_count_separately_but_current_and_future_never_do():
+    history=[RvolObservation(f"2026-08-{day:02d}","premarket",60,100) for day in range(1,21)]
+    history += [RvolObservation("2026-09-29","premarket",60,1),RvolObservation("2026-09-30","premarket",60,1)]
+    result=calculate_time_adjusted_rvol(trading_date="2026-09-29",market_phase="premarket",phase_offset_seconds=60,cumulative_volume=200,history=history)
+    assert result["status"]=="available" and result["value"]==pytest.approx(2.0)

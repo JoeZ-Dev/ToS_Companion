@@ -9,7 +9,10 @@ from momentum_companion.recording.provenance import (
     DERIVED_JOURNAL_SCHEMA_VERSION,
     deterministic_fingerprint,
 )
-from momentum_companion.recording.trigger_context import TRIGGER_STATES
+from momentum_companion.recording.trigger_context import (
+    TRIGGER_STATES,
+    attach_detector_resistance_evidence,
+)
 
 UTC = timezone.utc
 PATTERN_JOURNAL_FILENAME = "pattern_events.jsonl"
@@ -103,7 +106,11 @@ def build_pattern_event(
         "snapshot_fingerprint": snapshot_fingerprint,
     }
     if snapshot["state"].upper() in TRIGGER_STATES:
-        event["trigger_context"] = dict(trigger_context or {}) or None
+        context = dict(trigger_context or {})
+        event["trigger_context"] = (
+            attach_detector_resistance_evidence(context, observation)
+            if context else None
+        )
     return event, snapshot_fingerprint
 
 

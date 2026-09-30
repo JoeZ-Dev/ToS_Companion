@@ -10,9 +10,10 @@ PREFERRED_BREAKOUT_ROOM_PCT = 10.0
 MIN_TIME_ADJUSTED_RVOL = 2.0
 RVOL_LOOKBACK_SESSIONS = 20
 RVOL_SOURCE = (
-    "derived: cumulative LevelOne total_volume at the decision timestamp divided "
-    "by the median cumulative total_volume at the same market-phase-relative "
-    "timestamp across the previous 20 eligible sessions"
+    "derived: current cumulative LevelOne total_volume divided by the median "
+    "same-market-phase cumulative volume across 20 distinct prior ET sessions; "
+    "history comes from persisted LevelOne recordings or summed Schwab "
+    "PRICEHISTORY one-minute extended-hours candles"
 )
 
 
@@ -30,7 +31,7 @@ def calculate_time_adjusted_rvol(*, trading_date: str, market_phase: str,
     if cumulative_volume is None or float(cumulative_volume) < 0:
         return _unavailable_rvol("current cumulative volume is unavailable")
     current_day = date.fromisoformat(trading_date)
-    eligible: list[tuple[str, float]] = []
+    eligible_by_date: dict[tuple[str, str], float] = {}
     for raw in history:
         item = raw if isinstance(raw, Mapping) else raw.__dict__
         try:
@@ -41,7 +42,9 @@ def calculate_time_adjusted_rvol(*, trading_date: str, market_phase: str,
             continue
         if prior_day >= current_day or phase != market_phase or offset != phase_offset_seconds or volume < 0:
             continue
-        eligible.append((prior_day.isoformat(), volume))
+        key = (prior_day.isoformat(), phase)
+        eligible_by_date[key] = max(volume, eligible_by_date.get(key, 0.0))
+    eligible = [(day, volume) for (day, _), volume in eligible_by_date.items()]
     eligible.sort(key=lambda item: item[0])
     eligible = eligible[-RVOL_LOOKBACK_SESSIONS:]
     if len(eligible) < RVOL_LOOKBACK_SESSIONS:
@@ -104,6 +107,8 @@ def _breakout_room(entry_price, decision_ts_ms, resistance_levels, evidence_comp
     if entry_price is None or float(entry_price) <= 0: return _unavailable_room("entry price is unavailable")
     candidates, saw = [], False
     for item in resistance_levels:
+        if item.get("role") == "broken_level":
+            continue
         available_at = item.get("available_at_ms")
         if available_at is None or int(available_at) > int(decision_ts_ms): continue
         try: price = float(item["price"])

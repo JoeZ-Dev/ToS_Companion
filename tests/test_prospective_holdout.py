@@ -126,6 +126,35 @@ def test_minimum_size_requires_dates_opportunities_and_pairs() -> None:
     )["ready_for_locked_assessment"] is False
 
 
+def test_momentum_count_never_blocks_primary_readiness() -> None:
+    result = holdout_readiness(
+        independent_trading_dates=20, opportunities=500, paired_trades=250,
+        momentum_trades=0,
+    )
+    assert result["ready_for_locked_assessment"] is True
+    assert result["momentum_count_blocks_primary_readiness"] is False
+    assert "required_momentum_trades" not in result
+
+
+def test_momentum_policy_is_never_approvable_in_this_holdout() -> None:
+    ready = holdout_readiness(
+        independent_trading_dates=20, opportunities=500, paired_trades=250,
+        momentum_trades=999,
+    )
+    policies = {
+        "confirmed_detector_stop": {"aggregate": {"net_r": 5.0, "average_r": 0.1}},
+        "confirmed_detector_stop_momentum_eligible": {
+            "aggregate": {"net_r": 100.0, "average_r": 2.0}
+        },
+    }
+    result = _success_assessment(
+        policies, {"overall": {"paired_mean_delta_r": 0.0}}, ready
+    )
+    assert result["momentum_policy"]["assessment_allowed"] is False
+    assert result["momentum_policy"]["approvable_from_this_holdout"] is False
+    assert result["momentum_policy"]["protocol_passed"] is False
+
+
 def test_success_requires_positive_expectancy_and_paired_noninferiority() -> None:
     ready = holdout_readiness(
         independent_trading_dates=20, opportunities=500, paired_trades=250

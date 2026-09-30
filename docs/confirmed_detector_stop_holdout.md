@@ -40,8 +40,13 @@ a small paired subset. These are prospective design requirements, not values
 optimized against the September historical results. Do not stop early after a
 favorable interim result.
 
-The momentum policy uses the same 20 dates and 500 opportunities and requires
-at least 250 eligible trades before assessment.
+These are exactly the primary readiness requirements. Momentum-eligible trade
+count is reported separately and never blocks primary readiness. The momentum
+policy remains preregistered but exploratory: report its eligible/traded counts,
+outcomes, and paired decomposition, but it cannot be approved from this holdout
+regardless of apparent results. Do not select a momentum sample threshold from
+historical results. Preregister a separate prospective validation after its
+natural eligibility frequency is known.
 
 ## Locked reporting
 
@@ -65,20 +70,62 @@ floor is an evaluation guardrail fixed before unseen results, not a trading
 threshold. Passing the protocol makes the policy eligible for a separate
 decision review; it does not approve deployment.
 
-Momentum eligibility separately requires positive out-of-sample net R and
-average R. Losing less is not success. Its locked constants are 8.0% minimum
+Momentum eligibility outcomes still report net and average R; losing less is
+not positive expectancy. Its locked constants are 8.0% minimum
 breakout room, 10.0% preferred room, and 2.0 time-adjusted RVOL. Resistance is
 limited to registered causal local/session levels (including PMH, ORH, regular
 high, VWAP, and nearest resistance); incomplete evidence is unavailable.
 
 There is no authoritative multi-session RVOL field in the engine. The existing
-`volume_multiple` is a one-minute spike measure and is not used. RVOL derives
-from Schwab Level One field 8 (`total_volume`, normalized as
-`QuoteEvent.volume`): cumulative phase volume at decision time divided by the
-median at the identical premarket/RTH-relative timestamp over the previous 20
-eligible same-symbol sessions. RTH volume subtracts the last pre-09:30 total.
-Missing history is unavailable; current/future sessions and post-decision data
-are excluded.
+`volume_multiple` is a one-minute spike measure and is not used. Current-session
+volume comes from Schwab Level One field 8 (`total_volume`, normalized as
+`QuoteEvent.volume`). Prior-session evidence comes from persisted Level One
+recordings or Schwab `PRICEHISTORY` one-minute candle volume with extended
+hours requested and phase volume summed causally. RVOL is current cumulative
+phase volume divided by the median at the identical premarket/RTH-relative
+timestamp over the previous 20 eligible same-symbol sessions. Recorded Level
+One RTH volume subtracts the last pre-09:30 total.
+History is deduplicated by symbol, distinct ET trading date, and market phase,
+so multiple recording sessions on one date count once. Missing history is
+unavailable; current/future sessions and post-decision data are excluded.
+
+## Prerequisite evidence collection
+
+Run the read-only retention canary independently from an authenticated app
+environment. Its cutoff is exclusive, and it rejects out-of-bounds candles
+even when the upstream response includes them:
+
+```bash
+python -m momentum_companion.evaluation.schwab_retention_canary \
+  /tmp/schwab-retention-canary.json \
+  --symbols APUS,IMCC,NCPL,BENF,JAGX \
+  --cutoff-date 2026-09-29 \
+  --calendar-days 50
+```
+
+The enrollment sidecar is additive and research-only. Enable it explicitly;
+without this setting the normal runtime is unchanged:
+
+```bash
+export TOS_RVOL_EVIDENCE_DIR=/data/research/rvol-evidence
+```
+
+At first recording enrollment it requests prior one-minute extended-hours
+history and atomically stores at least 20 complete previous sessions when
+available. The sidecar contains raw extended-hours candles, separate
+premarket/RTH/after-hours cumulative series, request bounds, receipt time,
+source, and coverage diagnostics. The decision date is excluded, requests are
+serialized and rate-limited, complete evidence is cached, and an incomplete
+response cannot overwrite complete evidence.
+
+Future trigger journals also persist the causal resistance candidates evaluated
+at the timestamp: PMH, ORH, regular-session high, VWAP, prior-day high,
+local/micro resistance, swing highs, detector structural resistance, and the
+selected nearest overhead level. Each candidate records availability, as-of
+time, entry distance, and whether it is overhead. Completeness is false unless
+all required sources were evaluated and available. A broken breakout level is
+tagged and cannot automatically become the next overhead level. Wrapped and
+legacy `nearest_resistance` schemas remain readable.
 
 ## Exact command
 
@@ -98,7 +145,8 @@ docker run --rm --user 0:0 \
   python -m momentum_companion.evaluation.prospective_holdout \
     /data/recordings /output \
     --cutoff-date 2026-09-29 \
-    --code-revision "${REVISION}"
+    --code-revision "${REVISION}" \
+    --rvol-evidence-dir /data/research/rvol-evidence
 ```
 
 To reproduce determinism, run the same command into two empty output

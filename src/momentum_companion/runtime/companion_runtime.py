@@ -28,6 +28,7 @@ from momentum_companion.recording.history import (
 )
 from momentum_companion.recording.market_day import MarketDayRecorder, reached_cutoff, seconds_until_cutoff
 from momentum_companion.recording.provenance import build_recording_provenance
+from momentum_companion.recording.rvol_enrollment import EnrollmentRvolEvidenceCollector
 from momentum_companion.recording.trigger_context import build_trigger_context
 from momentum_companion.session import CompanionSession
 from momentum_companion.setup_engine.pattern_service import PatternEvaluationService
@@ -111,6 +112,11 @@ class CompanionRuntime:
         self._backfill_stop = threading.Event()
         self._backfill_thread: threading.Thread | None = None
         self._backfill_manager = HistoricalBackfillManager(self.rest)
+        rvol_root = str(os.environ.get("TOS_RVOL_EVIDENCE_DIR") or "").strip()
+        self._rvol_evidence_collector = (
+            EnrollmentRvolEvidenceCollector(self.rest, Path(rvol_root))
+            if rvol_root else None
+        )
 
     @property
     def active_symbol(self) -> str | None:
@@ -618,6 +624,8 @@ class CompanionRuntime:
 
         self._ensure_stream()
         self._refresh_stream_subscription()
+        for symbol in normalized:
+            self._collect_rvol_enrollment_evidence(symbol)
         self.session.update_recorder_state(recorder.state())
 
         def cutoff_worker() -> None:
@@ -658,6 +666,7 @@ class CompanionRuntime:
             self._recording_symbols = set(recorder.active_symbols())
         self._ensure_stream()
         self._refresh_stream_subscription()
+        self._collect_rvol_enrollment_evidence(normalized)
         if pre7_vwap is not None or pre7_volume is not None:
             return self.apply_recording_pre7_seed(
                 normalized,
@@ -667,6 +676,25 @@ class CompanionRuntime:
         state = recorder.state()
         self.session.update_recorder_state(state)
         return state
+
+    def _collect_rvol_enrollment_evidence(self, symbol: str) -> None:
+        collector = self._rvol_evidence_collector
+        if collector is None:
+            return
+
+        def worker() -> None:
+            try:
+                collector.enroll(symbol)
+            except Exception:
+                logger.warning(
+                    "Research RVOL enrollment evidence failed for %s", symbol,
+                    exc_info=True,
+                )
+
+        threading.Thread(
+            target=worker, daemon=True,
+            name=f"tos-rvol-evidence-{symbol.lower()}",
+        ).start()
 
     def apply_recording_pre7_seed(
         self,

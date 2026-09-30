@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import json
 from collections import Counter
 from dataclasses import asdict
 from datetime import datetime, time
@@ -97,6 +98,7 @@ def build_prospective_holdout(
     cutoff_date: str | None,
     code_revision: str,
     end_date: str | None = None,
+    rvol_evidence_root: Path | None = None,
 ) -> dict[str, Any]:
     cutoff = validate_cutoff(cutoff_date)
     revision = str(code_revision or "").strip()
@@ -199,8 +201,11 @@ def build_prospective_holdout(
             group["policy_results"] = {
                 policy: evaluated[policy] for policy in ("production_baseline", "confirmed_detector_stop")
             }
-            eligibility = _holdout_momentum_eligibility(catalog, catalog.list_sessions(), group,
-                group["policy_results"]["confirmed_detector_stop"])
+            eligibility = _holdout_momentum_eligibility(
+                catalog, catalog.list_sessions(), group,
+                group["policy_results"]["confirmed_detector_stop"],
+                rvol_evidence_root=rvol_evidence_root,
+            )
             group["momentum_eligibility"] = {"confirmed_detector_stop": eligibility, MOMENTUM_POLICY: eligibility}
             confirmed = group["policy_results"]["confirmed_detector_stop"]
             if eligibility["classification"] in {"trade_candidate", "preferred_candidate"}:
@@ -229,6 +234,9 @@ def build_prospective_holdout(
         for policy in EVALUATED_POLICIES
     }
     paired = _paired_policy_report(opportunities)
+    momentum_paired = _paired_named_policies(
+        opportunities, "confirmed_detector_stop", MOMENTUM_POLICY
+    )
     dates = sorted({item["trading_date"] for item in opportunities})
     readiness = holdout_readiness(
         independent_trading_dates=len(dates),
@@ -254,7 +262,9 @@ def build_prospective_holdout(
             "momentum_eligibility": {"min_breakout_room_pct": 8.0,
                 "preferred_breakout_room_pct": 10.0, "min_time_adjusted_rvol": 2.0,
                 "rvol_source": RVOL_SOURCE, "new_preregistered_hypothesis": True,
-                "original_two_policy_comparison_preserved": True},
+                "original_two_policy_comparison_preserved": True,
+                "exploratory_only": True,
+                "approvable_from_this_holdout": False},
         },
         "inventory": {
             "eligible_sessions": [
@@ -275,6 +285,16 @@ def build_prospective_holdout(
         "source_captures_byte_identical": True,
         "policy_results": policy_results,
         "paired_selection_and_execution": paired,
+        "momentum_exploratory": {
+            "eligible_opportunities": sum(
+                (item.get("momentum_eligibility") or {}).get(MOMENTUM_POLICY, {}).get("classification")
+                in {"trade_candidate", "preferred_candidate"}
+                for item in opportunities
+            ),
+            "traded_opportunities": policy_results[MOMENTUM_POLICY]["aggregate"]["trades"],
+            "paired_vs_confirmed_detector_stop": momentum_paired,
+            "approvable_from_this_holdout": False,
+        },
         "minimum_size": readiness,
         "success_assessment": success,
         "opportunities": [_compact(item) for item in opportunities],
@@ -293,7 +313,6 @@ def holdout_readiness(
         and opportunities >= MINIMUM_OPPORTUNITIES
         and paired_trades >= MINIMUM_PAIRED_TRADES
     )
-    momentum_ready = ready and momentum_trades is not None and momentum_trades >= MINIMUM_PAIRED_TRADES
     return {
         "required_independent_trading_dates": MINIMUM_TRADING_DATES,
         "required_opportunities": MINIMUM_OPPORTUNITIES,
@@ -301,11 +320,10 @@ def holdout_readiness(
         "observed_independent_trading_dates": independent_trading_dates,
         "observed_opportunities": opportunities,
         "observed_paired_trades": paired_trades,
-        "required_momentum_trades": MINIMUM_PAIRED_TRADES,
         "observed_momentum_trades": momentum_trades,
         "ready_for_locked_assessment": ready,
-        "momentum_ready_for_locked_assessment": momentum_ready,
-        "rule": "all minimums must be met; do not stop early after favorable results",
+        "momentum_count_blocks_primary_readiness": False,
+        "rule": "only the three primary minimums must be met; momentum count is reported but never blocks readiness",
     }
 
 
@@ -340,9 +358,14 @@ def _success_assessment(
     momentum = policies.get(MOMENTUM_POLICY, {}).get("aggregate")
     if momentum is not None:
         positive = momentum["net_r"] > 0 and (momentum["average_r"] or 0) > 0
-        result["momentum_policy"] = {"positive_out_of_sample_expectancy": positive,
-            "protocol_passed": bool(readiness.get("momentum_ready_for_locked_assessment") and positive),
-            "deployment_approved": False}
+        result["momentum_policy"] = {
+            "positive_out_of_sample_expectancy": positive,
+            "protocol_passed": False,
+            "assessment_allowed": False,
+            "approvable_from_this_holdout": False,
+            "reason": "exploratory only; preregister a separate validation after natural eligibility frequency is known",
+            "deployment_approved": False,
+        }
     return result
 
 
@@ -389,24 +412,39 @@ def _holdout_policy_metrics(
     }
 
 
-def _holdout_momentum_eligibility(catalog, sessions, group, confirmed):
+def _holdout_momentum_eligibility(
+    catalog, sessions, group, confirmed, *, rvol_evidence_root=None
+):
     leg = next((item for item in confirmed.get("legs") or [] if item.get("status") == "TRADE"), None)
     decision = int((leg or {}).get("decision_ts_ms") or group.get("review_ts_ms") or 0)
     levels, complete = _causal_resistance_levels(group, decision)
     phase, offset = _market_phase_offset(decision)
     current = _phase_cumulative_volume(catalog, str(group["session_id"]), str(group["symbol"]), decision)
-    history = []
+    history_by_date: dict[str, float] = {}
     for session in sorted(sessions, key=_trading_date):
         day = _trading_date(session)
         if day >= group["trading_date"] or str(group["symbol"]) not in (session.get("symbols") or []): continue
         volume = _phase_cumulative_volume(catalog, str(session["session_id"]), str(group["symbol"]),
             _timestamp_for_phase(day, phase, offset))
-        if volume is not None: history.append(RvolObservation(day, phase, offset, volume))
+        if volume is not None:
+            history_by_date[day] = max(volume, history_by_date.get(day, 0.0))
+    for day, volume in _sidecar_phase_history(
+        rvol_evidence_root, str(group["symbol"]), phase, offset,
+        before_date=group["trading_date"],
+    ).items():
+        history_by_date[day] = max(volume, history_by_date.get(day, 0.0))
+    history = [
+        RvolObservation(day, phase, offset, volume)
+        for day, volume in sorted(history_by_date.items())
+    ]
     rvol = calculate_time_adjusted_rvol(trading_date=group["trading_date"], market_phase=phase,
         phase_offset_seconds=offset, cumulative_volume=current, history=history)
-    return classify_momentum_eligibility(entry_price=(float(leg["entry_price"]) if leg else None),
+    result = classify_momentum_eligibility(entry_price=(float(leg["entry_price"]) if leg else None),
         decision_ts_ms=decision, detector_structure_valid=bool(group.get("detector_events")) and leg is not None,
         resistance_levels=levels, resistance_evidence_complete=complete, rvol=rvol)
+    result["resistance_candidates"] = levels
+    result["resistance_evidence_complete"] = complete
+    return result
 
 
 def _causal_resistance_levels(group, decision):
@@ -415,18 +453,80 @@ def _causal_resistance_levels(group, decision):
         observed = int(event.get("observation_ts_ms") or 0); context = event.get("trigger_context") or {}
         as_of = int(context.get("context_as_of_ts_ms") or observed)
         if observed > decision or as_of > decision: continue
+        persisted = context.get("resistance_registry") or {}
+        if persisted:
+            complete = complete or bool(persisted.get("complete"))
+            for candidate in persisted.get("candidates") or []:
+                levels.append({
+                    "type": str(candidate.get("source_type") or "known_resistance"),
+                    "price": candidate.get("price"),
+                    "availability": candidate.get("availability"),
+                    "available_at_ms": int(candidate.get("as_of_ts_ms") or as_of),
+                    "distance_from_entry_pct": candidate.get("distance_from_entry_pct"),
+                    "above_proposed_entry": candidate.get("above_proposed_entry"),
+                    "role": candidate.get("role"),
+                })
+            continue
         registry = context.get("session_levels") or {}
-        expected = ("premarket_high", "opening_range_high", "regular_session_high", "vwap")
-        complete = complete or all(key in registry for key in expected)
+        expected = (
+            "premarket_high", "opening_range_high", "regular_session_high",
+            "vwap", "prior_day_high",
+        )
+        # Legacy contexts remain readable, but they did not persist the full
+        # local/swing/detector candidate set and therefore cannot honestly
+        # assert complete breakout-room evidence.
         for key in expected:
             raw = registry.get(key); value = raw.get("value") if isinstance(raw, Mapping) else raw
             available = raw.get("available", value is not None) if isinstance(raw, Mapping) else value is not None
             if available and value is not None: levels.append({"type": key, "price": value, "available_at_ms": as_of})
         nearest = (context.get("structural_levels") or {}).get("nearest_resistance")
-        if isinstance(nearest, Mapping) and nearest.get("price") is not None:
-            levels.append({"type": str(nearest.get("source") or "nearest_resistance"),
-                "price": nearest["price"], "available_at_ms": as_of})
+        if isinstance(nearest, Mapping):
+            wrapped = nearest.get("value") if isinstance(nearest.get("value"), Mapping) else nearest
+            if wrapped.get("price") is not None:
+                levels.append({"type": str(wrapped.get("source") or "nearest_resistance"),
+                    "price": wrapped["price"], "available_at_ms": as_of,
+                    "distance_pct": wrapped.get("distance_pct")})
     return levels, complete
+
+
+def _sidecar_phase_history(root, symbol, phase, offset, *, before_date):
+    if not root:
+        return {}
+    try:
+        payload = json.loads(
+            (Path(root) / f"{symbol.upper()}.json").read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError):
+        return {}
+    values = {}
+    for session in payload.get("sessions") or []:
+        day = str(session.get("trading_date") or "")
+        if not day or day >= before_date:
+            continue
+        points = ((session.get("phase_cumulative") or {}).get(phase) or [])
+        eligible = [
+            item for item in points
+            if int(item.get("offset_seconds") or 0) <= offset
+        ]
+        if eligible:
+            point = max(eligible, key=lambda item: int(item["offset_seconds"]))
+            values[day] = float(point["cumulative_volume"])
+    return values
+
+
+def _paired_named_policies(opportunities, left_policy, right_policy):
+    shadow = [{
+        "trading_date": item["trading_date"],
+        "symbol": item["symbol"],
+        "policy_results": {
+            "production_baseline": item["policy_results"][left_policy],
+            "confirmed_detector_stop": item["policy_results"][right_policy],
+        },
+    } for item in opportunities]
+    result = _paired_policy_report(shadow)
+    result["left_policy"] = left_policy
+    result["right_policy"] = right_policy
+    return result
 
 
 def _market_phase_offset(timestamp_ms):
@@ -557,6 +657,10 @@ def _summary_markdown(report: Mapping[str, Any]) -> str:
         f"neither: {paired['neither']}. Selection effect: "
         f"{paired['selection_effect_r']:.3f}R. Both-traded execution effect: "
         f"{paired['delayed_entry_execution_effect_r']:.3f}R."
+    ), "", (
+        "Momentum eligibility is exploratory: its eligible/traded counts and paired "
+        "decomposition are reported, but it cannot be approved from this holdout "
+        "regardless of apparent results."
     ), "", "Positive out-of-sample expectancy is required; merely losing less does not pass. No result from this report approves deployment.", ""]
     return "\n".join(lines)
 
@@ -570,11 +674,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cutoff-date", required=True)
     parser.add_argument("--code-revision", required=True)
     parser.add_argument("--end-date")
+    parser.add_argument("--rvol-evidence-dir", type=Path)
     args = parser.parse_args(argv)
     build_prospective_holdout(
         args.recordings_root, args.output_root,
         cutoff_date=args.cutoff_date, code_revision=args.code_revision,
         end_date=args.end_date,
+        rvol_evidence_root=args.rvol_evidence_dir,
     )
     return 0
 
