@@ -26,9 +26,23 @@ class FakeRecorder:
         self.symbols = []
         self._active = []
         self.pre7_seeds = {}
+        self.pattern_updates = []
 
     def record_payload(self, payload):
         self.payloads.append(payload)
+
+    def record_pattern_observations(
+        self,
+        symbol,
+        patterns,
+        *,
+        observation_ts_ms,
+        trigger_context=None,
+    ):
+        self.pattern_updates.append(
+            (symbol, patterns, observation_ts_ms, trigger_context)
+        )
+        return len(patterns)
 
     def add_symbol(self, symbol):
         if symbol not in self.symbols:
@@ -251,6 +265,7 @@ def test_completed_bar_updates_patterns_and_preserves_ae_processing():
     runtime.pattern_service = FakePatternService()
     runtime.ae_engine = FakeAEEngineForPatterns()
     runtime._ae_engines = {"AEHL": runtime.ae_engine}
+    runtime._recorder = FakeRecorder()
     bar = TenSecondBar(
         ts=10,
         open=3.0,
@@ -268,6 +283,17 @@ def test_completed_bar_updates_patterns_and_preserves_ae_processing():
     assert symbol_state["pattern_observations"][0]["pattern_type"] == "TEST_PATTERN"
     assert symbol_state["ae_snapshot"]["status"] == "ok"
     assert runtime.ae_engine.bars == [bar]
+    update = runtime._recorder.pattern_updates[0]
+    assert update[:3] == (
+        "AEHL",
+        symbol_state["pattern_observations"],
+        20_000,
+    )
+    context = update[3]
+    assert context["captured_for_observation_ts_ms"] == 20_000
+    assert context["context_as_of_ts_ms"] == 20_000
+    assert context["price"]["value"] == 3.1
+    assert context["volume"]["completed_bar"]["value"] == 100
 
 
 def test_runtime_add_remove_recording_symbol_refreshes_stream_union(monkeypatch):
@@ -477,3 +503,37 @@ def test_apply_recording_pre7_seed_rebuilds_live_vwap_from_7am_history(monkeypat
     assert symbol_state["vwap_points"]
     assert symbol_state["ae_snapshot"]["vwap"] is not None
     assert "GCTK" in runtime._analysis_symbols
+
+
+def test_halted_quote_updates_context_but_does_not_create_analysis_bar():
+    runtime = bare_runtime()
+    runtime._recording_symbols = set()
+    runtime.session.add_symbol("AEHL", make_active=True)
+    runtime._analysis_symbols = {"AEHL"}
+    runtime._aggregators = {"AEHL": FakePerSymbolAggregator("AEHL")}
+    runtime._ae_engines = {"AEHL": FakePerSymbolAE("AEHL")}
+    runtime.pattern_service = FakePatternService()
+
+    runtime._handle_quote(
+        {
+            "ts_ms": 1_700_000_010_000,
+            "symbol": "AEHL",
+            "bid": 3.10,
+            "ask": 3.12,
+            "last": 3.11,
+            "bid_size": 100,
+            "ask_size": 100,
+            "last_size": 40,
+            "volume": 25_000,
+            "security_status": "Halted",
+            "hard_to_borrow": True,
+            "shortable": True,
+            "source_ts_type": "QUOTE_TS",
+            "raw_source": "SCHWAB_STREAM",
+        }
+    )
+
+    symbol_state = runtime.session.snapshot()["symbols"]["AEHL"]
+    assert symbol_state["market_context"]["halted"] is True
+    assert runtime._aggregators["AEHL"].updates == []
+    assert runtime._ae_engines["AEHL"].bars == []

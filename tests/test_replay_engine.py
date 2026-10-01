@@ -67,7 +67,58 @@ def test_catalog_lists_recorded_sessions_without_opening_live_services(tmp_path)
         "symbols": ["TOPS"],
         "counts": {"TOPS": {"LEVELONE_EQUITIES": 3}},
         "stop_reason": "3pm_cutoff",
+        "historical_backfill": {},
+        "provenance": {
+            "application": {
+                "git_revision": None,
+                "git_worktree_dirty": None,
+                "version": None,
+            },
+            "detectors": {
+                "enabled": None,
+                "inventory_fingerprint": None,
+            },
+            "schemas": {
+                "manifest": 1,
+                "market_event": None,
+                "derived_journal": None,
+            },
+            "pattern_evaluation": {"bar_cadence_seconds": None},
+            "session": {
+                "timezone": None,
+                "premarket_start_et": None,
+                "regular_market_open_et": None,
+                "regular_market_close_et": None,
+                "after_hours_end_et": None,
+                "recording_cutoff_et": None,
+            },
+            "source_mode": None,
+        },
     }]
+
+
+def test_catalog_loads_legacy_manifest_with_explicit_unknown_provenance(tmp_path):
+    session = _write_session(tmp_path)
+    manifest = RecordingCatalog(tmp_path).load_manifest(session.name)
+
+    assert manifest["schema_version"] == 1
+    assert manifest["provenance"]["application"]["git_revision"] is None
+    assert manifest["provenance"]["detectors"]["enabled"] is None
+    assert manifest["provenance"]["pattern_evaluation"]["bar_cadence_seconds"] is None
+
+
+def test_catalog_fills_unknown_fields_in_partial_provenance(tmp_path):
+    session = _write_session(tmp_path)
+    manifest_path = session / "manifest.json"
+    raw = json.loads(manifest_path.read_text())
+    raw["provenance"] = {"application": {"git_revision": "a" * 40}}
+    manifest_path.write_text(json.dumps(raw))
+
+    manifest = RecordingCatalog(tmp_path).load_manifest(session.name)
+
+    assert manifest["provenance"]["application"]["git_revision"] == "a" * 40
+    assert manifest["provenance"]["application"]["version"] is None
+    assert manifest["provenance"]["detectors"]["enabled"] is None
 
 
 def test_catalog_rejects_path_traversal(tmp_path):
@@ -98,6 +149,33 @@ def test_replay_step_uses_recorded_deltas_to_build_same_ten_second_bar(tmp_path)
     assert state["session"]["symbols"]["TOPS"]["quote"]["bid"] == 0.70
     assert state["session"]["symbols"]["TOPS"]["bars_10s"][0]["open"] == 0.705
     assert state["session"]["symbols"]["TOPS"]["bars_10s"][0]["close"] == 0.710
+
+
+def test_replay_pattern_timeline_distinguishes_bar_from_observation_time(tmp_path):
+    session = _write_session(tmp_path)
+    engine = ReplayEngine(recordings_root=tmp_path)
+    engine.load(session.name, "TOPS")
+
+    class OnePattern:
+        def ingest_completed_bar(self, symbol, bar):
+            return [{
+                "id": f"{symbol}:TEST:{bar.ts}",
+                "symbol": symbol,
+                "pattern_type": "TEST",
+                "state": "VALID",
+                "started_at": bar.ts,
+                "updated_at": bar.ts,
+                "evidence": {},
+                "points": [],
+                "lines": [],
+            }]
+
+    engine.pattern_service = OnePattern()
+    engine.step(3)
+
+    event = engine.pattern_timeline[0]
+    assert event["bar_ts"] == 1_790_161_200
+    assert event["observation_ts_ms"] == 1_790_161_210_000
 
 
 def test_replay_seek_rebuilds_state_from_start_without_future_leakage(tmp_path):
@@ -273,3 +351,48 @@ def test_replay_reports_volume_removed_by_cap_and_reset_without_changing_bar_vol
     assert reset["volume"] == {"capped_total": 250000, "discarded_total": 2000}
     assert engine.snapshot()["session"]["symbols"]["TOPS"]["bars_10s"][0]["volume"] == 900
     assert engine.seek(11)["data_quality"] == before_cap
+
+
+def test_replay_consumes_gap_repair_candles_without_fabricating_l1_ticks(tmp_path):
+    session = _write_session(tmp_path)
+    path = session / "TOPS.jsonl"
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    base = rows[0]["stream_ts_ms"]
+    repaired = {
+        "schema_version": 1,
+        "kind": "historical_candle",
+        "symbol": "TOPS",
+        "stream_ts_ms": base + 60_000,
+        "source": "SCHWAB_PRICEHISTORY_1M_GAP_REPAIR",
+        "candle": {
+            "datetime": base + 60_000,
+            "open": 0.72,
+            "high": 0.80,
+            "low": 0.70,
+            "close": 0.78,
+            "volume": 5000,
+        },
+    }
+    rows = [rows[0], repaired, {**rows[2], "stream_ts_ms": base + 120_000}]
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+
+    engine = ReplayEngine(recordings_root=tmp_path)
+    loaded = engine.load(session.name, "TOPS")
+    assert loaded["total_events"] == 3
+
+    final = engine.step(3)
+    symbol = engine.snapshot()["session"]["symbols"]["TOPS"]
+
+    repaired_bars = [
+        bar for bar in symbol["bars_10s"]
+        if bar.get("source") == "SCHWAB_PRICEHISTORY_1M_GAP_REPAIR"
+    ]
+    assert len(repaired_bars) == 1
+    assert repaired_bars[0]["interval_seconds"] == 60
+    assert repaired_bars[0]["close"] == 0.78
+    assert final["data_quality"]["gap_repair"] == {
+        "repaired_candles_consumed": 1,
+        "source": "SCHWAB_PRICEHISTORY_1M_GAP_REPAIR",
+        "granularity": "1m",
+    }
+    assert symbol["ae_snapshot"]["vwap"] is not None

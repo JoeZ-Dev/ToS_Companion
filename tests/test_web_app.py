@@ -1,3 +1,4 @@
+import json
 import time
 from pathlib import Path
 import subprocess
@@ -15,6 +16,174 @@ def test_chart_vwap_uses_backend_series_after_display_window_is_trimmed():
     js = function + "\nconsole.log(JSON.stringify(vwapPoints({vwap_points:[{time:10,value:42.25}],history_bars:[{time:10,close:99,volume:100}],bars_10s:[]})));"
     result = subprocess.run(["node", "-e", js], text=True, capture_output=True, check=True)
     assert result.stdout.strip() == '[{"time":10,"value":42.25}]'
+
+
+def test_pattern_overlay_descriptors_render_geometry_recovery_and_triggers():
+    script = Path(__file__).resolve().parents[1] / "src/momentum_companion/web/static/app.js"
+    source = script.read_text()
+    helpers = source[
+        source.index("  const PATTERN_MARKER_SERIES_CONFIG"):
+        source.index("  function patternShortName(")
+    ]
+    patterns = [
+        {
+            "id": "AEHL:ASCENDING_TRIANGLE:10",
+            "pattern_type": "ASCENDING_TRIANGLE",
+            "state": "BREAKOUT",
+            "updated_at": 30,
+            "lines": [
+                {
+                    "role": "resistance",
+                    "start": {"time": 10, "price": 4.2},
+                    "end": {"time": 30, "price": 4.2},
+                },
+                {
+                    "role": "rising_support",
+                    "start": {"time": 10, "price": 3.8},
+                    "end": {"time": 30, "price": 4.0},
+                },
+            ],
+            "evidence": {},
+        },
+        {
+            "id": "AEHL:MICRO_PULLBACK:20",
+            "pattern_type": "MICRO_PULLBACK",
+            "state": "CONTINUATION",
+            "updated_at": 50,
+            "lines": [
+                {
+                    "role": "impulse",
+                    "start": {"time": 20, "price": 4.0},
+                    "end": {"time": 30, "price": 4.8},
+                }
+            ],
+            "evidence": {"recovery_pivot": 4.6, "recovery_pivot_time": 40},
+        },
+    ]
+    javascript = (
+        "const LightweightCharts={LineStyle:{Solid:0,Dotted:1,Dashed:2}};\n"
+        + helpers
+        + "\nconst patterns="
+        + json.dumps(patterns)
+        + ";\nconsole.log(JSON.stringify({all:patternOverlayDescriptors(patterns,{}),"
+        + "hidden:patternOverlayDescriptors(patterns,{MICRO_PULLBACK:false})}));"
+    )
+    result = subprocess.run(
+        ["node", "-e", javascript],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+
+    assert [line["role"] for line in payload["all"]["lines"]] == [
+        "resistance",
+        "rising_support",
+        "impulse",
+        "recovery_pivot",
+    ]
+    assert [trigger["state"] for trigger in payload["all"]["triggers"]] == [
+        "BREAKOUT",
+        "CONTINUATION",
+    ]
+    assert all(
+        line["patternType"] != "MICRO_PULLBACK"
+        for line in payload["hidden"]["lines"]
+    )
+
+
+def test_pattern_marker_legend_tooltips_explain_detector_and_cooldown_semantics():
+    script = Path(__file__).resolve().parents[1] / "src/momentum_companion/web/static/app.js"
+    source = script.read_text()
+    helpers = source[
+        source.index("  const PATTERN_MARKER_SERIES_CONFIG"):
+        source.index("  function patternLineStyle(")
+    ]
+    pattern_types = [
+        "ASCENDING_TRIANGLE",
+        "MICRO_PULLBACK",
+        "LOCAL_RESISTANCE_BREAKOUT",
+        "TIGHT_CONSOLIDATION_BREAKOUT",
+    ]
+    javascript = (
+        helpers
+        + "\nconst types="
+        + json.dumps(pattern_types)
+        + ";\nconsole.log(JSON.stringify(types.map((type) => ({"
+        + "definition:patternMarkerDefinition(type),tooltip:patternMarkerTooltip(type)}))));"
+    )
+    result = subprocess.run(
+        ["node", "-e", javascript],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+
+    expected = {
+        "ASCENDING_TRIANGLE": ("Ascending Triangle", "#46c2ff"),
+        "MICRO_PULLBACK": ("Micro Pullback", "#f2b84b"),
+        "LOCAL_RESISTANCE_BREAKOUT": ("Local Resistance Breakout", "#db7cff"),
+        "TIGHT_CONSOLIDATION_BREAKOUT": (
+            "Tight Consolidation Breakout",
+            "#5ed39a",
+        ),
+    }
+    shared_help = (
+        "Markers point to the candle they annotate. "
+        "A downward-pointing marker does not mean sell or bearish."
+    )
+    for item in payload:
+        definition = item["definition"]
+        detector_name, color = expected[definition["patternType"]]
+        tooltip = item["tooltip"]
+        assert definition["detectorName"] == detector_name
+        assert definition["color"] == color
+        assert definition["eventType"] == "detector transition"
+        assert detector_name in tooltip
+        assert color in tooltip
+        assert "Event type: detector transition" in tooltip
+        assert "opportunity-start" in tooltip
+        assert "repeated-signal" in tooltip
+        assert "other-event" in tooltip
+        assert "first eligible candidate as the opportunity start" in tooltip
+        assert "suppressed by the existing cooldown" in tooltip
+        assert shared_help in tooltip
+
+
+def test_pattern_marker_legend_uses_tooltip_for_title_and_accessible_label():
+    app_js = (
+        Path(__file__).resolve().parents[1]
+        / "src/momentum_companion/web/static/app.js"
+    ).read_text()
+    render = app_js[
+        app_js.index("  function renderPatternOverlayFilters("):
+        app_js.index("  function setPatternOverlays(")
+    ]
+
+    assert "const marker = patternMarkerDefinition(patternType)" in render
+    assert "const tooltip = patternMarkerTooltip(patternType)" in render
+    assert 'aria-label="${escapeHtml(tooltip)}"' in render
+    assert 'title="${escapeHtml(tooltip)}"' in render
+    assert 'style="--pattern-color:${marker.color}"' in render
+
+
+def test_pattern_overlay_updates_preserve_viewport_and_expose_family_controls():
+    runtime = FakeRuntime()
+    with TestClient(create_app(runtime)) as client:
+        index = client.get("/").text
+        app_js = client.get("/app.js").text
+
+    overlay_update = app_js[
+        app_js.index("  function setPatternOverlays("):
+        app_js.index("  function mergedBars(")
+    ]
+    assert 'id="pattern-overlay-filters"' in index
+    assert "getVisibleLogicalRange" in overlay_update
+    assert "setVisibleLogicalRange" in overlay_update
+    assert "fitContent" not in overlay_update
+    assert "patternTriggerHistory" in app_js
+    assert "state.patternVisibility" in app_js
 
 
 class FakeRuntime:
@@ -260,6 +429,7 @@ def test_browser_surfaces_quote_freshness_indicator():
         app_js = client.get("/app.js").text
 
     assert 'id="quote-freshness"' in index
+    assert "_client_received_at_ms" in app_js
     assert "received_at_ms" in app_js
     assert "DELAYED" in app_js
     assert "STALE" in app_js
@@ -436,3 +606,280 @@ def test_recording_page_exposes_pre7_inputs():
     assert 'id="recorder-pre7-volume"' in index
     assert "pre7_vwap" in app_js
     assert "PRE7 not set" in app_js
+
+
+def test_browser_surfaces_momentum_context_fields():
+    runtime = FakeRuntime()
+    with TestClient(create_app(runtime)) as client:
+        index = client.get("/").text
+        app_js = client.get("/app.js").text
+
+    assert 'id="security-status"' in index
+    assert 'id="htb-status"' in index
+    assert 'id="relative-strength"' in index
+    assert "market_context" in app_js
+    assert "shares_outstanding" in app_js
+    assert "short_interest_to_float" in app_js
+
+
+def test_review_api_exposes_future_safe_packets_and_annotations(tmp_path):
+    import json
+    from momentum_companion.replay.engine import ReplayEngine
+
+    session = tmp_path / "2026-09-23_070000_session"
+    session.mkdir(parents=True)
+    (session / "manifest.json").write_text(json.dumps({
+        "schema_version": 1,
+        "kind": "market_day_recording",
+        "symbols": ["TOPS"],
+        "services": ["LEVELONE_EQUITIES"],
+        "counts": {"TOPS": {"LEVELONE_EQUITIES": 3}},
+    }))
+    base = 1_790_161_200_000
+    rows = [
+        {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"TOPS","stream_ts_ms":base,
+         "raw":{"key":"TOPS","1":1.0,"2":1.1,"3":1.05,"8":100}},
+        {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"TOPS","stream_ts_ms":base+10_000,
+         "raw":{"key":"TOPS","3":1.10,"8":120}},
+        {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"TOPS","stream_ts_ms":base+20_000,
+         "raw":{"key":"TOPS","3":0.95,"8":150}},
+    ]
+    (session / "TOPS.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+
+    runtime = FakeRuntime()
+    replay = ReplayEngine(recordings_root=tmp_path)
+    with TestClient(create_app(runtime, replay_engine=replay)) as client:
+        packet = client.post("/api/review/verify", json={
+            "session_id": session.name,
+            "symbol": "TOPS",
+            "trigger_ms": base + 10_000,
+            "lookback_ms": 10_000,
+        })
+        saved = client.post("/api/review/annotations", json={
+            "session_id": session.name,
+            "symbol": "TOPS",
+            "setup_type": "breakout",
+            "trigger_ms": base + 10_000,
+            "valid_at_time": True,
+            "outcome": "failed",
+            "confidence": 0.9,
+            "evidence": {"level": 1.10},
+        })
+        listed = client.get("/api/review/annotations", params={"symbol": "TOPS"})
+
+    assert packet.status_code == 200
+    assert packet.json()["window"]["future_data_included"] is False
+    assert packet.json()["end_state"]["quote"]["last"] == 1.10
+    assert saved.status_code == 200
+    assert listed.status_code == 200
+    assert listed.json()[0]["outcome"] == "failed"
+
+
+def test_detector_audit_endpoint_uses_verification_annotations_and_reports_unsupported_types(tmp_path):
+    import json
+    from momentum_companion.replay.engine import ReplayEngine
+
+    recordings = tmp_path / "recordings"
+    session = recordings / "2026-09-23_070000_session"
+    session.mkdir(parents=True)
+    (session / "manifest.json").write_text(json.dumps({
+        "schema_version": 1,
+        "kind": "market_day_recording",
+        "symbols": ["TOPS"],
+        "services": ["LEVELONE_EQUITIES"],
+        "counts": {"TOPS": {"LEVELONE_EQUITIES": 2}},
+    }))
+    rows = [
+        {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"TOPS","stream_ts_ms":1000,
+         "raw":{"key":"TOPS","1":1.0,"2":1.1,"3":1.05,"8":100}},
+        {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"TOPS","stream_ts_ms":11000,
+         "raw":{"key":"TOPS","3":1.06,"8":120}},
+    ]
+    (session / "TOPS.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+
+    runtime = FakeRuntime()
+    replay = ReplayEngine(recordings_root=recordings)
+    with TestClient(create_app(runtime, replay_engine=replay)) as client:
+        saved = client.post("/api/review/annotations", json={
+            "session_id": session.name,
+            "symbol": "TOPS",
+            "setup_type": "local_resistance_breakout",
+            "trigger_ms": 11000,
+            "valid_at_time": True,
+            "outcome": "succeeded",
+            "review_pass": "verification",
+            "source": "codex",
+        })
+        audit = client.post("/api/evaluation/detector-audit", json={
+            "session_id": session.name,
+            "symbol": "TOPS",
+        })
+
+    assert saved.status_code == 200
+    assert audit.status_code == 200
+    payload = audit.json()
+    assert payload["summary"]["verification_annotations"] == 1
+    assert payload["summary"]["supported_annotations"] == 0
+    assert payload["summary"]["unsupported_setup_types"] == ["local_resistance_breakout"]
+    assert payload["results"][0]["supported_by_current_detector_registry"] is False
+
+
+def test_recording_integrity_endpoint_is_read_only_and_handles_unknown_session(tmp_path):
+    import json
+    from momentum_companion.replay.engine import ReplayEngine
+
+    session = tmp_path / "session"
+    session.mkdir()
+    (session / "manifest.json").write_text(
+        json.dumps(
+            {
+                "kind": "market_day_recording",
+                "symbols": ["TOPS"],
+                "ended_at_et": "2026-09-27T09:00:00-04:00",
+            }
+        )
+    )
+    (session / "TOPS.jsonl").write_text(
+        json.dumps(
+            {
+                "kind": "market_event",
+                "service": "LEVELONE_EQUITIES",
+                "symbol": "TOPS",
+                "stream_ts_ms": 1000,
+                "raw": {"key": "TOPS"},
+            }
+        )
+        + "\n"
+    )
+    runtime = FakeRuntime()
+    replay = ReplayEngine(recordings_root=tmp_path)
+
+    with TestClient(create_app(runtime, replay_engine=replay)) as client:
+        response = client.get("/api/recordings/session/integrity")
+        outcomes = client.get("/api/evaluation/pattern-outcomes/session")
+        overlaps = client.get("/api/evaluation/pattern-overlaps/session")
+        research = client.get("/api/research/export", params={"session_id": "session"})
+        parity = client.get("/api/evaluation/pattern-parity/session")
+        simulation = client.get("/api/evaluation/trade-simulation/session")
+        invalid_research_range = client.get(
+            "/api/research/export",
+            params={"session_id": "session", "start_ms": 2, "end_ms": 1},
+        )
+        invalid_overlap_filter = client.get(
+            "/api/evaluation/pattern-overlaps/session",
+            params={"level_tolerance_pct": -1},
+        )
+        missing = client.get("/api/recordings/missing/integrity")
+
+    assert response.status_code == 200
+    assert response.json()["symbols"]["TOPS"]["raw_event_count"] == 1
+    assert outcomes.status_code == 200
+    assert outcomes.json()["outcomes"] == []
+    assert overlaps.status_code == 200
+    assert overlaps.json()["overlaps"] == []
+    assert research.status_code == 200
+    assert research.json()["future_data_policy"]["outcomes_included"] is False
+    assert "outcome_measurements" not in research.json()["sessions"][0]
+    assert invalid_research_range.status_code == 400
+    assert parity.status_code == 200
+    assert parity.json()["symbols"][0]["status"] == "live_journal_unavailable"
+    assert simulation.status_code == 200
+    assert simulation.json()["summary"]["simulated_trade_count"] == 0
+    assert invalid_overlap_filter.status_code == 422
+    assert missing.status_code == 404
+    assert not (session / "integrity_report.json").exists()
+
+
+def test_corpus_classification_api_defaults_reserves_and_protects_holdout(tmp_path):
+    import json
+    from momentum_companion.replay.engine import ReplayEngine
+
+    recordings = tmp_path / "recordings"
+    session = recordings / "future-session"
+    session.mkdir(parents=True)
+    (session / "manifest.json").write_text(
+        json.dumps({"kind": "market_day_recording", "symbols": ["TOPS"]})
+    )
+    runtime = FakeRuntime()
+    replay = ReplayEngine(recordings_root=recordings)
+
+    with TestClient(create_app(runtime, replay_engine=replay)) as client:
+        initial = client.get("/api/corpus/classifications/future-session")
+        reserved = client.put(
+            "/api/corpus/classifications/future-session",
+            json={"classification": "holdout", "note": "Reserved before review"},
+        )
+        rejected = client.put(
+            "/api/corpus/classifications/future-session",
+            json={"classification": "development"},
+        )
+        relabeled = client.put(
+            "/api/corpus/classifications/future-session",
+            json={
+                "classification": "development",
+                "note": "Holdout cycle ended",
+                "confirm_holdout_relabel": True,
+            },
+        )
+        recordings_response = client.get("/api/review/recordings")
+        unknown = client.put(
+            "/api/corpus/classifications/missing",
+            json={"classification": "holdout"},
+        )
+
+    assert initial.json()["classification"] == "unclassified"
+    assert reserved.json()["classification"] == "holdout"
+    assert reserved.json()["classified_at_utc"] is not None
+    assert rejected.status_code == 400
+    assert relabeled.json()["history"][-1]["holdout_relabel_confirmed"] is True
+    assert recordings_response.json()[0]["corpus"]["classification"] == "development"
+    assert unknown.status_code == 404
+    persisted = json.loads((tmp_path / "corpus_classifications.json").read_text())
+    assert persisted["sessions"]["future-session"]["classification"] == "development"
+
+
+def test_historical_l1_review_endpoint_is_stateless_and_carries_quote(tmp_path):
+    from momentum_companion.replay.engine import ReplayEngine
+
+    session = tmp_path / "2026-09-23_070000_session"
+    session.mkdir(parents=True)
+    (session / "manifest.json").write_text(__import__("json").dumps({
+        "kind": "market_day_recording",
+        "symbols": ["TOPS"],
+        "services": ["LEVELONE_EQUITIES"],
+        "counts": {"TOPS": {"LEVELONE_EQUITIES": 3}},
+    }))
+    rows = [
+        {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"TOPS","stream_ts_ms":1000,
+         "raw":{"key":"TOPS","1":1.0,"2":1.02,"3":1.01,"4":1000,"5":900,"8":100}},
+        {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"TOPS","stream_ts_ms":2000,
+         "raw":{"key":"TOPS","3":1.015,"8":120}},
+        {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"TOPS","stream_ts_ms":3000,
+         "raw":{"key":"TOPS","1":1.01,"2":1.03,"3":1.02,"4":1500,"5":600,"8":150}},
+    ]
+    with (session / "TOPS.jsonl").open("w") as handle:
+        for row in rows:
+            handle.write(__import__("json").dumps(row) + "\n")
+
+    runtime = FakeRuntime()
+    shared = ReplayEngine(recordings_root=tmp_path)
+
+    with TestClient(create_app(runtime, replay_engine=shared)) as client:
+        response = client.post(
+            "/api/review/l1-window",
+            json={
+                "session_id": session.name,
+                "symbol": "TOPS",
+                "start_ms": 2000,
+                "end_ms": 3000,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["window"]["future_data_included"] is False
+    assert payload["frames"][0]["timestamp_ms"] == 2000
+    assert payload["frames"][0]["bid"] == 1.0
+    assert payload["frames"][0]["ask"] == 1.02
+    assert payload["frames"][1]["bid"] == 1.01
+    assert shared.snapshot()["replay"]["status"] == "EMPTY"

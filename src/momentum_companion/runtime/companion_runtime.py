@@ -27,6 +27,9 @@ from momentum_companion.recording.history import (
     merge_candles_prefer_primary,
 )
 from momentum_companion.recording.market_day import MarketDayRecorder, reached_cutoff, seconds_until_cutoff
+from momentum_companion.recording.provenance import build_recording_provenance
+from momentum_companion.recording.rvol_enrollment import EnrollmentRvolEvidenceCollector
+from momentum_companion.recording.trigger_context import build_trigger_context
 from momentum_companion.session import CompanionSession
 from momentum_companion.setup_engine.pattern_service import PatternEvaluationService
 from momentum_companion.utils.logging import logging
@@ -64,7 +67,15 @@ class CompanionRuntime:
             base_url="https://api.schwabapi.com/trader/v1",
             auth_token_provider=self.token_provider,
         )
-        self.ae_engine = ae_engine or AEEngine(self.rest, self.db_path)
+        self._market_state_lock = threading.RLock()
+        self._shared_market_state: tuple[bool, bool | None] = (False, None)
+        self._market_state_stop = threading.Event()
+        self._market_state_thread: threading.Thread | None = None
+        self.ae_engine = ae_engine or AEEngine(
+            self.rest,
+            self.db_path,
+            market_state_provider=self._get_shared_market_state,
+        )
         self._ae_engines: dict[str, AEEngine] = {}
         self._aggregators: dict[str, BarAggregator10s] = {}
         self._analysis_symbols: set[str] = set()
@@ -101,6 +112,11 @@ class CompanionRuntime:
         self._backfill_stop = threading.Event()
         self._backfill_thread: threading.Thread | None = None
         self._backfill_manager = HistoricalBackfillManager(self.rest)
+        rvol_root = str(os.environ.get("TOS_RVOL_EVIDENCE_DIR") or "").strip()
+        self._rvol_evidence_collector = (
+            EnrollmentRvolEvidenceCollector(self.rest, Path(rvol_root))
+            if rvol_root else None
+        )
 
     @property
     def active_symbol(self) -> str | None:
@@ -120,6 +136,8 @@ class CompanionRuntime:
         self._start_stream_watchdog()
         self._backfill_stop.clear()
         self._start_history_backfill_scheduler()
+        self._market_state_stop.clear()
+        self._start_market_state_refresher()
         self.session.update_connection_state("READY")
 
     def stop(self) -> None:
@@ -129,6 +147,7 @@ class CompanionRuntime:
             self._started = False
         self._stream_watchdog_stop.set()
         self._backfill_stop.set()
+        self._market_state_stop.set()
         self.stop_recording(reason="runtime_stopped")
         if stream is not None:
             try:
@@ -136,6 +155,37 @@ class CompanionRuntime:
             except Exception:
                 logger.warning("Failed to disconnect Schwab stream", exc_info=True)
         self.session.update_connection_state("DISCONNECTED")
+
+    def _get_shared_market_state(self) -> tuple[bool, bool | None]:
+        lock = getattr(self, "_market_state_lock", None)
+        if lock is None:
+            return getattr(self, "_shared_market_state", (False, None))
+        with lock:
+            return getattr(self, "_shared_market_state", (False, None))
+
+    def _start_market_state_refresher(self) -> None:
+        if self._market_state_thread and self._market_state_thread.is_alive():
+            return
+
+        def worker() -> None:
+            probe = AEEngine(self.rest, None)
+            while not self._market_state_stop.is_set():
+                try:
+                    value = probe._market_state()
+                    with self._market_state_lock:
+                        self._shared_market_state = value
+                except Exception:
+                    logger.warning("Market-state refresh failed", exc_info=True)
+                if self._market_state_stop.wait(30.0):
+                    return
+
+        thread = threading.Thread(
+            target=worker,
+            daemon=True,
+            name="tos-market-state-refresh",
+        )
+        self._market_state_thread = thread
+        thread.start()
 
     def _start_stream_watchdog(self) -> None:
         if self._stream_watchdog_thread and self._stream_watchdog_thread.is_alive():
@@ -270,9 +320,13 @@ class CompanionRuntime:
             engine = self._ae_engines.get(symbol)
             if engine is None:
                 if not self._ae_engines:
-                    engine = self.ae_engine
-                else:
-                    engine = AEEngine(self.rest, self.db_path)
+                    engine = getattr(self, "ae_engine", None)
+                if engine is None:
+                    engine = AEEngine(
+                        getattr(self, "rest", None),
+                        getattr(self, "db_path", None),
+                        market_state_provider=self._get_shared_market_state,
+                    )
                 self._ae_engines[symbol] = engine
             if symbol == self._active_symbol:
                 # Backward-compatible alias for code that still inspects the
@@ -422,6 +476,12 @@ class CompanionRuntime:
             return
         self.session.ingest_quote(event)
 
+        # A Schwab security-status halt is not the same thing as a quiet market.
+        # Keep the quote/context visible, but do not turn halted snapshots into
+        # synthetic price/bar evidence for indicators or pattern detection.
+        if str(event.get("security_status") or "").strip().lower() == "halted":
+            return
+
         ts_ms = event.get("ts_ms")
         last = event.get("last")
         if ts_ms is None or last is None:
@@ -451,11 +511,26 @@ class CompanionRuntime:
         completed = aggregator.ingest_price(update)
         engine.record_quote_ts(int(ts_ms))
         if completed is not None:
-            self._handle_completed_bar(symbol, completed)
+            self._handle_completed_bar(
+                symbol,
+                completed,
+                observation_ts_ms=int(ts_ms),
+            )
 
-    def _handle_completed_bar(self, symbol: str, bar: TenSecondBar) -> None:
+    def _handle_completed_bar(
+        self,
+        symbol: str,
+        bar: TenSecondBar,
+        *,
+        observation_ts_ms: int | None = None,
+    ) -> None:
+        observed_at_ms = max(
+            int(observation_ts_ms) if observation_ts_ms is not None else 0,
+            (int(bar.ts) + 10) * 1000,
+        )
         self.session.ingest_bar(symbol, bar)
 
+        patterns = None
         try:
             patterns = self.pattern_service.ingest_completed_bar(symbol, bar)
             self.session.update_pattern_observations(symbol, patterns)
@@ -475,6 +550,35 @@ class CompanionRuntime:
                 self.session.update_ae_snapshot(symbol, snapshot)
         except Exception:
             logger.warning("AE live ingest failed for %s", symbol, exc_info=True)
+
+        if patterns is not None:
+            try:
+                with self._lock:
+                    recorder = self._recorder
+                if recorder is not None:
+                    symbol_state = (
+                        self.session.snapshot().get("symbols", {}).get(symbol) or {}
+                    )
+                    context = build_trigger_context(
+                        symbol_state=symbol_state,
+                        bar={
+                            "ts": bar.ts,
+                            "open": bar.open,
+                            "high": bar.high,
+                            "low": bar.low,
+                            "close": bar.close,
+                            "volume": bar.volume,
+                        },
+                        observation_ts_ms=observed_at_ms,
+                    )
+                    recorder.record_pattern_observations(
+                        symbol,
+                        patterns,
+                        observation_ts_ms=observed_at_ms,
+                        trigger_context=context,
+                    )
+            except Exception:
+                logger.warning("Pattern journal failed for %s", symbol, exc_info=True)
 
     def _on_stream_state(self, state: str) -> None:
         self.session.update_connection_state(state)
@@ -509,12 +613,19 @@ class CompanionRuntime:
         with self._lock:
             if self._recorder is not None:
                 raise RuntimeError("a recording session is already active")
-            recorder = MarketDayRecorder(normalized)
+            recorder = MarketDayRecorder(
+                normalized,
+                provenance=build_recording_provenance(
+                    engine=self.pattern_service.engine,
+                ),
+            )
             self._recorder = recorder
             self._recording_symbols = set(recorder.symbols)
 
         self._ensure_stream()
         self._refresh_stream_subscription()
+        for symbol in normalized:
+            self._collect_rvol_enrollment_evidence(symbol)
         self.session.update_recorder_state(recorder.state())
 
         def cutoff_worker() -> None:
@@ -555,6 +666,7 @@ class CompanionRuntime:
             self._recording_symbols = set(recorder.active_symbols())
         self._ensure_stream()
         self._refresh_stream_subscription()
+        self._collect_rvol_enrollment_evidence(normalized)
         if pre7_vwap is not None or pre7_volume is not None:
             return self.apply_recording_pre7_seed(
                 normalized,
@@ -564,6 +676,25 @@ class CompanionRuntime:
         state = recorder.state()
         self.session.update_recorder_state(state)
         return state
+
+    def _collect_rvol_enrollment_evidence(self, symbol: str) -> None:
+        collector = getattr(self, "_rvol_evidence_collector", None)
+        if collector is None:
+            return
+
+        def worker() -> None:
+            try:
+                collector.enroll(symbol)
+            except Exception:
+                logger.warning(
+                    "Research RVOL enrollment evidence failed for %s", symbol,
+                    exc_info=True,
+                )
+
+        threading.Thread(
+            target=worker, daemon=True,
+            name=f"tos-rvol-evidence-{symbol.lower()}",
+        ).start()
 
     def apply_recording_pre7_seed(
         self,

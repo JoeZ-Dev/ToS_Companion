@@ -1,13 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_DIR="${REPO_DIR:-/srv/apps/ToS_Companion}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_REPO_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+
+REPO_DIR="${REPO_DIR:-$DEFAULT_REPO_DIR}"
 COMPOSE_FILE="${COMPOSE_FILE:-deploy/docker-compose.joelab.yml}"
 ENV_FILE="${ENV_FILE:-deploy/joelab.env}"
 STATE_DIR="${STATE_DIR:-/srv/data/tos-companion/state}"
 CODEX_BRIDGE_DIR="${CODEX_BRIDGE_DIR:-/srv/data/tos-companion/codex-bridge}"
 
 cd "$REPO_DIR"
+
+TOS_COMPANION_GIT_REVISION="$(git rev-parse --verify HEAD)"
+if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+  TOS_COMPANION_GIT_WORKTREE_DIRTY=true
+else
+  TOS_COMPANION_GIT_WORKTREE_DIRTY=false
+fi
+export TOS_COMPANION_GIT_REVISION TOS_COMPANION_GIT_WORKTREE_DIRTY
 
 if [[ ! -f "$COMPOSE_FILE" ]]; then
   echo "ERROR: missing $REPO_DIR/$COMPOSE_FILE" >&2
@@ -40,7 +51,7 @@ sudo install -d -o "$(id -u)" -g 10001 -m 2770 "$CODEX_BRIDGE_DIR"
 echo "Validating compose configuration..."
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config >/dev/null
 
-echo "Building and starting ToS_Companion..."
+echo "Building and starting ToS_Companion revision $TOS_COMPANION_GIT_REVISION (dirty=$TOS_COMPANION_GIT_WORKTREE_DIRTY)..."
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --build
 
 echo "Waiting for container health..."
@@ -65,6 +76,19 @@ if [[ "$status" != "healthy" ]]; then
   docker logs --tail 200 tos-companion >&2 || true
   exit 6
 fi
+
+echo "Verifying deployment provenance..."
+container_revision="$(docker exec tos-companion printenv TOS_COMPANION_GIT_REVISION 2>/dev/null || true)"
+container_dirty="$(docker exec tos-companion printenv TOS_COMPANION_GIT_WORKTREE_DIRTY 2>/dev/null || true)"
+if [[ "$container_revision" != "$TOS_COMPANION_GIT_REVISION" ]]; then
+  echo "ERROR: container git revision provenance mismatch: got '$container_revision', expected '$TOS_COMPANION_GIT_REVISION'." >&2
+  exit 7
+fi
+if [[ "$container_dirty" != "$TOS_COMPANION_GIT_WORKTREE_DIRTY" ]]; then
+  echo "ERROR: container dirty-state provenance mismatch: got '$container_dirty', expected '$TOS_COMPANION_GIT_WORKTREE_DIRTY'." >&2
+  exit 8
+fi
+echo "Deployment provenance verified: revision=$container_revision dirty=$container_dirty"
 
 echo "Verifying persistent mounts..."
 mounts_json="$(docker inspect tos-companion --format '{{json .Mounts}}')"

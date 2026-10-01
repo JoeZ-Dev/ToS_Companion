@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from momentum_companion.recording.backfill import load_backfill_candles
+from momentum_companion.recording.provenance import normalize_manifest_provenance
 
 
 class RecordingCatalog:
@@ -37,6 +38,7 @@ class RecordingCatalog:
                     "counts": manifest.get("counts") or {},
                     "stop_reason": manifest.get("stop_reason"),
                     "historical_backfill": manifest.get("historical_backfill") or {},
+                    "provenance": normalize_manifest_provenance(manifest),
                 }
             )
         return sessions
@@ -52,6 +54,7 @@ class RecordingCatalog:
             raise ValueError(f"invalid replay manifest: {session_id}") from exc
         if manifest.get("kind") != "market_day_recording":
             raise ValueError(f"invalid replay session: {session_id}")
+        manifest["provenance"] = normalize_manifest_provenance(manifest)
         return manifest
 
     def load_events(self, session_id: str, symbol: str) -> list[dict[str, Any]]:
@@ -79,13 +82,20 @@ class RecordingCatalog:
                         record = json.loads(line)
                     except json.JSONDecodeError:
                         continue
-                    if record.get("kind") != "market_event":
-                        continue
+                    kind = record.get("kind")
                     if str(record.get("symbol") or "").strip().upper() != normalized:
                         continue
-                    if record.get("service") != "LEVELONE_EQUITIES":
+                    if record.get("stream_ts_ms") is None:
                         continue
-                    if record.get("stream_ts_ms") is None or not isinstance(record.get("raw"), dict):
+                    if kind == "market_event":
+                        if record.get("service") != "LEVELONE_EQUITIES":
+                            continue
+                        if not isinstance(record.get("raw"), dict):
+                            continue
+                    elif kind == "historical_candle":
+                        if not isinstance(record.get("candle"), dict):
+                            continue
+                    else:
                         continue
                     events.append((index, record))
         except FileNotFoundError as exc:
@@ -117,6 +127,93 @@ class RecordingCatalog:
             session_dir,
             normalized,
             through_ms=through_ms,
+        )
+
+    def load_pattern_events(
+        self, session_id: str, *, symbol: str | None = None
+    ) -> list[dict[str, Any]]:
+        session_dir = self._session_dir(session_id)
+        self.load_manifest(session_id)
+        normalized = str(symbol or "").strip().upper() or None
+        path = session_dir / "pattern_events.jsonl"
+        events: list[dict[str, Any]] = []
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if event.get("kind") != "pattern_event":
+                        continue
+                    event_symbol = str(event.get("symbol") or "").strip().upper()
+                    if normalized is not None and event_symbol != normalized:
+                        continue
+                    events.append(event)
+        except FileNotFoundError:
+            return []
+        return sorted(
+            events,
+            key=lambda event: (
+                int(event.get("observation_ts_ms") or 0),
+                str(event.get("event_id") or ""),
+            ),
+        )
+
+    def load_security_status_events(
+        self, session_id: str, *, symbol: str | None = None
+    ) -> list[dict[str, Any]]:
+        return self._load_derived_events(
+            session_id,
+            filename="security_status_events.jsonl",
+            kind="security_status_event",
+            timestamp_field="provider_ts_ms",
+            symbol=symbol,
+        )
+
+    def integrity_report(self, session_id: str) -> dict[str, Any]:
+        from momentum_companion.recording.integrity import build_integrity_report
+
+        return build_integrity_report(self._session_dir(session_id))
+
+    def _load_derived_events(
+        self,
+        session_id: str,
+        *,
+        filename: str,
+        kind: str,
+        timestamp_field: str,
+        symbol: str | None,
+    ) -> list[dict[str, Any]]:
+        session_dir = self._session_dir(session_id)
+        self.load_manifest(session_id)
+        normalized = str(symbol or "").strip().upper() or None
+        events: list[dict[str, Any]] = []
+        try:
+            with (session_dir / filename).open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if event.get("kind") != kind:
+                        continue
+                    event_symbol = str(event.get("symbol") or "").strip().upper()
+                    if normalized is not None and event_symbol != normalized:
+                        continue
+                    events.append(event)
+        except FileNotFoundError:
+            return []
+        return sorted(
+            events,
+            key=lambda event: (
+                int(event.get(timestamp_field) or 0),
+                str(event.get("event_id") or ""),
+            ),
         )
 
     def _session_dir(self, session_id: str) -> Path:

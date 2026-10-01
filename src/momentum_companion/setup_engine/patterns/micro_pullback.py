@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
+from momentum_companion.setup_engine.confirmation import (
+    AdaptiveConfirmationPolicy,
+    measure_confirmation,
+)
 from momentum_companion.setup_engine.pattern_contracts import (
     PatternLine,
     PatternObservation,
@@ -10,9 +14,10 @@ from momentum_companion.setup_engine.pattern_contracts import (
     PatternState,
 )
 from momentum_companion.setup_engine.structure import (
+    first_confirmed_retracement,
     measure_retracement,
     normalize_bars,
-    strongest_bullish_impulse,
+    latest_bullish_impulse,
 )
 
 
@@ -27,6 +32,11 @@ class MicroPullbackConfig:
     min_retracement_pct: float = 0.08
     max_retracement_pct: float = 0.50
     continuation_buffer_pct: float = 0.001
+    confirmation_policy: AdaptiveConfirmationPolicy = AdaptiveConfirmationPolicy(
+        min_seconds=5.0,
+        max_seconds=20.0,
+        formation_fraction=0.10,
+    )
 
 
 @dataclass(frozen=True)
@@ -49,10 +59,11 @@ def detect_micro_pullback(symbol: str, bars, config: MicroPullbackConfig | None 
     if len(window) < cfg.min_bars:
         return None
 
-    impulse = strongest_bullish_impulse(window, min_move_pct=cfg.min_impulse_pct, reserve_tail_bars=1)
+    impulse = latest_bullish_impulse(window, min_move_pct=cfg.min_impulse_pct, reserve_tail_bars=1)
     if impulse is None:
         return None
-    retracement = measure_retracement(window, impulse)
+    confirmed_retracement = first_confirmed_retracement(window, impulse)
+    retracement = confirmed_retracement or measure_retracement(window, impulse)
     if retracement is None:
         return None
     if retracement.duration_sec <= 0 or retracement.duration_sec > cfg.max_duration_sec:
@@ -63,10 +74,55 @@ def detect_micro_pullback(symbol: str, bars, config: MicroPullbackConfig | None 
     pullback_bars = window[impulse.end_index + 1 :]
     last = pullback_bars[-1]
     prior = pullback_bars[-2] if len(pullback_bars) > 1 else window[impulse.end_index]
-    continuation_level = impulse.end_price * (1 + cfg.continuation_buffer_pct)
+
+    # Continuation is not "price is back above the old impulse high". A valid
+    # micro-pullback must first print a confirmed pullback trough, then at least
+    # one completed recovery bar, then break the recovery pivot formed after
+    # that trough. Before the trough is confirmed, the structure may still be
+    # emitted as a provisional PULLBACK/TURNING observation, but it cannot
+    # become CONTINUATION.
+    if confirmed_retracement is not None:
+        recovery_before_last = window[retracement.low_index + 1 : -1]
+        recovery_pivot = (
+            max(recovery_before_last, key=lambda bar: bar.high)
+            if recovery_before_last
+            else None
+        )
+        continuation_level = (
+            recovery_pivot.high * (1 + cfg.continuation_buffer_pct)
+            if recovery_pivot is not None
+            else None
+        )
+
+        # Because detectors are intentionally stateless, reconstruct whether
+        # this same confirmed impulse/pullback already completed on an earlier
+        # bar. Once a prior bar broke the recovery pivot available at that time,
+        # the instance is finished and must not later reappear.
+        for candidate_index in range(retracement.low_index + 2, len(window) - 1):
+            prior_recovery = window[retracement.low_index + 1 : candidate_index]
+            if not prior_recovery:
+                continue
+            prior_pivot = max(bar.high for bar in prior_recovery)
+            prior_level = prior_pivot * (1 + cfg.continuation_buffer_pct)
+            if window[candidate_index].close >= prior_level:
+                return None
+    else:
+        recovery_pivot = None
+        continuation_level = None
+
+    confirmation = measure_confirmation(
+        window[retracement.low_index + 1 :],
+        qualifies=(
+            (lambda bar: continuation_level is not None and bar.close >= continuation_level)
+        ),
+        formation_started_at=retracement.low_time,
+        policy=cfg.confirmation_policy,
+    )
     state = (
-        PatternState.CONTINUATION if last.close >= continuation_level
-        else PatternState.TURNING if last.close > prior.close and last.close > retracement.low_price
+        PatternState.CONTINUATION
+        if continuation_level is not None and last.close >= continuation_level
+        else PatternState.TURNING
+        if last.close > prior.close and last.close > retracement.low_price
         else PatternState.PULLBACK
     )
 
@@ -94,6 +150,17 @@ def detect_micro_pullback(symbol: str, bars, config: MicroPullbackConfig | None 
             "duration_sec": retracement.duration_sec,
             "retracement_pct": retracement.depth_pct,
             "continuation_level": continuation_level,
+            "recovery_pivot": recovery_pivot.high if recovery_pivot is not None else None,
+            "recovery_pivot_time": recovery_pivot.time if recovery_pivot is not None else None,
+            "continuation_confirmation": confirmation.to_dict(),
+            "continuation_basis": "post_pullback_recovery_pivot",
+            "impulse_selection": "latest_qualifying",
+            "retracement_selection": (
+                "first_confirmed_trough"
+                if confirmed_retracement is not None
+                else "provisional_current_low"
+            ),
+            "lifecycle": "single_continuation",
         },
         points=points,
         lines=lines,

@@ -6,7 +6,7 @@ from statistics import median
 import threading
 from typing import Any
 
-from momentum_companion.analysis.ae import AEEngine
+from momentum_companion.analysis.ae import AEEngine, OneMinuteBar
 from momentum_companion.clients.stream_mapping import LevelOneCache
 from momentum_companion.data.bar_aggregator import BarAggregator10s, TenSecondBar
 from momentum_companion.data.price_update import PriceUpdate
@@ -22,8 +22,16 @@ class ReplayEngine:
     It never subscribes to Schwab and never mutates the live CompanionRuntime.
     """
 
-    def __init__(self, *, recordings_root: Path) -> None:
+    def __init__(
+        self,
+        *,
+        recordings_root: Path,
+        max_bars_per_symbol: int = 600,
+        evaluate_patterns: bool = True,
+    ) -> None:
         self.catalog = RecordingCatalog(recordings_root)
+        self._max_bars_per_symbol = int(max_bars_per_symbol)
+        self._evaluate_patterns = bool(evaluate_patterns)
         self._lock = threading.RLock()
         self._events: list[dict[str, Any]] = []
         self._session_id: str | None = None
@@ -37,7 +45,9 @@ class ReplayEngine:
         self._reset_analysis()
 
     def _reset_analysis(self) -> None:
-        self.session = CompanionSession()
+        self.session = CompanionSession(
+            max_bars_per_symbol=self._max_bars_per_symbol
+        )
         self._cache = LevelOneCache()
         self._aggregator = BarAggregator10s()
         self._receive_offsets_ms: list[int] = []
@@ -45,7 +55,9 @@ class ReplayEngine:
         self._last_event_ts_ms: int | None = None
         self._significant_gap_count = 0
         self._largest_gap_ms = 0
+        self._repaired_candle_count = 0
         self.pattern_service = PatternEvaluationService()
+        self.pattern_timeline: list[dict[str, Any]] = []
         self.ae_engine = AEEngine(
             None,
             None,
@@ -240,6 +252,9 @@ class ReplayEngine:
         if self._symbol is None:
             return
         self._current_ts_ms = int(record["stream_ts_ms"])
+        if record.get("kind") == "historical_candle":
+            self._ingest_repaired_candle(record)
+            return
         if self._last_event_ts_ms is not None:
             gap_ms = self._current_ts_ms - self._last_event_ts_ms
             if gap_ms > 60_000:
@@ -262,6 +277,8 @@ class ReplayEngine:
         }
         for quote in self._cache.process_messages(message):
             self.session.ingest_quote(quote)
+            if str(quote.get("security_status") or "").strip().lower() == "halted":
+                continue
             last = quote.get("last")
             if last is None:
                 continue
@@ -276,11 +293,65 @@ class ReplayEngine:
             if completed is not None:
                 self._handle_completed_bar(completed)
 
+    def _ingest_repaired_candle(self, record: dict[str, Any]) -> None:
+        assert self._symbol is not None
+        completed = self._aggregator.close_out()
+        if completed is not None:
+            self._handle_completed_bar(completed)
+        candle = record.get("candle") or {}
+        required = ("open", "high", "low", "close")
+        if any(candle.get(key) is None for key in required):
+            return
+        ts = int(record["stream_ts_ms"] // 1000)
+        bar = OneMinuteBar(
+            ts=ts,
+            open=float(candle["open"]),
+            high=float(candle["high"]),
+            low=float(candle["low"]),
+            close=float(candle["close"]),
+            volume=float(candle.get("volume") or 0),
+            is_extended=False,
+        )
+        self.session.ingest_bar(
+            self._symbol,
+            {
+                "ts": bar.ts,
+                "open": bar.open,
+                "high": bar.high,
+                "low": bar.low,
+                "close": bar.close,
+                "volume": bar.volume,
+                "is_extended": bar.is_extended,
+                "source": "SCHWAB_PRICEHISTORY_1M_GAP_REPAIR",
+                "interval_seconds": 60,
+            },
+        )
+        snapshot = self.ae_engine.ingest_external_minute_bar(bar)
+        self.session.set_vwap_points(self._symbol, self.ae_engine.vwap_points)
+        if snapshot is not None:
+            self.session.update_ae_snapshot(self._symbol, snapshot)
+        self._repaired_candle_count += 1
+        self._last_event_ts_ms = self._current_ts_ms
+
     def _handle_completed_bar(self, bar: TenSecondBar) -> None:
         assert self._symbol is not None
         self.session.ingest_bar(self._symbol, bar)
-        patterns = self.pattern_service.ingest_completed_bar(self._symbol, bar)
-        self.session.update_pattern_observations(self._symbol, patterns)
+        patterns = []
+        if self._evaluate_patterns:
+            patterns = self.pattern_service.ingest_completed_bar(self._symbol, bar)
+            for pattern in patterns:
+                self.pattern_timeline.append(
+                    {
+                        "bar_ts": int(bar.ts),
+                        "observation_ts_ms": max(
+                            int(self._current_ts_ms),
+                            (int(bar.ts) + 10) * 1000,
+                        ),
+                        "symbol": self._symbol,
+                        "pattern": dict(pattern),
+                    }
+                )
+            self.session.update_pattern_observations(self._symbol, patterns)
         snapshot = self.ae_engine.ingest_10s_bar(bar)
         self.session.set_vwap_points(self._symbol, self.ae_engine.vwap_points)
         if snapshot is not None:
@@ -328,5 +399,10 @@ class ReplayEngine:
             "volume": {
                 "capped_total": self._aggregator.capped_volume_total,
                 "discarded_total": self._aggregator.discarded_volume_total,
+            },
+            "gap_repair": {
+                "repaired_candles_consumed": self._repaired_candle_count,
+                "source": "SCHWAB_PRICEHISTORY_1M_GAP_REPAIR" if self._repaired_candle_count else None,
+                "granularity": "1m" if self._repaired_candle_count else None,
             },
         }

@@ -1,17 +1,38 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from datetime import datetime, time as dt_time, timezone
 from pathlib import Path
-from typing import Iterable, TextIO
+from typing import Any, Iterable, Mapping, TextIO
 from zoneinfo import ZoneInfo
+
+from momentum_companion.recording.integrity import (
+    INTEGRITY_REPORT_FILENAME,
+    INTEGRITY_REPORT_SCHEMA_VERSION,
+    write_integrity_report,
+)
+from momentum_companion.recording.pattern_journal import (
+    PATTERN_JOURNAL_FILENAME,
+    PatternEventJournal,
+)
+from momentum_companion.recording.provenance import (
+    MANIFEST_SCHEMA_VERSION,
+    MARKET_EVENT_SCHEMA_VERSION,
+    build_recording_provenance,
+)
+from momentum_companion.recording.status_journal import (
+    STATUS_JOURNAL_FILENAME,
+    SecurityStatusJournal,
+)
 
 ET = ZoneInfo("America/New_York")
 UTC = timezone.utc
 CUTOFF_ET = dt_time(hour=15, minute=0)
 RECORDED_SERVICES = frozenset({"TIMESALE_EQUITY", "LEVELONE_EQUITIES"})
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = MARKET_EVENT_SCHEMA_VERSION
+logger = logging.getLogger(__name__)
 
 
 def normalize_symbols(symbols: Iterable[str]) -> list[str]:
@@ -99,6 +120,7 @@ class MarketDayRecorder:
         output_root: Path | None = None,
         started_at: datetime | None = None,
         services: Iterable[str] | None = None,
+        provenance: Mapping[str, Any] | None = None,
     ) -> None:
         self.symbols = normalize_symbols(symbols)
         self._symbol_set = set(self.symbols)
@@ -110,11 +132,21 @@ class MarketDayRecorder:
         if not selected_services:
             raise ValueError("At least one recording service is required")
         self.services = frozenset(selected_services)
+        self.provenance = dict(provenance or build_recording_provenance())
         self.started_at = (started_at or datetime.now(ET)).astimezone(ET)
         root = output_root or (Path.home() / ".tos_companion" / "recordings")
         stamp = self.started_at.strftime("%Y-%m-%d_%H%M%S")
         self.session_dir = root / f"{stamp}_session"
         self.session_dir.mkdir(parents=True, exist_ok=False)
+        self._pattern_journal = PatternEventJournal(
+            self.session_dir,
+            provenance=self.provenance,
+            source_mode="live",
+        )
+        self._status_journal = SecurityStatusJournal(
+            self.session_dir,
+            source_mode="live",
+        )
         self._files: dict[str, TextIO] = {}
         self._counts: dict[str, dict[str, int]] = {
             sym: {service: 0 for service in sorted(self.services)} for sym in self.symbols
@@ -168,6 +200,14 @@ class MarketDayRecorder:
                     handle.write(json.dumps(record, separators=(",", ":")) + "\n")
                     handle.flush()
                     self._counts[symbol][service] += 1
+            try:
+                self._status_journal.append_payload(
+                    payload,
+                    active_symbols=self._active_symbols,
+                    observed_at_utc=received,
+                )
+            except Exception:
+                logger.warning("Security-status journal write failed", exc_info=True)
 
     def add_symbol(self, symbol: str, *, changed_at: datetime | None = None) -> bool:
         normalized = str(symbol or "").strip().upper()
@@ -243,6 +283,31 @@ class MarketDayRecorder:
         with self._lock:
             return [symbol for symbol in self.symbols if symbol in self._active_symbols]
 
+    def record_pattern_observations(
+        self,
+        symbol: str,
+        observations: Iterable[Mapping[str, Any]],
+        *,
+        observation_ts_ms: int,
+        trigger_context: Mapping[str, Any] | None = None,
+    ) -> int:
+        normalized = str(symbol or "").strip().upper()
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("Recorder is closed")
+            if normalized not in self._active_symbols:
+                return 0
+            selected = [
+                observation
+                for observation in observations
+                if str(observation.get("symbol") or "").strip().upper() == normalized
+            ]
+            return self._pattern_journal.append_observations(
+                selected,
+                observation_ts_ms=observation_ts_ms,
+                trigger_context=trigger_context,
+            )
+
     def state(self) -> dict:
         with self._lock:
             return {
@@ -254,6 +319,8 @@ class MarketDayRecorder:
                 "counts": {
                     symbol: dict(counts) for symbol, counts in self._counts.items()
                 },
+                "pattern_event_count": self._pattern_journal.count,
+                "security_status_event_count": self._status_journal.count,
                 "pre7_seeds": {
                     symbol: dict(seed) for symbol, seed in self._pre7_seeds.items()
                 },
@@ -283,16 +350,39 @@ class MarketDayRecorder:
                 handle.flush()
                 handle.close()
             self._files.clear()
+            self._pattern_journal.close()
+            self._status_journal.close()
             self._closed = True
             self._write_manifest(
                 ended_at=ended_iso,
                 stop_reason=stop_reason,
             )
+            try:
+                write_integrity_report(self.session_dir)
+            except Exception:
+                logger.warning("Recording integrity report write failed", exc_info=True)
+            try:
+                from momentum_companion.evaluation.pattern_outcomes import (
+                    write_pattern_outcomes,
+                )
+
+                write_pattern_outcomes(self.session_dir.parent, self.session_dir.name)
+            except Exception:
+                logger.warning("Pattern outcome measurement failed", exc_info=True)
+            try:
+                from momentum_companion.evaluation.pattern_overlaps import (
+                    write_pattern_overlaps,
+                )
+
+                write_pattern_overlaps(self.session_dir.parent, self.session_dir.name)
+            except Exception:
+                logger.warning("Pattern overlap analysis failed", exc_info=True)
 
     def _write_manifest(self, *, ended_at: str | None, stop_reason: str | None) -> None:
         payload = {
-            "schema_version": SCHEMA_VERSION,
+            "schema_version": MANIFEST_SCHEMA_VERSION,
             "kind": "market_day_recording",
+            "provenance": self.provenance,
             "symbols": self.symbols,
             "active_symbols": self.active_symbols(),
             "symbol_lifecycle": self._symbol_lifecycle,
@@ -303,6 +393,34 @@ class MarketDayRecorder:
             "stop_reason": stop_reason,
             "counts": self._counts,
             "pre7_seeds": self._pre7_seeds,
+            "derived_artifacts": {
+                "pattern_events": {
+                    "path": PATTERN_JOURNAL_FILENAME,
+                    "schema_version": self.provenance.get("schemas", {}).get(
+                        "derived_journal"
+                    ),
+                    "event_count": self._pattern_journal.count,
+                },
+                "security_status_events": {
+                    "path": STATUS_JOURNAL_FILENAME,
+                    "schema_version": self.provenance.get("schemas", {}).get(
+                        "derived_journal"
+                    ),
+                    "event_count": self._status_journal.count,
+                },
+                "integrity_report": {
+                    "path": INTEGRITY_REPORT_FILENAME,
+                    "schema_version": INTEGRITY_REPORT_SCHEMA_VERSION,
+                },
+                "pattern_outcomes": {
+                    "path": "pattern_outcomes.json",
+                    "schema_version": 1,
+                },
+                "pattern_overlaps": {
+                    "path": "pattern_overlaps.json",
+                    "schema_version": 1,
+                },
+            },
         }
         (self.session_dir / "manifest.json").write_text(
             json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"

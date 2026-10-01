@@ -182,3 +182,35 @@ def test_manual_pre7_seed_is_included_before_post7_hlc3_bars():
     assert engine._minute_agg.vwap() == pytest.approx(expected)
     assert engine._minute_agg.vwap_den == pytest.approx(10570235 + 3000)
     assert engine.vwap_points[-1]["value"] == pytest.approx(expected)
+
+
+def test_market_state_provider_avoids_rest_calls_on_snapshot_hot_path():
+    class ExplodingRest:
+        def fetch_price_history(self, *args, **kwargs):
+            raise AssertionError("REST must not run from live snapshot path")
+
+    calls = []
+    engine = AEEngine(
+        ExplodingRest(),
+        None,
+        market_state_provider=lambda: calls.append(True) or (True, True),
+    )
+    symbol = "ABC"
+    engine._active_symbol = symbol
+    engine._profile_cache[symbol] = {
+        "symbol": symbol,
+        "is_above_4h_ema": True,
+        "prior_close": 10.0,
+        "htf_high": 12.0,
+        "resistance_clusters": [],
+        "support_clusters": [],
+    }
+    engine._minute_agg._bars = [
+        OneMinuteBar(ts=_ts(24, 10, 0), open=10, high=10.2, low=9.9, close=10.1, volume=100, is_extended=False)
+    ]
+
+    snapshot = engine._build_snapshot(symbol)
+
+    assert snapshot["has_market_data"] is True
+    assert snapshot["regime"]["is_market_green"] is True
+    assert calls == [True]

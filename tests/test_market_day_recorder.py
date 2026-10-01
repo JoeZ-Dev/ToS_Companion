@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -11,6 +12,13 @@ from momentum_companion.recording.market_day import (
     build_subscription_requests,
     normalize_symbols,
     reached_cutoff,
+)
+from momentum_companion.recording.provenance import (
+    FROZEN_DETECTOR_REVISIONS,
+    MANIFEST_SCHEMA_VERSION,
+    application_git_state,
+    build_recording_provenance,
+    deterministic_fingerprint,
 )
 
 
@@ -72,6 +80,73 @@ def test_recorder_routes_each_stream_entry_to_its_symbol_file(tmp_path: Path):
     assert '"symbol":"TOPS"' in tops
 
 
+def test_recorder_derives_explicit_security_status_history(tmp_path: Path):
+    recorder = MarketDayRecorder(["AEHL"], output_root=tmp_path)
+    recorder.record_payload(
+        {
+            "data": [
+                {
+                    "service": "LEVELONE_EQUITIES",
+                    "timestamp": 1_700_000_000_000,
+                    "content": [
+                        {
+                            "key": "AEHL",
+                            "1": 3.10,
+                            "2": 3.12,
+                            "3": 3.11,
+                            "8": 25_000,
+                            "32": "Halted",
+                        }
+                    ],
+                }
+            ]
+        },
+        received_at="2026-09-27T13:00:00Z",
+    )
+    recorder.close()
+
+    status_event = json.loads(
+        (recorder.session_dir / "security_status_events.jsonl").read_text()
+    )
+    manifest = json.loads((recorder.session_dir / "manifest.json").read_text())
+    assert status_event["provider_status"] == "Halted"
+    assert manifest["derived_artifacts"]["security_status_events"] == {
+        "path": "security_status_events.jsonl",
+        "schema_version": 1,
+        "event_count": 1,
+    }
+    assert recorder.state()["security_status_event_count"] == 1
+
+
+def test_status_journal_failure_does_not_block_raw_recording(tmp_path: Path, monkeypatch):
+    recorder = MarketDayRecorder(["AEHL"], output_root=tmp_path)
+
+    def fail_status_write(*args, **kwargs):
+        raise OSError("derived journal unavailable")
+
+    monkeypatch.setattr(recorder._status_journal, "append_payload", fail_status_write)
+    recorder.record_payload(
+        {
+            "service": "LEVELONE_EQUITIES",
+            "timestamp": 1_700_000_000_000,
+            "content": [
+                {
+                    "key": "AEHL",
+                    "1": 3.10,
+                    "2": 3.12,
+                    "3": 3.11,
+                    "8": 25_000,
+                    "32": "Halted",
+                }
+            ],
+        }
+    )
+    recorder.close()
+
+    raw = json.loads((recorder.session_dir / "AEHL.jsonl").read_text())
+    assert raw["raw"]["32"] == "Halted"
+
+
 def test_non_recorded_services_are_ignored(tmp_path: Path):
     recorder = MarketDayRecorder(["AEHL"], output_root=tmp_path)
     recorder.record_payload(
@@ -91,6 +166,87 @@ def test_default_manifest_declares_level_one_only(tmp_path: Path):
     manifest = json.loads((recorder.session_dir / "manifest.json").read_text())
     assert manifest["services"] == ["LEVELONE_EQUITIES"]
     assert "TIMESALE_EQUITY" not in manifest["counts"]["AEHL"]
+    assert (recorder.session_dir / "integrity_report.json").exists()
+    assert (recorder.session_dir / "pattern_outcomes.json").exists()
+    assert (recorder.session_dir / "pattern_overlaps.json").exists()
+
+
+def test_recorder_journals_patterns_only_for_active_symbols(tmp_path: Path):
+    recorder = MarketDayRecorder(["AEHL"], output_root=tmp_path)
+    event = {
+        "id": "AEHL:TEST_PATTERN:10",
+        "symbol": "AEHL",
+        "pattern_type": "TEST_PATTERN",
+        "state": "FORMING",
+        "started_at": 10,
+        "evidence": {},
+        "points": [],
+        "lines": [],
+    }
+
+    assert recorder.record_pattern_observations(
+        "AEHL", [event], observation_ts_ms=20_000
+    ) == 1
+    recorder.remove_symbol("AEHL")
+    assert recorder.record_pattern_observations(
+        "AEHL", [event], observation_ts_ms=30_000
+    ) == 0
+    recorder.close()
+
+    manifest = json.loads((recorder.session_dir / "manifest.json").read_text())
+    artifact = manifest["derived_artifacts"]["pattern_events"]
+    assert artifact["path"] == "pattern_events.jsonl"
+    assert artifact["schema_version"] == 1
+    assert artifact["event_count"] == 1
+
+
+def test_new_manifest_records_runtime_and_detector_provenance(tmp_path: Path):
+    provenance = build_recording_provenance(
+        git_revision="a" * 40,
+        git_worktree_dirty=False,
+        app_version="test-version",
+    )
+    recorder = MarketDayRecorder(
+        ["AEHL"],
+        output_root=tmp_path,
+        provenance=provenance,
+    )
+    recorder.close()
+
+    import json
+    manifest = json.loads((recorder.session_dir / "manifest.json").read_text())
+    recorded = manifest["provenance"]
+    enabled = recorded["detectors"]["enabled"]
+
+    assert manifest["schema_version"] == MANIFEST_SCHEMA_VERSION
+    assert recorded["application"] == {
+        "git_revision": "a" * 40,
+        "git_worktree_dirty": False,
+        "version": "test-version",
+    }
+    assert [item["name"] for item in enabled] == [
+        "ASCENDING_TRIANGLE",
+        "MICRO_PULLBACK",
+        "LOCAL_RESISTANCE_BREAKOUT",
+        "TIGHT_CONSOLIDATION_BREAKOUT",
+    ]
+    micro = next(item for item in enabled if item["name"] == "MICRO_PULLBACK")
+    assert micro["semantic_revision"] == FROZEN_DETECTOR_REVISIONS["MICRO_PULLBACK"]
+    assert micro["config_fingerprint"] == deterministic_fingerprint(micro["config"])
+    assert recorded["schemas"] == {
+        "manifest": 2,
+        "market_event": 1,
+        "derived_journal": 1,
+    }
+    assert recorded["pattern_evaluation"]["bar_cadence_seconds"] == 10
+    assert recorded["session"]["timezone"] == "America/New_York"
+
+
+def test_deployed_git_revision_can_be_supplied_without_git_checkout(monkeypatch):
+    monkeypatch.setenv("TOS_COMPANION_GIT_REVISION", "b" * 40)
+    monkeypatch.setenv("TOS_COMPANION_GIT_WORKTREE_DIRTY", "false")
+
+    assert application_git_state() == ("b" * 40, False)
 
 
 def test_manifest_counts_match_jsonl_records(tmp_path: Path):
@@ -130,6 +286,7 @@ def test_manifest_counts_match_jsonl_records(tmp_path: Path):
     assert manifest["stop_reason"] == "browser_stop"
     assert manifest["counts"]["AEHL"]["LEVELONE_EQUITIES"] == 3
     assert len(jsonl_lines) == 3
+    assert all(json.loads(line)["schema_version"] == 1 for line in jsonl_lines)
 
 
 def test_recorded_l1_can_reconstruct_minute_candles(tmp_path: Path):

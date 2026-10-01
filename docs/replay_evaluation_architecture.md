@@ -214,6 +214,12 @@ Available endpoints:
   - interactive replay controls
 - POST /api/replay/inspect
   - stateless machine inspection for Codex/batch tooling
+- GET /api/evaluation/pattern-parity/{session_id}
+  - compare persisted live pattern transitions with current-code replay output;
+    optional `symbol` filter
+- GET /api/research/export
+  - compose provenance, integrity, pattern lifecycle, status, overlap, and
+    optional separated outcome evidence for session or corpus research
 
 The inspect request accepts:
 
@@ -245,3 +251,18 @@ The returned machine state includes the same underlying information used by the 
 This is the preferred interface for Codex-driven chart/setup review and later batch simulation. Codex should use the API rather than scraping rendered browser output.
 
 Chart screenshots/reference images may still be supplied separately for human/vision labeling, but the software-side truth should be matched back to session_id + symbol + replay timestamp/cursor through this API.
+
+## Live/replay pattern parity
+
+Pattern parity is a diagnostic, not an assertion that current code should always
+match an older recording. It first reports whether detector config fingerprints
+and frozen semantic revisions match the recording provenance, then lists exact
+transition matches and differences. Deterministic comparison excludes live-only
+trigger context because HTB, fundamentals, and watched-symbol rank may not be
+self-contained replay inputs. Those fields remain preserved in the live journal
+for separate inspection.
+
+The replay timeline records both the completed bar timestamp and the later
+provider event timestamp at which evaluation became possible. This mirrors live
+capture and prevents results from being backdated into a bar that had not yet
+completed.

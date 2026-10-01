@@ -45,11 +45,16 @@ src/momentum_companion/setup_engine/
         levels.py
         impulse.py
         retracement.py
+        ranges.py
+        volume.py
+        session_levels.py
 
     patterns/
         __init__.py
         ascending_triangle.py
         micro_pullback.py
+        local_resistance_breakout.py
+        tight_consolidation_breakout.py
 ```
 
 ## Data flow
@@ -76,7 +81,8 @@ live Schwab events OR recorded replay events
      setup generation   UI/chart
 ```
 
-Live and replay should eventually feed the same detector pipeline.
+Live and replay feed the same `PatternEvaluationService`; parity reports
+compare the resulting meaningful transitions against the persisted live journal.
 
 ## Reusable structure primitives
 
@@ -136,6 +142,15 @@ Measures the pullback following an impulse:
 - retracement depth.
 
 This is shared infrastructure for continuation patterns rather than logic owned by `MICRO_PULLBACK`.
+
+### Ranges, volume, and session levels
+
+`structure/ranges.py` provides generic tight-range geometry.
+`structure/volume.py` provides descriptive completed-bar volume statistics,
+ratios, expansion, and trend. `structure/session_levels.py` provides explicit
+premarket, regular-session, opening-range, prior-day, and VWAP context. Volume
+and session values are observational evidence in the current engine and do not
+gate any detector.
 
 ## Pattern contract
 
@@ -245,6 +260,8 @@ def build_default_pattern_engine() -> PatternEngine:
     engine = PatternEngine()
     engine.register(AscendingTriangleDetector())
     engine.register(MicroPullbackDetector())
+    engine.register(LocalResistanceBreakoutDetector())
+    engine.register(TightConsolidationBreakoutDetector())
     return engine
 ```
 
@@ -388,8 +405,10 @@ Currently emits evidence including:
 Consumes:
 
 - normalized bars;
-- strongest recent bullish impulse;
+- the latest qualifying local bullish impulse, anchored between local swing highs;
 - measured retracement.
+
+A micro-pullback is treated as a single local impulse -> retracement -> recovery -> continuation lifecycle. Its pullback low is anchored to the first confirmed local trough after the impulse rather than the lowest low seen later in the rolling window. That keeps one detector instance from retroactively moving its trough and resurrecting after continuation. Continuation is defined from the post-pullback recovery structure, not simply from reclaiming the old impulse high: after the pullback low, at least one completed recovery bar must establish a recovery pivot, and a later bar must close through that pivot plus the existing continuation buffer. Once an earlier bar has already completed that recovery-pivot break, the detector instance is complete and is not allowed to drift back into PULLBACK/TURNING on later bars.
 
 Currently emits evidence including:
 
@@ -398,9 +417,52 @@ Currently emits evidence including:
 - pullback low;
 - duration;
 - retracement depth;
-- continuation level.
+- recovery pivot and timestamp;
+- continuation level derived from the recovery pivot.
 
-These two detectors are reference implementations for the framework, not special cases built into it.
+### Tight consolidation breakout
+
+Consumes:
+
+- normalized bars;
+- the reusable trailing tight-range primitive.
+
+The consolidation range is measured only from bars completed before the current bar, so the breakout bar cannot expand the range boundary and hide its own breakout. The detector selects the longest trailing range that satisfies the configured width limit, emits the range high/low as chart geometry, and emits `BREAKOUT` only when the current close crosses the buffered range high from below. A downside close beyond the buffered range low invalidates the bullish setup.
+
+Its initial defaults are structural starting points and were not tuned against the existing six-session development corpus. It is registered prospectively so fresh recordings can capture behavior before any corpus-driven tuning.
+
+Currently emits evidence including:
+
+- range high/low/center;
+- range width percentage;
+- range duration;
+- number of consolidation bars;
+- breakout and breakdown levels;
+- previous/current close;
+- adaptive confirmation evidence.
+
+### Local resistance breakout
+
+Consumes:
+
+- normalized bars;
+- recent swing highs;
+- clustered horizontal resistance.
+
+It intentionally does not require the rising-low geometry of an ascending triangle. The structure remains valid while repeated local swing highs define resistance and no intervening bar has already closed through the breakout level. A breakout observation is emitted only on the current close crossing the buffered resistance level from below; a previously resolved level is not resurrected.
+
+Its initial defaults are structural starting points and were not tuned against the existing six-session development corpus. It is registered prospectively so new recordings can capture its behavior before any corpus-driven tuning.
+
+Currently emits evidence including:
+
+- resistance level/range;
+- number of resistance touches;
+- breakout level;
+- previous/current close;
+- whether the current bar performed the breakout cross;
+- adaptive confirmation evidence.
+
+These detectors are reference implementations for the framework, not special cases built into it.
 
 ## Future pattern families
 
@@ -582,6 +644,8 @@ As of this branch:
 - reusable structure package exists;
 - ascending triangle reference detector exists;
 - micro pullback reference detector exists;
+- local resistance breakout detector exists and is prospectively registered without development-corpus tuning;
+- tight consolidation breakout detector exists and is prospectively registered without development-corpus tuning;
 - explicit default registration exists;
 - duplicate registration is rejected;
 - synthetic pattern tests exist;

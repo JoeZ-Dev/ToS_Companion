@@ -3,6 +3,9 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile.web
+      args:
+        TOS_COMPANION_GIT_REVISION: ${TOS_COMPANION_GIT_REVISION:?deploy via deploy/deploy_joelab_docker.sh so provenance is populated}
+        TOS_COMPANION_GIT_WORKTREE_DIRTY: ${TOS_COMPANION_GIT_WORKTREE_DIRTY:?deploy via deploy/deploy_joelab_docker.sh so provenance is populated}
     container_name: tos-companion
     restart: unless-stopped
     environment:
@@ -13,10 +16,14 @@ services:
       TOS_COMPANION_LOG_LEVEL: info
       TOS_CODEX_BRIDGE_SOCKET: /run/tos-codex/bridge.sock
       TOS_CODEX_TIMEOUT_SECONDS: 120
+      TOS_COMPANION_GIT_REVISION: ${TOS_COMPANION_GIT_REVISION}
+      TOS_COMPANION_GIT_WORKTREE_DIRTY: ${TOS_COMPANION_GIT_WORKTREE_DIRTY}
     volumes:
       - tos-companion-data:/home/companion/.tos_companion
       - /srv/data/tos-companion/state:/home/companion/.local/share/MomentumTradingCompanion
       - /srv/data/tos-companion/codex-bridge:/run/tos-codex
+    ports:
+      - "127.0.0.1:4977:8787"
     networks:
       - joelab-ingress
     healthcheck:

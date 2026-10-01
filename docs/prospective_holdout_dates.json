@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "kind": "prospective_holdout_date_manifest",
+  "locked_cutoff_date": "2026-09-29",
+  "recorded_at_utc": "2026-10-01T12:48:53Z",
+  "recorded_before_outcome_review": true,
+  "dates": [
+    {
+      "trading_date": "2026-09-30",
+      "status": "excluded",
+      "classification": "excluded_partial_capture",
+      "reason": "authorization/deployment interruption",
+      "recorded_at_utc": "2026-10-01T12:48:53Z",
+      "counts_toward": {
+        "trading_dates": false,
+        "opportunities": false,
+        "paired_trades": false,
+        "performance": false
+      },
+      "raw_recordings": "preserve",
+      "research_evidence": "preserve"
+    },
+    {
+      "trading_date": "2026-10-01",
+      "status": "pending",
+      "classification": "pending_capture_completion",
+      "reason": "pending end-of-day completeness determination; no recording session existed at the 2026-10-01T12:48:53Z audit",
+      "recorded_at_utc": "2026-10-01T12:48:53Z",
+      "inclusion_requirements": {
+        "coverage_start_et": "07:00:00",
+        "minimum_coverage_end_et": "10:30:00",
+        "material_gap_seconds": 60,
+        "authorization_continuous": true,
+        "infrastructure_continuous": true
+      },
+      "counts_toward": {
+        "trading_dates": false,
+        "opportunities": false,
+        "paired_trades": false,
+        "performance": false
+      },
+      "raw_recordings": "preserve",
+      "research_evidence": "preserve"
+    }
+  ]
+}

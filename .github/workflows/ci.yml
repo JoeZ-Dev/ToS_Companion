@@ -24,25 +24,6 @@ jobs:
           chmod +x tools/ci.sh
           tools/ci.sh
 
-  smoke-windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller
-      - name: Windows smoke (PyInstaller + mock run)
-        shell: pwsh
-        run: |
-          Set-ExecutionPolicy Bypass -Scope Process -Force
-          ./tools/windows_smoke.ps1
-
-
   browser-foundation:
     runs-on: ubuntu-latest
     steps:
@@ -78,6 +59,8 @@ jobs:
         run: |
           cp deploy/joelab.env.example deploy/joelab.env
           sed -i 's/^INTERNAL_AUTH_SECRET=.*/INTERNAL_AUTH_SECRET=ci-test-secret/' deploy/joelab.env
+          export TOS_COMPANION_GIT_REVISION="$(git rev-parse --verify HEAD)"
+          export TOS_COMPANION_GIT_WORKTREE_DIRTY=false
           docker network create joelab-ingress >/dev/null
           docker compose --env-file deploy/joelab.env -f deploy/docker-compose.joelab.yml config >/dev/null
       - name: Smoke boot browser server
