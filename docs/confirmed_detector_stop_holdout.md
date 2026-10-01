@@ -20,6 +20,15 @@ select a policy while this holdout is accumulating. If evidence motivates a
 change, close the holdout, classify all inspected data as development data,
 freeze a new protocol, and collect a new unseen corpus.
 
+The additive, outcome-blind date registry is
+`docs/prospective_holdout_dates.json`. It was recorded before prospective
+outcomes were inspected. September 30 is permanently marked
+`excluded_partial_capture` because authorization and deployment interrupted the
+capture. It contributes no trading date, opportunity, paired-trade, or
+performance count; its raw recordings and research evidence remain preserved.
+October 1 is pending until its completed capture can be checked. Pending and
+excluded dates never enter progress counts.
+
 Human chart labels may be added after primary results are locked, but only as a
 secondary diagnostic. They cannot change entries, eligibility, stops, exits,
 success criteria, or policy selection.
@@ -160,6 +169,56 @@ sha256sum /tmp/tos-confirmed-holdout-a/*
 The evaluator writes `holdout-results.json`, `holdout-trades.csv`,
 `holdout-summary.md`, and `artifact-hashes.json`. It hashes eligible source
 captures before and after evaluation and fails if any source bytes change.
+
+## Outcome-blind collection progress
+
+Do not run the outcome-bearing evaluator above while the sample is accumulating.
+The collection-progress command accepts only an outcome-blind inventory and
+rejects outcome keys such as wins, losses, exits, realized R, MFE, MAE, and
+expectancy. Its output is limited to date status, grouped and paired counts,
+momentum evidence/eligibility counts, minimum-size progress, and completeness
+warnings:
+
+```bash
+cd /srv/apps/ToS_Companion
+docker run --rm --user 0:0 \
+  -w /workspace \
+  -e PYTHONPATH=/workspace/src \
+  -v deploy_tos-companion-data:/data:ro \
+  -v /srv/apps/ToS_Companion:/workspace:ro \
+  deploy-tos-companion \
+  python -m momentum_companion.evaluation.holdout_progress \
+    progress /workspace/docs/prospective_holdout_dates.json \
+    --rvol-evidence-dir /data/research/rvol-evidence
+```
+
+An optional inventory must contain only `trading_date`, `opportunity_id`,
+`baseline_entered`, `confirmed_entered`, `momentum_evidence`, and
+`momentum_eligibility` (`trade_candidate`, `preferred_candidate`,
+`monitor_only`, or `unavailable`). Duplicate opportunity IDs are deduplicated
+within an exact trading date, not across dates.
+
+At end of day, validate October 1 capture continuity without calculating or
+displaying any trade outcome:
+
+```bash
+cd /srv/apps/ToS_Companion
+docker run --rm --user 0:0 \
+  -w /workspace \
+  -e PYTHONPATH=/workspace/src \
+  -v deploy_tos-companion-data:/data:ro \
+  -v /srv/apps/ToS_Companion:/workspace:ro \
+  deploy-tos-companion \
+  python -m momentum_companion.evaluation.holdout_progress \
+    audit-date /data/recordings --date 2026-10-01
+```
+
+The date can be changed from `pending` only after this audit is reviewed. It is
+eligible only with continuous recording coverage from 07:00 through at least
+10:30 ET, no material interval over 60 seconds between recording sessions, and
+no unresolved market-data gap. Multiple sessions may be combined only when
+they satisfy that rule. A failed date remains preserved and receives a specific
+exclusion reason in the date manifest.
 
 ## Trade Review preview
 
