@@ -66,6 +66,62 @@ button:disabled {
   color: #98a5b3;
 }
 
+.auth-banner {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 13px 18px;
+  border-bottom: 1px solid #7f2929;
+  background: #3a1518;
+  color: #ffe1e1;
+  box-shadow: 0 5px 18px rgba(0, 0, 0, .35);
+}
+
+.auth-banner[hidden] { display: none; }
+.auth-banner button[hidden] { display: none; }
+
+.auth-banner strong { font-size: 15px; }
+
+.auth-banner #schwab-auth-detail {
+  margin-top: 3px;
+  color: #e9b9b9;
+  font-size: 12px;
+}
+
+.auth-banner.waiting,
+.auth-banner.verifying,
+.auth-banner.reconnecting {
+  border-color: #80621c;
+  background: #332910;
+  color: #fff0b8;
+}
+
+.auth-banner.connected,
+.auth-banner.authorized {
+  border-color: #1f6848;
+  background: #123526;
+  color: #c6f6df;
+}
+
+.auth-banner-actions {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.auth-banner button.primary {
+  border-color: #f26b6b;
+  background: #d63e45;
+  color: white;
+  font-weight: 800;
+}
+
+.auth-banner.connected button.primary { display: none; }
+
 .quote-strip {
   display: grid;
   grid-template-columns: repeat(6, minmax(100px, 1fr));

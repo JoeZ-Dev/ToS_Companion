@@ -65,6 +65,8 @@ jobs:
             tests/test_stream_raw_recording.py \
             tests/test_market_day_recorder.py \
             tests/test_codex_bridge_client.py \
+            tests/test_auth_refresh.py \
+            tests/test_schwab_reauthorization.py \
             tests/test_pattern_engine.py \
             tests/test_pattern_service.py \
             tests/test_pattern_replay.py
