@@ -99,6 +99,7 @@ class MarketDayRecorder:
         output_root: Path | None = None,
         started_at: datetime | None = None,
         services: Iterable[str] | None = None,
+        recovery_context: dict | None = None,
     ) -> None:
         self.symbols = normalize_symbols(symbols)
         self._symbol_set = set(self.symbols)
@@ -111,6 +112,7 @@ class MarketDayRecorder:
             raise ValueError("At least one recording service is required")
         self.services = frozenset(selected_services)
         self.started_at = (started_at or datetime.now(ET)).astimezone(ET)
+        self.recovery_context = dict(recovery_context or {})
         root = output_root or (Path.home() / ".tos_companion" / "recordings")
         stamp = self.started_at.strftime("%Y-%m-%d_%H%M%S")
         self.session_dir = root / f"{stamp}_session"
@@ -276,6 +278,7 @@ class MarketDayRecorder:
             "ended_at_et": ended_at,
             "stop_reason": stop_reason,
             "counts": self._counts,
+            "recovery_context": self.recovery_context or None,
         }
         (self.session_dir / "manifest.json").write_text(
             json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
