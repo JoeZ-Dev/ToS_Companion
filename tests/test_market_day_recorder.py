@@ -251,3 +251,27 @@ def test_recorder_can_start_empty_then_add_remove_and_resume_symbol(tmp_path: Pa
     assert manifest["counts"]["AEHL"]["LEVELONE_EQUITIES"] == 2
     assert len(manifest["symbol_lifecycle"]["AEHL"]["periods"]) == 2
     assert manifest["active_symbols"] == []
+
+
+
+def test_manifest_records_recovery_lineage(tmp_path: Path):
+    import json
+
+    recorder = MarketDayRecorder(
+        ["JZ", "FLYE"],
+        output_root=tmp_path,
+        started_at=datetime(2026, 10, 8, 10, 10, tzinfo=ET),
+        recovery_context={
+            "recovered_from_interruption": True,
+            "interrupted_at_et": "2026-10-08T10:00:00-04:00",
+            "previous_session_dir": "/data/2026-10-08_093654_session",
+            "recovered_at_et": "2026-10-08T10:10:00-04:00",
+        },
+    )
+    recorder.close(stop_reason="3pm_cutoff")
+
+    manifest = json.loads((recorder.session_dir / "manifest.json").read_text())
+    recovery = manifest["recovery_context"]
+    assert recovery["recovered_from_interruption"] is True
+    assert recovery["previous_session_dir"].endswith("2026-10-08_093654_session")
+    assert recovery["interrupted_at_et"] == "2026-10-08T10:00:00-04:00"
