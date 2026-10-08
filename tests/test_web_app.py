@@ -191,6 +191,13 @@ class FakeRuntime:
         self.session = CompanionSession()
         self.started = False
         self.stopped = False
+        self.auth_workflow = {
+            "authorized": True,
+            "auth_owner": "companion_auth",
+            "helper_url_configured": True,
+            "status": "connected",
+            "resume_recording_required": False,
+        }
 
     def start(self):
         self.started = True
@@ -203,11 +210,21 @@ class FakeRuntime:
         return self.session.snapshot()
 
     def auth_status(self):
+        return dict(self.auth_workflow)
+
+    def begin_schwab_reauthorization(self):
+        self.auth_workflow.update({"authorized": False, "status": "waiting"})
         return {
-            "authorized": True,
-            "auth_owner": "companion_auth",
-            "helper_url_configured": True,
+            **self.auth_workflow,
+            "authorization_url": "https://api.schwabapi.com/v1/oauth/authorize?state=opaque",
         }
+
+    def poll_schwab_reauthorization(self):
+        return dict(self.auth_workflow)
+
+    def resume_recording_after_authorization(self):
+        self.auth_workflow["resume_recording_required"] = False
+        return self.start_recording([])
 
     def readiness(self):
         return {
@@ -349,6 +366,77 @@ def test_auth_status_never_returns_a_schwab_token():
     assert payload["auth_owner"] == "companion_auth"
     assert "access_token" not in payload
     assert "refresh_token" not in payload
+
+
+def test_reauthorization_is_denied_outside_trusted_admin_boundary():
+    runtime = FakeRuntime()
+    with TestClient(create_app(runtime, admin_authorizer=lambda assertion: False)) as client:
+        response = client.post("/api/auth/reauthorize")
+
+    assert response.status_code == 403
+    assert runtime.auth_workflow["status"] == "connected"
+
+
+def test_reauthorization_returns_only_official_url_and_redacted_state():
+    runtime = FakeRuntime()
+    authorize = lambda assertion: assertion == "signed-admin-assertion"
+    with TestClient(create_app(runtime, admin_authorizer=authorize)) as client:
+        response = client.post(
+            "/api/auth/reauthorize",
+            headers={"Cf-Access-Jwt-Assertion": "signed-admin-assertion"},
+        )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["status"] == "waiting"
+    assert payload["authorization_url"].startswith(
+        "https://api.schwabapi.com/v1/oauth/authorize"
+    )
+    assert "access_token" not in response.text
+    assert "refresh_token" not in response.text
+    assert "client_secret" not in response.text
+    assert "authorization_code" not in response.text
+
+
+def test_reauthorization_status_and_resume_require_admin_boundary():
+    runtime = FakeRuntime()
+    runtime.auth_workflow["resume_recording_required"] = True
+    authorize = lambda assertion: assertion == "admin"
+    with TestClient(create_app(runtime, admin_authorizer=authorize)) as client:
+        assert client.get("/api/auth/reauthorize/status").status_code == 403
+        assert client.post("/api/auth/resume-recording").status_code == 403
+        status = client.get(
+            "/api/auth/reauthorize/status",
+            headers={"Cf-Access-Jwt-Assertion": "admin"},
+        )
+        resumed = client.post(
+            "/api/auth/resume-recording",
+            headers={"Cf-Access-Jwt-Assertion": "admin"},
+        )
+    assert status.status_code == 200
+    assert resumed.status_code == 200
+    assert resumed.json()["active"] is True
+
+
+def test_browser_has_persistent_reauthorization_states_and_no_credential_inputs():
+    static_dir = Path(__file__).resolve().parents[1] / "src/momentum_companion/web/static"
+    index = (static_dir / "index.html").read_text()
+    app_js = (static_dir / "app.js").read_text()
+    assert "Schwab authorization required" in index
+    assert 'id="schwab-reconnect"' in index
+    assert "Reconnect Schwab" in index
+    for label in (
+        "Authorization required",
+        "Waiting for Schwab",
+        "Verifying authorization",
+        "Authorized and reconnecting",
+        "Connected",
+        "Authorization failed",
+    ):
+        assert label.lower() in (index + app_js).lower()
+    assert 'type="password"' not in index
+    assert "schwab_username" not in (index + app_js).lower()
+    assert "schwab_password" not in (index + app_js).lower()
 
 
 def test_manual_llm_endpoint_returns_immediately_and_updates_headless_state():

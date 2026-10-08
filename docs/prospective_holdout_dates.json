@@ -41,6 +41,28 @@
       },
       "raw_recordings": "preserve",
       "research_evidence": "preserve"
+    },
+    {
+      "trading_date": "2026-10-08",
+      "status": "excluded",
+      "classification": "excluded_authorization_capture_gap",
+      "reason": "capture began at 09:36:54 ET rather than the required 07:00 ET start; Schwab authorization later failed and stream recording stopped receiving data",
+      "recorded_at_utc": "2026-10-08T14:34:49Z",
+      "outcome_blind_audit": {
+        "required_coverage_start_et": "2026-10-08T07:00:00-04:00",
+        "recording_session_started_at_et": "2026-10-08T09:36:54.663711-04:00",
+        "authorization_outage_observed_at_utc": "2026-10-08T14:23:14Z",
+        "authorization_recovered_at_utc": null,
+        "outcomes_inspected": false
+      },
+      "counts_toward": {
+        "trading_dates": false,
+        "opportunities": false,
+        "paired_trades": false,
+        "performance": false
+      },
+      "raw_recordings": "preserve",
+      "research_evidence": "preserve"
     }
   ]
 }

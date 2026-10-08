@@ -87,10 +87,8 @@ def test_token_refresh_http(monkeypatch, tmp_path):
         return FakeResp()
 
     monkeypatch.setattr("httpx.post", fake_post)
-    import os
-
-    os.environ["SCHWAB_CLIENT_ID"] = "id"
-    os.environ["SCHWAB_CLIENT_SECRET"] = "secret"
+    monkeypatch.setenv("SCHWAB_CLIENT_ID", "id")
+    monkeypatch.setenv("SCHWAB_CLIENT_SECRET", "secret")
     new_tokens = provider.refresh()
     assert new_tokens["access_token"] == "new"
     assert provider._token_cache["refresh_token"] == "rt2"
@@ -107,10 +105,11 @@ def test_auth_helper_mode(monkeypatch):
         def json(self):
             return resp_data
 
-    def fake_get(url, timeout=10.0):
-        return FakeResp()
+    class Client:
+        def get(self, url, **kwargs):
+            return FakeResp()
 
-    monkeypatch.setattr("httpx.get", fake_get)
+    provider._helper_http = Client()
     token = provider()
     assert token == "helper_tok"
 
@@ -153,3 +152,31 @@ def test_auth_helper_sends_internal_auth_header(monkeypatch):
 
     assert provider() == "abc"
     assert client.calls[0][1]["headers"]["X-Internal-Auth"] == "shared-secret"
+
+
+def test_auth_helper_failure_discards_previously_cached_access_token(monkeypatch):
+    class Response:
+        def __init__(self, status_code, body):
+            self.status_code = status_code
+            self._body = body
+
+        def json(self):
+            return self._body
+
+    class Client:
+        def __init__(self):
+            self.responses = [
+                Response(200, {"access_token": "old-secret", "expires_at": time.time() + 1}),
+                Response(503, {"error": "UPSTREAM"}),
+            ]
+
+        def get(self, _url, **_kwargs):
+            return self.responses.pop(0)
+
+    monkeypatch.setenv("AUTH_HELPER_URL", "http://companion-auth:8766")
+    provider = TokenProvider()
+    provider._helper_http = Client()
+    assert provider() == "old-secret"
+    provider._helper_cache["expires_at"] = time.time() - 1
+    assert provider() == ""
+    assert provider.peek_access_token() == ""

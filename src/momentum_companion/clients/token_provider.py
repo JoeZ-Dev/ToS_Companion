@@ -37,7 +37,11 @@ class TokenProvider:
         self._refresh_event.set()
         self._refresh_listeners: List[Callable[[dict], None]] = []
         self._state_callback = state_callback
-        self._auth_helper_url = os.environ.get("AUTH_HELPER_URL") or DEFAULT_AUTH_HELPER_URL
+        # Helper ownership is an explicit deployment mode. Local desktop/test
+        # callers without AUTH_HELPER_URL retain the legacy local-token path.
+        self._auth_helper_url = (
+            "" if refresh_callback is not None else os.environ.get("AUTH_HELPER_URL", "")
+        )
         self._internal_auth_secret = os.environ.get("INTERNAL_AUTH_SECRET") or ""
         self._helper_cache: dict = {}
         self._client_id = os.environ.get("SCHWAB_CLIENT_ID")
@@ -60,6 +64,24 @@ class TokenProvider:
             return self._helper_cache.get("access_token", "") or ""
         return self._token_cache.get("access_token", "") or ""
 
+    def invalidate_helper_cache(self) -> None:
+        """Discard a previously vended access token before re-verification."""
+        if self._auth_helper_url:
+            self._helper_cache = {}
+            self._helper_backoff_until = 0.0
+
+    def fetch_fresh_helper_token(self) -> str:
+        """Require a current successful response from companion_auth."""
+        if not self._auth_helper_url:
+            raise RuntimeError("companion_auth is not configured")
+        self.invalidate_helper_cache()
+        if not self._fetch_from_helper():
+            raise RuntimeError("companion_auth did not provide a usable access token")
+        token = self.peek_access_token()
+        if not token:
+            raise RuntimeError("companion_auth returned an empty access token")
+        return token
+
     def set_access_token(self, token: str, expires_at: Optional[float] = None) -> None:
         self._token_cache["access_token"] = token
         if expires_at:
@@ -69,6 +91,9 @@ class TokenProvider:
 
     def refresh(self, current: Optional[dict] = None) -> dict:
         """Public refresh entry; delegates to refresh_callback if provided."""
+        if self._auth_helper_url:
+            self.fetch_fresh_helper_token()
+            return dict(self._helper_cache)
         tokens = current or self._token_cache
         try:
             if self._refresh_callback:
@@ -180,9 +205,9 @@ class TokenProvider:
             return
         self._fetch_from_helper()
 
-    def _fetch_from_helper(self) -> None:
+    def _fetch_from_helper(self) -> bool:
         if not self._auth_helper_url:
-            return
+            return False
         url = self._auth_helper_url.rstrip("/") + "/access_token"
         if self._helper_http is None:
             self._helper_http = httpx.Client(
@@ -201,20 +226,33 @@ class TokenProvider:
             self._logger.info("Auth helper fetch status=%s latency_ms=%s", resp.status_code, latency_ms)
             if resp.status_code == 200:
                 data = resp.json()
+                access_token = data.get("access_token")
+                if not access_token:
+                    self._helper_cache = {}
+                    if self._state_callback:
+                        self._state_callback("AUTH_REQUIRED")
+                    return False
                 self._helper_cache = {
-                    "access_token": data.get("access_token"),
+                    "access_token": access_token,
                     "expires_at": data.get("expires_at") or (time.time() + 900),
                 }
                 self._notify_listeners()
                 self._helper_backoff_until = 0.0
+                return True
             else:
+                # Never keep vending a stale cached token after the owner has
+                # explicitly failed to refresh it.
+                self._helper_cache = {}
                 if self._state_callback:
                     self._state_callback("AUTH_REQUIRED")
+                return False
         except Exception as exc:
+            self._helper_cache = {}
             self._logger.warning("Auth helper fetch failed: %s", type(exc).__name__, exc_info=True)
             if self._state_callback:
                 self._state_callback("AUTH_REQUIRED")
             self._helper_backoff_until = time.time() + 15
+            return False
 
     def interactive_login(self) -> dict:
         """Run full interactive OAuth using bounce server and local loopback."""
@@ -229,6 +267,9 @@ class TokenProvider:
 
     def add_refresh_listener(self, listener: Callable[[dict], None]) -> None:
         self._refresh_listeners.append(listener)
+        # A listener attached after a token was cached must be eligible for
+        # the next explicit notification/recovery event.
+        self._last_notified = (None, None)
 
     def _notify_listeners(self) -> None:
         access = self.peek_access_token()
