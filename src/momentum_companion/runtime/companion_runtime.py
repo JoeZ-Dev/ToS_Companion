@@ -32,6 +32,8 @@ from momentum_companion.utils.logging import logging
 
 logger = logging.getLogger(__name__)
 
+_RECORDING_INTENT_KEY = "market_day_recording_resume_intent_v1"
+
 
 class CompanionRuntime:
     """Own the live backend independently from Qt or any browser connection.
@@ -97,6 +99,7 @@ class CompanionRuntime:
         self._stream_watchdog_stop = threading.Event()
         self._stream_watchdog_thread: threading.Thread | None = None
         self._stale_resubscribe_at: float | None = None
+        self._last_recording_recovery_attempt = 0.0
 
     @property
     def active_symbol(self) -> str | None:
@@ -115,6 +118,10 @@ class CompanionRuntime:
         self._stream_watchdog_stop.clear()
         self._start_stream_watchdog()
         self.session.update_connection_state("READY")
+        try:
+            self._recover_recording_intent_once()
+        except Exception:
+            logger.warning("Initial recording recovery attempt failed", exc_info=True)
 
     def stop(self) -> None:
         with self._lock:
@@ -136,6 +143,10 @@ class CompanionRuntime:
 
         def worker() -> None:
             while not self._stream_watchdog_stop.wait(5.0):
+                try:
+                    self._recover_recording_intent_once()
+                except Exception:
+                    logger.warning("Recording recovery watchdog failed", exc_info=True)
                 try:
                     self._check_stream_freshness_once()
                 except Exception:
@@ -454,7 +465,120 @@ class CompanionRuntime:
         except Exception:
             logger.warning("Live multi-symbol subscribe failed for %s", symbols, exc_info=True)
 
-    def start_recording(self, symbols: list[str]) -> dict[str, Any]:
+    def _load_recording_intent(self) -> dict[str, Any] | None:
+        raw = self.app_state.get(_RECORDING_INTENT_KEY)
+        if not raw:
+            return None
+        try:
+            value = json.loads(raw)
+        except Exception:
+            logger.warning("Invalid persisted recording recovery intent")
+            return None
+        return value if isinstance(value, dict) else None
+
+    def _persist_recording_intent(
+        self,
+        symbols: list[str] | set[str],
+        *,
+        now_et: datetime | None = None,
+        interrupted_at_et: str | None = None,
+        previous_session_dir: str | None = None,
+    ) -> None:
+        current = now_et or datetime.now(self._et_tz)
+        current = current.astimezone(self._et_tz)
+        payload = {
+            "schema_version": "market_day_recording_resume_intent.v1",
+            "date_et": current.date().isoformat(),
+            "resume_allowed": True,
+            "symbols": sorted(set(symbols)),
+            "updated_at_et": current.isoformat(),
+            "interrupted_at_et": interrupted_at_et,
+            "previous_session_dir": previous_session_dir,
+        }
+        self.app_state.set(_RECORDING_INTENT_KEY, json.dumps(payload, sort_keys=True))
+
+    def _clear_recording_intent(self) -> None:
+        self.app_state.set(_RECORDING_INTENT_KEY, "")
+
+    def _recover_recording_intent_once(
+        self,
+        *,
+        now_et: datetime | None = None,
+    ) -> bool:
+        with self._lock:
+            if self._recorder is not None or not self._started:
+                return False
+
+        intent = self._load_recording_intent()
+        if not intent or not intent.get("resume_allowed"):
+            return False
+
+        current = now_et or datetime.now(self._et_tz)
+        current = current.astimezone(self._et_tz)
+        if intent.get("date_et") != current.date().isoformat():
+            self._clear_recording_intent()
+            return False
+        if reached_cutoff(current):
+            self._clear_recording_intent()
+            return False
+
+        symbols = [
+            self.session.normalize_symbol(symbol)
+            for symbol in (intent.get("symbols") or [])
+            if self.session.normalize_symbol(symbol)
+        ]
+        symbols = list(dict.fromkeys(symbols))
+        if not symbols:
+            return False
+
+        now_mono = time.monotonic()
+        if now_mono - self._last_recording_recovery_attempt < 5.0:
+            return False
+        self._last_recording_recovery_attempt = now_mono
+
+        auth = self.auth_status()
+        if not auth.get("authorized"):
+            self.session.update_recorder_state({
+                "active": False,
+                "recovery_pending": True,
+                "recovery_symbols": symbols,
+                "recovery_reason": "awaiting_auth",
+            })
+            return False
+
+        recovery_context = {
+            "recovered_from_interruption": True,
+            "interrupted_at_et": intent.get("interrupted_at_et"),
+            "previous_session_dir": intent.get("previous_session_dir"),
+            "recovered_at_et": current.isoformat(),
+        }
+        try:
+            self.start_recording(
+                symbols,
+                recovery_context=recovery_context,
+            )
+        except Exception:
+            self.session.update_recorder_state({
+                "active": False,
+                "recovery_pending": True,
+                "recovery_symbols": symbols,
+                "recovery_reason": "restart_failed",
+            })
+            raise
+
+        logger.warning(
+            "Recovered market-day recording after interruption symbols=%s previous_session=%s",
+            symbols,
+            intent.get("previous_session_dir"),
+        )
+        return True
+
+    def start_recording(
+        self,
+        symbols: list[str],
+        *,
+        recovery_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         if reached_cutoff():
             raise ValueError("3:00 PM ET recording cutoff has already been reached")
 
@@ -467,9 +591,13 @@ class CompanionRuntime:
         with self._lock:
             if self._recorder is not None:
                 raise RuntimeError("a recording session is already active")
-            recorder = MarketDayRecorder(normalized)
+            recorder = MarketDayRecorder(
+                normalized,
+                recovery_context=recovery_context,
+            )
             self._recorder = recorder
             self._recording_symbols = set(recorder.symbols)
+        self._persist_recording_intent(normalized)
 
         self._ensure_stream()
         self._refresh_stream_subscription()
@@ -505,6 +633,8 @@ class CompanionRuntime:
                 raise RuntimeError("no recording session is active")
             recorder.add_symbol(normalized)
             self._recording_symbols = set(recorder.active_symbols())
+            recording_symbols = set(self._recording_symbols)
+        self._persist_recording_intent(recording_symbols)
         self._ensure_stream()
         self._refresh_stream_subscription()
         state = recorder.state()
@@ -521,6 +651,7 @@ class CompanionRuntime:
                 raise RuntimeError("no recording session is active")
             recorder.remove_symbol(normalized)
             self._recording_symbols = set(recorder.active_symbols())
+            recording_symbols = set(self._recording_symbols)
             stream = self._stream
             active_symbol = self._active_symbol
         with self._lock:
@@ -530,6 +661,7 @@ class CompanionRuntime:
                 stream.unsubscribe(normalized)
             except Exception:
                 logger.warning("Recording symbol unsubscribe failed for %s", normalized, exc_info=True)
+        self._persist_recording_intent(recording_symbols)
         self._refresh_stream_subscription()
         state = recorder.state()
         self.session.update_recorder_state(state)
@@ -538,19 +670,34 @@ class CompanionRuntime:
     def stop_recording(self, *, reason: str = "stopped") -> dict[str, Any]:
         with self._lock:
             recorder = self._recorder
+            active_symbols = set(self._recording_symbols)
             self._recorder = None
             self._recording_symbols = set()
         if recorder is None:
             state = {"active": False}
             self.session.update_recorder_state(state)
+            if reason != "runtime_stopped":
+                self._clear_recording_intent()
             return state
 
+        previous_session_dir = str(recorder.session_dir)
+        interrupted_at = datetime.now(self._et_tz).isoformat()
         try:
             recorder.close(stop_reason=reason)
         finally:
             state = recorder.state()
             state["active"] = False
             state["stop_reason"] = reason
+            if reason == "runtime_stopped" and active_symbols:
+                self._persist_recording_intent(
+                    active_symbols,
+                    interrupted_at_et=interrupted_at,
+                    previous_session_dir=previous_session_dir,
+                )
+                state["recovery_pending"] = True
+                state["recovery_symbols"] = sorted(active_symbols)
+            else:
+                self._clear_recording_intent()
             self.session.update_recorder_state(state)
             self._refresh_stream_subscription()
         return state
