@@ -75,11 +75,20 @@ It never returns Schwab access or refresh tokens.
 
 ## Schwab authorization
 
-If readiness shows `companion_auth_authorized: false`, reauthorize through the existing companion_auth bootstrap process.
+If readiness shows `companion_auth_authorized: false`, the browser displays the
+persistent **Schwab authorization required** banner. An operator admitted by the
+configured Cloudflare Access admin policy can click **Reconnect Schwab**. The
+button asks the existing companion_auth service for a three-minute authorization
+URL; companion_auth remains the only service that exchanges the code and stores
+Schwab tokens.
 
-ToS_Companion must not create a separate Schwab OAuth session.
+The browser reports Connected only after a fresh companion_auth token, a
+read-only Schwab `userPreference` request, and successful stream LOGIN. If an
+existing recorder remains open, stream recovery continues it. If the recorder
+was lost, use the explicit **Resume recording** button; recovery never silently
+creates a new recording session.
 
-After companion_auth is healthy, refresh the browser or retry symbol selection.
+See `docs/schwab_reauthorization.md` for the endpoint and trust-boundary audit.
 
 ## Browser workflow
 

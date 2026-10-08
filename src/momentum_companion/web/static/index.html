@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ToS Companion</title>
-  <link rel="stylesheet" href="/styles-20260922-7.css">
+  <link rel="stylesheet" href="/styles.css?v=20261008-auth">
   <script src="/vendor/lightweight-charts-20260922.js"></script>
 </head>
 <body>
@@ -16,6 +16,17 @@
     </form>
     <div id="connection-state" class="status">DISCONNECTED</div>
   </header>
+
+  <section id="schwab-auth-banner" class="auth-banner" aria-live="polite">
+    <div>
+      <strong id="schwab-auth-title">Schwab authorization required</strong>
+      <div id="schwab-auth-detail">Reconnect through Schwab to restore live market data.</div>
+    </div>
+    <div class="auth-banner-actions">
+      <button id="schwab-reconnect" class="primary" type="button">Reconnect Schwab</button>
+      <button id="schwab-resume-recording" type="button" hidden>Resume recording</button>
+    </div>
+  </section>
 
   <main>
     <section class="quote-strip">
@@ -253,6 +264,6 @@
     </section>
   </main>
 
-  <script src="/app-20260922-13.js"></script>
+  <script src="/app.js?v=20261008-auth"></script>
 </body>
 </html>

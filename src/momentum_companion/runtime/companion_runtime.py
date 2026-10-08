@@ -15,6 +15,7 @@ from momentum_companion.bootstrap import bootstrap
 from momentum_companion.clients.schwab_rest import SchwabRestClient
 from momentum_companion.clients.schwab_stream import SchwabStreamClient
 from momentum_companion.clients.token_provider import TokenProvider
+from momentum_companion.clients.companion_auth import CompanionAuthClient, CompanionAuthError
 from momentum_companion.data.bar_aggregator import BarAggregator10s, TenSecondBar
 from momentum_companion.data.contracts import QuoteEvent
 from momentum_companion.data.price_update import PriceUpdate
@@ -29,6 +30,7 @@ from momentum_companion.recording.history import (
 from momentum_companion.recording.market_day import MarketDayRecorder, reached_cutoff, seconds_until_cutoff
 from momentum_companion.recording.provenance import build_recording_provenance
 from momentum_companion.recording.rvol_enrollment import EnrollmentRvolEvidenceCollector
+from momentum_companion.recording.auth_continuity import AuthorizationContinuityJournal
 from momentum_companion.recording.trigger_context import build_trigger_context
 from momentum_companion.session import CompanionSession
 from momentum_companion.setup_engine.pattern_service import PatternEvaluationService
@@ -52,6 +54,8 @@ class CompanionRuntime:
         token_provider: TokenProvider | None = None,
         rest_client: SchwabRestClient | None = None,
         ae_engine: AEEngine | None = None,
+        companion_auth_client: CompanionAuthClient | None = None,
+        auth_continuity_journal: AuthorizationContinuityJournal | None = None,
     ) -> None:
         db_path, app_state, journal = bootstrap(instance_id)
         self.db_path: Path = db_path
@@ -67,6 +71,7 @@ class CompanionRuntime:
             base_url="https://api.schwabapi.com/trader/v1",
             auth_token_provider=self.token_provider,
         )
+        self.companion_auth = companion_auth_client or CompanionAuthClient()
         self._market_state_lock = threading.RLock()
         self._shared_market_state: tuple[bool, bool | None] = (False, None)
         self._market_state_stop = threading.Event()
@@ -104,6 +109,21 @@ class CompanionRuntime:
         self._started = False
         self._recorder: MarketDayRecorder | None = None
         self._recording_symbols: set[str] = set()
+        continuity_path = Path.home() / ".tos_companion" / "authorization_continuity.jsonl"
+        self._auth_continuity = auth_continuity_journal or AuthorizationContinuityJournal(
+            continuity_path
+        )
+        self._auth_workflow_state = "checking"
+        self._auth_flow_id: str | None = None
+        self._auth_flow_expires_at: int | None = None
+        self._auth_error: str | None = None
+        prior_auth_events = self._auth_continuity.read()
+        last_auth_event = prior_auth_events[-1] if prior_auth_events else {}
+        self._auth_outage_open = last_auth_event.get("event") == "authorization_outage"
+        self._recording_active_at_outage = bool(
+            last_auth_event.get("recording_active")
+        ) if self._auth_outage_open else False
+        self._resume_recording_required = False
         self._recorder_cutoff_thread: threading.Thread | None = None
         self._last_recorder_state_emit = 0.0
         self._stream_watchdog_stop = threading.Event()
@@ -339,25 +359,163 @@ class CompanionRuntime:
 
     def auth_status(self) -> dict[str, Any]:
         """Report companion_auth availability without exposing credentials."""
+        if self._auth_workflow_state in {
+            "waiting", "verifying", "authorized_reconnecting", "connected", "failed"
+        }:
+            return self._auth_status_payload()
         try:
             token = self.token_provider()
+            if not token:
+                self._mark_authorization_outage()
+                self._auth_workflow_state = "authorization_required"
+            else:
+                if self._auth_outage_open:
+                    self._verify_authorization_and_reconnect()
+                    return self._auth_status_payload()
+                self._auth_workflow_state = (
+                    "connected"
+                    if self.session.snapshot().get("connection_state") == "CONNECTED"
+                    else "authorized"
+                )
             return {
                 "authorized": bool(token),
                 "auth_owner": "companion_auth",
                 "helper_url_configured": bool(
                     getattr(self.token_provider, "_auth_helper_url", None)
                 ),
+                "status": self._auth_workflow_state,
+                "resume_recording_required": self._resume_recording_required,
             }
         except Exception as exc:
             logger.warning("companion_auth status check failed", exc_info=True)
+            self._mark_authorization_outage()
+            self._auth_workflow_state = "authorization_required"
             return {
                 "authorized": False,
                 "auth_owner": "companion_auth",
                 "helper_url_configured": bool(
                     getattr(self.token_provider, "_auth_helper_url", None)
                 ),
+                "status": "authorization_required",
                 "error": type(exc).__name__,
+                "resume_recording_required": self._resume_recording_required,
             }
+
+    def begin_schwab_reauthorization(self) -> dict[str, Any]:
+        """Start the existing companion_auth-owned OAuth flow."""
+        self._mark_authorization_outage()
+        try:
+            started = self.companion_auth.start_authorization()
+        except CompanionAuthError as exc:
+            self._auth_workflow_state = "failed"
+            self._auth_error = str(exc)
+            return self._auth_status_payload()
+        self._auth_flow_id = str(started["flow_id"])
+        self._auth_flow_expires_at = started.get("expires_at")
+        self._auth_workflow_state = "waiting"
+        self._auth_error = None
+        payload = self._auth_status_payload()
+        payload["authorization_url"] = started["authorization_url"]
+        return payload
+
+    def poll_schwab_reauthorization(self) -> dict[str, Any]:
+        if self._auth_workflow_state in {"authorized_reconnecting", "connected"}:
+            return self._auth_status_payload()
+        flow_id = self._auth_flow_id
+        if not flow_id:
+            return self.auth_status()
+        try:
+            upstream = self.companion_auth.authorization_status(flow_id)
+        except CompanionAuthError as exc:
+            self._auth_workflow_state = "failed"
+            self._auth_error = str(exc)
+            return self._auth_status_payload()
+        upstream_status = upstream["status"]
+        if upstream_status == "waiting":
+            self._auth_workflow_state = "waiting"
+        elif upstream_status == "verifying":
+            self._auth_workflow_state = "verifying"
+        elif upstream_status in {"failed", "expired"}:
+            self._auth_workflow_state = "failed"
+            self._auth_error = str(
+                upstream.get("error") or "Authorization failed. Please retry."
+            )
+        elif upstream_status == "authorized" and self._auth_workflow_state not in {
+            "authorized_reconnecting", "connected"
+        }:
+            self._verify_authorization_and_reconnect()
+        return self._auth_status_payload()
+
+    def resume_recording_after_authorization(self) -> dict[str, Any]:
+        if not self._resume_recording_required:
+            raise RuntimeError("recording does not require an explicit resume")
+        state = self.start_recording([])
+        self._resume_recording_required = False
+        return state
+
+    def _verify_authorization_and_reconnect(self) -> None:
+        self._auth_workflow_state = "verifying"
+        self._auth_error = None
+        try:
+            with self._lock:
+                stream = self._stream
+                self._stream = None
+            if stream is not None:
+                stream.disconnect()
+            self.token_provider.fetch_fresh_helper_token()
+            preferences = self.rest.get_user_preference()
+            root = preferences[0] if isinstance(preferences, list) else preferences
+            if not isinstance(root, dict) or not root.get("streamerInfo"):
+                raise RuntimeError("read-only Schwab readiness response was incomplete")
+            self._auth_workflow_state = "authorized_reconnecting"
+            self._ensure_stream()
+            self._refresh_stream_subscription()
+        except Exception:
+            # Upstream OAuth/HTTP exceptions can include sensitive request
+            # context. Keep application logs intentionally generic.
+            logger.warning("Schwab authorization readiness verification failed")
+            self._auth_workflow_state = "failed"
+            self._auth_error = "Authorization could not be verified with Schwab. Please retry."
+
+    def _auth_status_payload(self) -> dict[str, Any]:
+        state = self._auth_workflow_state
+        payload = {
+            "authorized": state in {"authorized", "authorized_reconnecting", "connected"},
+            "auth_owner": "companion_auth",
+            "helper_url_configured": bool(
+                getattr(self.token_provider, "_auth_helper_url", None)
+            ),
+            "status": state,
+            "expires_at": self._auth_flow_expires_at,
+            "resume_recording_required": self._resume_recording_required,
+        }
+        if self._auth_error:
+            payload["error"] = self._auth_error
+        return payload
+
+    def _mark_authorization_outage(self) -> None:
+        if self._auth_outage_open:
+            return
+        with self._lock:
+            recording_active = self._recorder is not None
+        self._auth_continuity.append(
+            "authorization_outage", recording_active=recording_active
+        )
+        self._auth_outage_open = True
+        self._recording_active_at_outage = recording_active
+
+    def _mark_authorization_recovered(self) -> None:
+        if not self._auth_outage_open:
+            return
+        with self._lock:
+            recording_active = self._recorder is not None
+        self._auth_continuity.append(
+            "authorization_recovered", recording_active=recording_active
+        )
+        self._auth_outage_open = False
+        self._resume_recording_required = (
+            self._recording_active_at_outage and not recording_active
+        )
 
     def run_llm(self, symbol: str | None = None) -> dict[str, Any]:
         selected = self.session.normalize_symbol(symbol or self.active_symbol or "")
@@ -581,6 +739,13 @@ class CompanionRuntime:
                 logger.warning("Pattern journal failed for %s", symbol, exc_info=True)
 
     def _on_stream_state(self, state: str) -> None:
+        if state == "CONNECTED" and self._auth_workflow_state == "authorized_reconnecting":
+            self._auth_workflow_state = "connected"
+            self._auth_error = None
+            self._mark_authorization_recovered()
+        elif state in {"LOGIN_FAILED", "STREAM_DOWN", "DOWN"} and self._auth_workflow_state == "authorized_reconnecting":
+            self._auth_workflow_state = "failed"
+            self._auth_error = "Authorization succeeded, but the Schwab stream did not become ready. Please retry."
         self.session.update_connection_state(state)
 
     def _desired_stream_symbols(self) -> list[str]:
@@ -807,6 +972,10 @@ class CompanionRuntime:
             logger.warning("Raw market recording failed", exc_info=True)
 
     def _on_auth_state(self, state: str) -> None:
+        if state == "AUTH_REQUIRED":
+            self._mark_authorization_outage()
+            if self._auth_workflow_state not in {"waiting", "verifying"}:
+                self._auth_workflow_state = "authorization_required"
         self.session.update_connection_state(state)
 
     def _on_llm_state(self, state: str) -> None:

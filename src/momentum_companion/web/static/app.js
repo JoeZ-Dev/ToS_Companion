@@ -20,6 +20,7 @@
     patternVisibility: {},
     patternTriggerHistory: {},
     patternOverlayRevision: null,
+    authPollTimer: null,
   };
 
   const EASTERN_TZ = "America/New_York";
@@ -1244,21 +1245,95 @@
 
   async function refreshAuthStatus() {
     try {
-      const response = await fetch("/api/auth/status");
+      const response = await fetch("/api/auth/status", { cache: "no-store" });
       const payload = await response.json();
-      if (payload.authorized) {
-        byId("auth-status").textContent = "Schwab auth: companion_auth authorized";
-        byId("auth-status").classList.remove("error");
-      } else {
-        byId("auth-status").textContent =
-          "Schwab auth: authorization required in companion_auth";
-        byId("auth-status").classList.add("error");
-      }
+      renderAuthStatus(payload);
     } catch (_error) {
       byId("auth-status").textContent = "Schwab auth: status unavailable";
       byId("auth-status").classList.add("error");
+      renderAuthStatus({ status: "failed", error: "Authorization status is unavailable." });
     }
   }
+
+  const AUTH_COPY = {
+    authorization_required: ["Schwab authorization required", "Reconnect through Schwab to restore live market data."],
+    waiting: ["Waiting for Schwab", "Complete authorization in the Schwab window."],
+    verifying: ["Verifying authorization", "Checking companion_auth and a read-only Schwab request."],
+    authorized_reconnecting: ["Authorized and reconnecting", "The read-only check passed. Waiting for the Schwab stream."],
+    connected: ["Connected", "Schwab authorization and stream readiness are confirmed."],
+    authorized: ["Authorized", "Schwab authorization is available."],
+    failed: ["Authorization failed", "Authorization could not be completed."],
+    checking: ["Checking Schwab authorization", "Checking companion_auth."],
+  };
+
+  function renderAuthStatus(payload) {
+    const status = String(payload?.status || (payload?.authorized ? "authorized" : "authorization_required"));
+    const copy = AUTH_COPY[status] || AUTH_COPY.authorization_required;
+    const banner = byId("schwab-auth-banner");
+    banner.hidden = false;
+    banner.className = `auth-banner ${status === "authorized_reconnecting" ? "reconnecting" : status}`;
+    byId("schwab-auth-title").textContent = copy[0];
+    byId("schwab-auth-detail").textContent = payload?.error || copy[1];
+    const reconnect = byId("schwab-reconnect");
+    reconnect.hidden = !["authorization_required", "failed"].includes(status);
+    reconnect.textContent = status === "failed" ? "Retry" : "Reconnect Schwab";
+    reconnect.disabled = false;
+    byId("schwab-resume-recording").hidden = !payload?.resume_recording_required;
+    byId("auth-status").textContent = `Schwab auth: ${copy[0]}`;
+    byId("auth-status").classList.toggle("error", ["authorization_required", "failed"].includes(status));
+    if (["waiting", "verifying", "authorized_reconnecting"].includes(status)) {
+      scheduleAuthPoll();
+    } else if (state.authPollTimer) {
+      clearTimeout(state.authPollTimer);
+      state.authPollTimer = null;
+    }
+  }
+
+  function scheduleAuthPoll() {
+    if (state.authPollTimer) return;
+    state.authPollTimer = setTimeout(async () => {
+      state.authPollTimer = null;
+      try {
+        const response = await fetch("/api/auth/reauthorize/status", { cache: "no-store" });
+        const payload = await parseResponse(response);
+        if (!response.ok) throw new Error(payload.detail || "Unable to verify authorization");
+        renderAuthStatus(payload);
+      } catch (error) {
+        renderAuthStatus({ status: "failed", error: error.message });
+      }
+    }, 1000);
+  }
+
+  byId("schwab-reconnect").addEventListener("click", async () => {
+    const button = byId("schwab-reconnect");
+    button.disabled = true;
+    const popup = window.open("about:blank", "schwab-authorization", "popup,width=720,height=820");
+    try {
+      const response = await fetch("/api/auth/reauthorize", { method: "POST" });
+      const payload = await parseResponse(response);
+      if (!response.ok) throw new Error(payload.detail || payload.error || "Unable to start authorization");
+      if (!payload.authorization_url) throw new Error(payload.error || "Unable to start authorization");
+      renderAuthStatus(payload);
+      if (popup) popup.location.replace(payload.authorization_url);
+      else window.location.assign(payload.authorization_url);
+    } catch (error) {
+      if (popup) popup.close();
+      renderAuthStatus({ status: "failed", error: error.message });
+    }
+  });
+
+  byId("schwab-resume-recording").addEventListener("click", async () => {
+    try {
+      const response = await fetch("/api/auth/resume-recording", { method: "POST" });
+      const payload = await parseResponse(response);
+      if (!response.ok) throw new Error(payload.detail || "Unable to resume recording");
+      renderRecorderState(payload);
+      byId("schwab-resume-recording").hidden = true;
+      setRecordingMessage("Recording resumed by explicit operator action.");
+    } catch (error) {
+      byId("schwab-auth-detail").textContent = error.message;
+    }
+  });
 
   function connect() {
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
