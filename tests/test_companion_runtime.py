@@ -48,10 +48,18 @@ class FakeRecorder:
 
 
 class FakeAppState:
+    def __init__(self):
+        self.values = {}
+
     def get(self, key):
+        if key in self.values:
+            return self.values[key]
         if key == "llm_full_model":
             return "test-model"
         return None
+
+    def set(self, key, value):
+        self.values[key] = str(value)
 
 
 class FakeLLMClient:
@@ -93,6 +101,9 @@ def bare_runtime():
     runtime._stream = FakeStream()
     runtime._recorder = None
     runtime._et_tz = ZoneInfo("America/New_York")
+    runtime.app_state = FakeAppState()
+    runtime._started = True
+    runtime._last_recording_recovery_attempt = 0.0
     return runtime
 
 
@@ -409,3 +420,137 @@ def test_stream_watchdog_does_nothing_outside_intraday_window():
 
     assert runtime._stream.refresh_calls == 0
     assert runtime._stream.reconnect_calls == 0
+
+
+
+def test_runtime_stopped_preserves_recovery_intent(monkeypatch):
+    import json
+    import momentum_companion.runtime.companion_runtime as runtime_module
+
+    runtime = bare_runtime()
+    recorder = FakeRecorder()
+    recorder.session_dir = "/tmp/2026-10-08_093654_session"
+    recorder.close = lambda stop_reason="stopped": None
+    runtime._recorder = recorder
+    runtime._recording_symbols = {"JZ", "FLYE"}
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = cls(2026, 10, 8, 10, 5, tzinfo=ZoneInfo("America/New_York"))
+            return value if tz else value.replace(tzinfo=None)
+
+    monkeypatch.setattr(runtime_module, "datetime", FixedDateTime)
+
+    state = runtime.stop_recording(reason="runtime_stopped")
+    intent = json.loads(runtime.app_state.get(runtime_module._RECORDING_INTENT_KEY))
+
+    assert state["recovery_pending"] is True
+    assert intent["resume_allowed"] is True
+    assert intent["date_et"] == "2026-10-08"
+    assert intent["symbols"] == ["FLYE", "JZ"]
+    assert intent["previous_session_dir"].endswith("2026-10-08_093654_session")
+    assert intent["interrupted_at_et"].startswith("2026-10-08T10:05:00")
+
+
+def test_manual_stop_clears_recovery_intent():
+    runtime = bare_runtime()
+    runtime.app_state.set(
+        "market_day_recording_resume_intent_v1",
+        '{"resume_allowed": true, "date_et": "2026-10-08", "symbols": ["JZ"]}',
+    )
+    recorder = FakeRecorder()
+    recorder.session_dir = "/tmp/session"
+    recorder.close = lambda stop_reason="stopped": None
+    runtime._recorder = recorder
+    runtime._recording_symbols = {"JZ"}
+
+    runtime.stop_recording(reason="browser_stop")
+
+    assert runtime.app_state.get("market_day_recording_resume_intent_v1") == ""
+
+
+def test_recovery_waits_for_auth_then_starts_new_session(monkeypatch):
+    import json
+    import momentum_companion.runtime.companion_runtime as runtime_module
+
+    runtime = bare_runtime()
+    runtime._recorder = None
+    runtime._recording_symbols = set()
+    runtime.app_state.set(
+        runtime_module._RECORDING_INTENT_KEY,
+        json.dumps({
+            "schema_version": "market_day_recording_resume_intent.v1",
+            "date_et": "2026-10-08",
+            "resume_allowed": True,
+            "symbols": ["JZ", "FLYE"],
+            "interrupted_at_et": "2026-10-08T10:00:00-04:00",
+            "previous_session_dir": "/data/2026-10-08_093654_session",
+        }),
+    )
+
+    now = datetime(2026, 10, 8, 10, 10, tzinfo=ZoneInfo("America/New_York"))
+    runtime.auth_status = lambda: {"authorized": False}
+    assert runtime._recover_recording_intent_once(now_et=now) is False
+    assert runtime.session.snapshot()["recorder_state"]["recovery_pending"] is True
+
+    captured = {}
+
+    def fake_start(symbols, recovery_context=None):
+        captured["symbols"] = list(symbols)
+        captured["context"] = dict(recovery_context or {})
+        runtime._recorder = object()
+        return {"active": True}
+
+    runtime._last_recording_recovery_attempt = 0.0
+    runtime.auth_status = lambda: {"authorized": True}
+    runtime.start_recording = fake_start
+
+    assert runtime._recover_recording_intent_once(now_et=now) is True
+    assert captured["symbols"] == ["JZ", "FLYE"]
+    assert captured["context"]["recovered_from_interruption"] is True
+    assert captured["context"]["previous_session_dir"].endswith(
+        "2026-10-08_093654_session"
+    )
+
+
+def test_recovery_intent_expires_at_cutoff(monkeypatch):
+    import json
+    import momentum_companion.runtime.companion_runtime as runtime_module
+
+    runtime = bare_runtime()
+    runtime._recorder = None
+    runtime._recording_symbols = set()
+    runtime.app_state.set(
+        runtime_module._RECORDING_INTENT_KEY,
+        json.dumps({
+            "date_et": "2026-10-08",
+            "resume_allowed": True,
+            "symbols": ["JZ"],
+        }),
+    )
+
+    now = datetime(2026, 10, 8, 15, 0, tzinfo=ZoneInfo("America/New_York"))
+    assert runtime._recover_recording_intent_once(now_et=now) is False
+    assert runtime.app_state.get(runtime_module._RECORDING_INTENT_KEY) == ""
+
+
+def test_old_day_recovery_intent_is_not_resumed():
+    import json
+    import momentum_companion.runtime.companion_runtime as runtime_module
+
+    runtime = bare_runtime()
+    runtime._recorder = None
+    runtime._recording_symbols = set()
+    runtime.app_state.set(
+        runtime_module._RECORDING_INTENT_KEY,
+        json.dumps({
+            "date_et": "2026-10-07",
+            "resume_allowed": True,
+            "symbols": ["JZ"],
+        }),
+    )
+
+    now = datetime(2026, 10, 8, 8, 0, tzinfo=ZoneInfo("America/New_York"))
+    assert runtime._recover_recording_intent_once(now_et=now) is False
+    assert runtime.app_state.get(runtime_module._RECORDING_INTENT_KEY) == ""
