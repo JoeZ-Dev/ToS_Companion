@@ -23,9 +23,13 @@ joelab-ingress
 
 ToS_Companion should use the same network.
 
-No host port is required.
+The browser/public path does not require a host-published port, but WAMO runs as a host systemd service and requires a private loopback API. The joelab compose therefore publishes:
 
-This avoids conflicts with other joelab services already using host ports, including the existing service bound to host port 8787.
+```text
+127.0.0.1:4977 -> tos-companion:8787
+```
+
+This port is bound only to localhost and is not exposed on the LAN or through Cloudflare. It restores WAMO's configured `WAMO_TOS_API_BASE=http://127.0.0.1:4977` while keeping the browser/public path on the `joelab-ingress` Docker network.
 
 ## Schwab authentication
 
