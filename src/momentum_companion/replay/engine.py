@@ -20,8 +20,14 @@ class ReplayEngine:
     It never subscribes to Schwab and never mutates the live CompanionRuntime.
     """
 
-    def __init__(self, *, recordings_root: Path) -> None:
+    def __init__(
+        self,
+        *,
+        recordings_root: Path,
+        max_bars_per_symbol: int = 600,
+    ) -> None:
         self.catalog = RecordingCatalog(recordings_root)
+        self._max_bars_per_symbol = int(max_bars_per_symbol)
         self._lock = threading.RLock()
         self._events: list[dict[str, Any]] = []
         self._session_id: str | None = None
@@ -35,7 +41,9 @@ class ReplayEngine:
         self._reset_analysis()
 
     def _reset_analysis(self) -> None:
-        self.session = CompanionSession()
+        self.session = CompanionSession(
+            max_bars_per_symbol=self._max_bars_per_symbol
+        )
         self._cache = LevelOneCache()
         self._aggregator = BarAggregator10s()
         self.pattern_service = PatternEvaluationService()
