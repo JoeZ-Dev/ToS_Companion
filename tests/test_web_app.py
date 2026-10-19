@@ -507,7 +507,7 @@ def test_wamo_review_window_is_future_safe_and_returns_10s_bars(tmp_path):
         '"counts":{"OFAL":{"LEVELONE_EQUITIES":4}}}'
     )
     rows = [
-        {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"OFAL","stream_ts_ms":1000,"raw":{"key":"OFAL","3":0.50,"8":100}},
+        {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"OFAL","stream_ts_ms":1000,"raw":{"key":"OFAL","1":0.49,"2":0.51,"3":0.50,"8":100}},
         {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"OFAL","stream_ts_ms":11000,"raw":{"key":"OFAL","3":0.52,"8":120}},
         {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"OFAL","stream_ts_ms":21000,"raw":{"key":"OFAL","3":0.54,"8":150}},
         {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"OFAL","stream_ts_ms":31000,"raw":{"key":"OFAL","3":0.53,"8":180}},
@@ -551,7 +551,7 @@ def test_wamo_full_session_compatibility_retains_more_than_default_bar_cap(tmp_p
             "service": "LEVELONE_EQUITIES",
             "symbol": "OFAL",
             "stream_ts_ms": index * 10_000 + 1000,
-            "raw": {"key": "OFAL", "3": 0.50 + index / 100000, "8": 100 + index},
+            "raw": {"key": "OFAL", "1": 0.49, "2": 0.51, "3": 0.50 + index / 100000, "8": 100 + index},
         })
     (session / "manifest.json").write_text(
         json.dumps({
