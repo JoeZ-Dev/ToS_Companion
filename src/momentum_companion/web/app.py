@@ -6,12 +6,13 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from momentum_companion.replay import ReplayEngine
 from momentum_companion.runtime import CompanionRuntime
+from momentum_companion.web.admin_access import AdminAccessVerifier
 
 
 STATIC_DIR = Path(__file__).with_name("static")
@@ -59,11 +60,13 @@ def create_app(
     runtime: CompanionRuntime | None = None,
     *,
     replay_engine: ReplayEngine | None = None,
+    admin_authorizer: Any | None = None,
 ) -> FastAPI:
     companion = runtime or CompanionRuntime()
     replay = replay_engine or ReplayEngine(
         recordings_root=Path.home() / ".tos_companion" / "recordings"
     )
+    admin_access = admin_authorizer or AdminAccessVerifier()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -149,6 +152,36 @@ def create_app(
     @app.get("/api/auth/status")
     def auth_status() -> dict[str, Any]:
         return companion.auth_status()
+
+    def require_admin(request: Request) -> None:
+        assertion = request.headers.get("Cf-Access-Jwt-Assertion")
+        authorize = getattr(admin_access, "authorize", admin_access)
+        if not callable(authorize) or not bool(authorize(assertion)):
+            raise HTTPException(
+                status_code=403,
+                detail="Trusted admin access is required for Schwab authorization.",
+            )
+
+    @app.post("/api/auth/reauthorize")
+    def begin_reauthorization(
+        request: Request, response: Response
+    ) -> dict[str, Any]:
+        require_admin(request)
+        response.headers["Cache-Control"] = "no-store"
+        return companion.begin_schwab_reauthorization()
+
+    @app.get("/api/auth/reauthorize/status")
+    def poll_reauthorization(request: Request) -> dict[str, Any]:
+        require_admin(request)
+        return companion.poll_schwab_reauthorization()
+
+    @app.post("/api/auth/resume-recording")
+    def resume_recording_after_authorization(request: Request) -> dict[str, Any]:
+        require_admin(request)
+        try:
+            return companion.resume_recording_after_authorization()
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/symbol/{symbol}")
     def select_symbol(symbol: str) -> dict[str, Any]:

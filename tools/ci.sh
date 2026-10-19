@@ -12,6 +12,7 @@ echo "Running maintained core test set..."
 pytest -q \
   tests/test_ae.py \
   tests/test_app_state.py \
+  tests/test_auth_refresh.py \
   tests/test_bar_aggregator.py \
   tests/test_bar_session.py \
   tests/test_codex_bridge_client.py \
@@ -40,6 +41,7 @@ pytest -q \
   tests/test_stream_freshness.py \
   tests/test_stream_mapping.py \
   tests/test_stream_raw_recording.py \
+  tests/test_schwab_reauthorization.py \
   tests/test_synthetic_trigger.py \
   tests/test_trade_executor_cancel.py \
   tests/test_trade_executor_integration.py \
