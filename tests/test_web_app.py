@@ -467,3 +467,110 @@ def test_stateless_replay_inspection_does_not_mutate_shared_replay(tmp_path, mon
     assert payload["replay"]["cursor"] == 2
     assert payload["session"]["symbols"]["TOPS"]["quote"]["last"] == 1.06
     assert shared.snapshot()["replay"]["status"] == "EMPTY"
+
+
+
+def test_wamo_review_recordings_compatibility_endpoint(tmp_path):
+    from momentum_companion.replay.engine import ReplayEngine
+
+    session = tmp_path / "2026-10-09_073202_session"
+    session.mkdir(parents=True)
+    (session / "manifest.json").write_text(
+        '{"kind":"market_day_recording","symbols":["OFAL"],'
+        '"services":["LEVELONE_EQUITIES"],'
+        '"started_at_et":"2026-10-09T07:32:02-04:00",'
+        '"ended_at_et":"2026-10-09T15:00:00-04:00",'
+        '"stop_reason":"3pm_cutoff",'
+        '"counts":{"OFAL":{"LEVELONE_EQUITIES":2}}}'
+    )
+    (session / "OFAL.jsonl").write_text("")
+
+    runtime = FakeRuntime()
+    shared = ReplayEngine(recordings_root=tmp_path)
+    with TestClient(create_app(runtime, replay_engine=shared)) as client:
+        response = client.get("/api/review/recordings")
+
+    assert response.status_code == 200
+    assert response.json()[0]["session_id"] == session.name
+    assert response.json()[0]["symbols"] == ["OFAL"]
+
+
+def test_wamo_review_window_is_future_safe_and_returns_10s_bars(tmp_path):
+    import json
+    from momentum_companion.replay.engine import ReplayEngine
+
+    session = tmp_path / "2026-10-09_073202_session"
+    session.mkdir(parents=True)
+    (session / "manifest.json").write_text(
+        '{"kind":"market_day_recording","symbols":["OFAL"],'
+        '"services":["LEVELONE_EQUITIES"],'
+        '"counts":{"OFAL":{"LEVELONE_EQUITIES":4}}}'
+    )
+    rows = [
+        {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"OFAL","stream_ts_ms":1000,"raw":{"key":"OFAL","1":0.49,"2":0.51,"3":0.50,"8":100}},
+        {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"OFAL","stream_ts_ms":11000,"raw":{"key":"OFAL","3":0.52,"8":120}},
+        {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"OFAL","stream_ts_ms":21000,"raw":{"key":"OFAL","3":0.54,"8":150}},
+        {"kind":"market_event","service":"LEVELONE_EQUITIES","symbol":"OFAL","stream_ts_ms":31000,"raw":{"key":"OFAL","3":0.53,"8":180}},
+    ]
+    with (session / "OFAL.jsonl").open("w") as handle:
+        for row in rows:
+            handle.write(json.dumps(row) + "\n")
+
+    runtime = FakeRuntime()
+    shared = ReplayEngine(recordings_root=tmp_path)
+    with TestClient(create_app(runtime, replay_engine=shared)) as client:
+        response = client.post(
+            "/api/review/window",
+            json={
+                "session_id": session.name,
+                "symbol": "OFAL",
+                "start_ms": 1000,
+                "end_ms": 31000,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["window"]["future_data_included"] is False
+    assert payload["symbol"] == "OFAL"
+    assert payload["replay"]["current_ts_ms"] == 31000
+    assert payload["bars_10s"]
+    assert payload["data_quality"]["evidence_tier"] == "L1"
+
+
+def test_wamo_full_session_compatibility_retains_more_than_default_bar_cap(tmp_path):
+    import json
+    from momentum_companion.replay.engine import ReplayEngine
+
+    session = tmp_path / "2026-10-09_073202_session"
+    session.mkdir(parents=True)
+    rows = []
+    for index in range(620):
+        rows.append({
+            "kind": "market_event",
+            "service": "LEVELONE_EQUITIES",
+            "symbol": "OFAL",
+            "stream_ts_ms": index * 10_000 + 1000,
+            "raw": {"key": "OFAL", "1": 0.49, "2": 0.51, "3": 0.50 + index / 100000, "8": 100 + index},
+        })
+    (session / "manifest.json").write_text(
+        json.dumps({
+            "kind": "market_day_recording",
+            "symbols": ["OFAL"],
+            "services": ["LEVELONE_EQUITIES"],
+            "counts": {"OFAL": {"LEVELONE_EQUITIES": len(rows)}},
+        })
+    )
+    with (session / "OFAL.jsonl").open("w") as handle:
+        for row in rows:
+            handle.write(json.dumps(row) + "\n")
+
+    runtime = FakeRuntime()
+    shared = ReplayEngine(recordings_root=tmp_path)
+    with TestClient(create_app(runtime, replay_engine=shared)) as client:
+        response = client.get(f"/api/review/session/{session.name}/OFAL")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["window"]["full_session"] is True
+    assert len(payload["bars_10s"]) > 600

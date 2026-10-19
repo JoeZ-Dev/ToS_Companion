@@ -48,6 +48,13 @@ class ReplayInspectRequest(BaseModel):
     timestamp_ms: int | None = None
 
 
+class ReviewWindowRequest(BaseModel):
+    session_id: str
+    symbol: str
+    start_ms: int | None = None
+    end_ms: int | None = None
+
+
 LIGHTWEIGHT_CHARTS_JS = (
     Path(__file__).resolve().parents[1]
     / "ui"
@@ -216,6 +223,146 @@ def create_app(
     @app.post("/api/recording/stop")
     def stop_recording() -> dict[str, Any]:
         return companion.stop_recording(reason="browser_stop")
+
+    def _review_packet(
+        engine: ReplayEngine,
+        *,
+        start_ms: int | None,
+        end_ms: int | None,
+        full_session: bool = False,
+    ) -> dict[str, Any]:
+        snapshot = engine.snapshot()
+        replay_state = snapshot.get("replay") or {}
+        symbol = str(replay_state.get("symbol") or "").upper()
+        symbol_state = ((snapshot.get("session") or {}).get("symbols") or {}).get(symbol) or {}
+        bars = []
+        for bar in symbol_state.get("bars_10s") or []:
+            bar_ms = int(bar.get("ts") or 0) * 1000
+            if start_ms is not None and bar_ms < int(start_ms):
+                continue
+            if end_ms is not None and bar_ms > int(end_ms):
+                continue
+            item = dict(bar)
+            item.setdefault("interval_seconds", 10)
+            item.setdefault("source", "L1")
+            bars.append(item)
+
+        events = [
+            event for event in engine._events
+            if (start_ms is None or int(event["stream_ts_ms"]) >= int(start_ms))
+            and (end_ms is None or int(event["stream_ts_ms"]) <= int(end_ms))
+        ]
+        gaps = []
+        previous = None
+        for event in events:
+            ts = int(event["stream_ts_ms"])
+            if previous is not None and ts - previous > 60_000:
+                gaps.append(ts - previous)
+            previous = ts
+
+        return {
+            "purpose": "momentum_full_session_review" if full_session else "momentum_review_window",
+            "session_id": replay_state.get("session_id"),
+            "symbol": symbol,
+            "window": {
+                "start_ms": start_ms,
+                "end_ms": end_ms,
+                "future_data_included": False,
+                "full_session": bool(full_session),
+            },
+            "bars_10s": bars,
+            "vwap_points": [],
+            "end_state": {
+                "quote": symbol_state.get("quote") or {},
+                "ae_snapshot": symbol_state.get("ae_snapshot") or {},
+                "pattern_observations": symbol_state.get("pattern_observations") or [],
+            },
+            "replay": replay_state,
+            "data_quality": {
+                "evidence_tier": "L1",
+                "significant_gap": {
+                    "count": len(gaps),
+                    "largest_ms": max(gaps) if gaps else 0,
+                },
+                "gap_repair": {"repaired_candles_consumed": 0},
+                "volume": {"capped_total": 0, "discarded_total": 0},
+                "receive_offset_ms": {},
+            },
+            "review_context": {
+                "source": "deterministic_replay_compatibility",
+                "events_in_window": len(events),
+            },
+        }
+
+    @app.get("/api/review/recordings")
+    def review_recordings() -> list[dict[str, Any]]:
+        return replay.catalog.list_sessions()
+
+    @app.post("/api/review/window")
+    def review_window(request: ReviewWindowRequest) -> dict[str, Any]:
+        try:
+            isolated = ReplayEngine(
+                recordings_root=replay.catalog.root,
+                max_bars_per_symbol=10_000,
+            )
+            state = isolated.load(request.session_id, request.symbol)
+            total = int(state.get("total_events") or 0)
+            if total == 0:
+                return _review_packet(
+                    isolated,
+                    start_ms=request.start_ms,
+                    end_ms=request.end_ms,
+                )
+
+            first_ms = int(isolated._events[0]["stream_ts_ms"])
+            last_ms = int(isolated._events[-1]["stream_ts_ms"])
+            requested_end = last_ms if request.end_ms is None else int(request.end_ms)
+            requested_start = (
+                requested_end - 20 * 60 * 1000
+                if request.start_ms is None
+                else int(request.start_ms)
+            )
+            if requested_start > requested_end:
+                raise ValueError("start_ms must be <= end_ms")
+            if requested_end - requested_start > 45 * 60 * 1000:
+                raise ValueError("review window may not exceed 45 minutes")
+
+            resolved_start = max(requested_start, first_ms)
+            resolved_end = min(requested_end, last_ms)
+            if resolved_start <= resolved_end:
+                isolated.seek(isolated.cursor_for_timestamp(resolved_end))
+            return _review_packet(
+                isolated,
+                start_ms=resolved_start,
+                end_ms=resolved_end,
+            )
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/review/session/{session_id}/{symbol}")
+    def review_full_session(session_id: str, symbol: str) -> dict[str, Any]:
+        try:
+            isolated = ReplayEngine(
+                recordings_root=replay.catalog.root,
+                max_bars_per_symbol=10_000,
+            )
+            state = isolated.load(session_id, symbol)
+            total = int(state.get("total_events") or 0)
+            if total:
+                isolated.step(total)
+                start_ms = int(isolated._events[0]["stream_ts_ms"])
+                end_ms = int(isolated._events[-1]["stream_ts_ms"])
+            else:
+                start_ms = None
+                end_ms = None
+            return _review_packet(
+                isolated,
+                start_ms=start_ms,
+                end_ms=end_ms,
+                full_session=True,
+            )
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/replay/sessions")
     def replay_sessions() -> list[dict[str, Any]]:
