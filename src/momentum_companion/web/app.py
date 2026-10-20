@@ -308,8 +308,7 @@ def create_app(
     def review_recordings() -> list[dict[str, Any]]:
         return replay.catalog.list_sessions()
 
-    @lru_cache(maxsize=4)
-    def _complete_l1_quote_history(session_id: str, symbol: str) -> tuple[tuple[int, ...], tuple[dict[str, Any], ...]]:
+    def _build_l1_quote_history(session_id: str, symbol: str) -> tuple[tuple[int, ...], tuple[dict[str, Any], ...]]:
         """Rebuild causal quote state from captured L1 deltas once per symbol.
 
         A bounded LRU prevents repeated full-day JSONL scans when WAMO requests
@@ -338,6 +337,8 @@ def create_app(
                 })
         return tuple(frame["timestamp_ms"] for frame in frames), tuple(frames)
 
+    _cached_complete_l1_quote_history = lru_cache(maxsize=4)(_build_l1_quote_history)
+
     @app.post("/api/review/l1-window")
     def review_l1_window(request: ReviewL1WindowRequest) -> dict[str, Any]:
         """Read-only captured Level 1 top-of-book snapshots in a bounded time window.
@@ -354,7 +355,15 @@ def create_app(
         if not symbol:
             raise HTTPException(status_code=400, detail="symbol is required")
         try:
-            timestamps, history = _complete_l1_quote_history(request.session_id, symbol)
+            manifest = replay.catalog.load_manifest(request.session_id)
+            # Completed recordings are immutable; active captures must be
+            # reconstructed afresh so the LRU never serves stale quotes.
+            read_history = (
+                _cached_complete_l1_quote_history
+                if manifest.get("ended_at_et")
+                else _build_l1_quote_history
+            )
+            timestamps, history = read_history(request.session_id, symbol)
         except (ValueError, RuntimeError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         begin = bisect_left(timestamps, request.start_ms)
