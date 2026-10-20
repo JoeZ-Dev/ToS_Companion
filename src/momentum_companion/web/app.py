@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from bisect import bisect_left, bisect_right
+from functools import lru_cache
 from contextlib import asynccontextmanager
 import threading
 from pathlib import Path
@@ -11,6 +13,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from momentum_companion.replay import ReplayEngine
+from momentum_companion.clients.stream_mapping import LevelOneCache
 from momentum_companion.runtime import CompanionRuntime
 from momentum_companion.web.admin_access import AdminAccessVerifier
 
@@ -53,6 +56,13 @@ class ReviewWindowRequest(BaseModel):
     symbol: str
     start_ms: int | None = None
     end_ms: int | None = None
+
+
+class ReviewL1WindowRequest(BaseModel):
+    session_id: str
+    symbol: str
+    start_ms: int
+    end_ms: int
 
 
 LIGHTWEIGHT_CHARTS_JS = (
@@ -297,6 +307,69 @@ def create_app(
     @app.get("/api/review/recordings")
     def review_recordings() -> list[dict[str, Any]]:
         return replay.catalog.list_sessions()
+
+    @lru_cache(maxsize=4)
+    def _complete_l1_quote_history(session_id: str, symbol: str) -> tuple[tuple[int, ...], tuple[dict[str, Any], ...]]:
+        """Rebuild causal quote state from captured L1 deltas once per symbol.
+
+        A bounded LRU prevents repeated full-day JSONL scans when WAMO requests
+        multiple 120-second windows while also bounding historical cache size.
+        No shared replay cursor or live runtime state is modified.
+        """
+        cache = LevelOneCache()
+        frames: list[dict[str, Any]] = []
+        for event in replay.catalog.load_events(session_id, symbol):
+            ts = int(event["stream_ts_ms"])
+            emitted = cache.process_messages({
+                "service": "LEVELONE_EQUITIES",
+                "timestamp": ts,
+                "content": [event["raw"]],
+            })
+            for row in emitted:
+                frames.append({
+                    "timestamp_ms": ts,
+                    "bid": row.get("bid"),
+                    "ask": row.get("ask"),
+                    "last": row.get("last"),
+                    "bid_size": row.get("bid_size"),
+                    "ask_size": row.get("ask_size"),
+                    "last_size": row.get("last_size"),
+                    "volume": row.get("volume"),
+                })
+        return tuple(frame["timestamp_ms"] for frame in frames), tuple(frames)
+
+    @app.post("/api/review/l1-window")
+    def review_l1_window(request: ReviewL1WindowRequest) -> dict[str, Any]:
+        """Read-only captured Level 1 top-of-book snapshots in a bounded time window.
+
+        This is a historical observation service, not an execution/fill endpoint.
+        It reconstructs partial Schwab deltas in capture order; it neither
+        interpolates unobserved quotes nor includes snapshots past end_ms.
+        """
+        if request.start_ms < 0 or request.end_ms < request.start_ms:
+            raise HTTPException(status_code=400, detail="invalid review L1 time range")
+        if request.end_ms - request.start_ms > 120_000:
+            raise HTTPException(status_code=400, detail="L1 review window may not exceed 120 seconds")
+        symbol = request.symbol.strip().upper()
+        if not symbol:
+            raise HTTPException(status_code=400, detail="symbol is required")
+        try:
+            timestamps, history = _complete_l1_quote_history(request.session_id, symbol)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        begin = bisect_left(timestamps, request.start_ms)
+        end = bisect_right(timestamps, request.end_ms)
+        return {
+            "session_id": request.session_id,
+            "symbol": symbol,
+            "window": {
+                "start_ms": request.start_ms,
+                "end_ms": request.end_ms,
+                "future_data_included": False,
+            },
+            "frames": list(history[begin:end]),
+            "evidence_tier": "captured_L1_top_of_book",
+        }
 
     @app.post("/api/review/window")
     def review_window(request: ReviewWindowRequest) -> dict[str, Any]:
