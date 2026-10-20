@@ -574,3 +574,51 @@ def test_wamo_full_session_compatibility_retains_more_than_default_bar_cap(tmp_p
     payload = response.json()
     assert payload["window"]["full_session"] is True
     assert len(payload["bars_10s"]) > 600
+
+
+def test_wamo_l1_window_reconstructs_partial_quotes_without_future_or_shared_mutation(tmp_path):
+    import json
+    from momentum_companion.replay.engine import ReplayEngine
+
+    session = tmp_path / "2026-10-15_070000_session"
+    session.mkdir()
+    (session / "manifest.json").write_text(json.dumps({
+        "kind": "market_day_recording", "symbols": ["ABCD"],
+        "services": ["LEVELONE_EQUITIES"], "counts": {"ABCD": {"LEVELONE_EQUITIES": 5}}
+    }))
+    events = [
+        (1000, {"key": "ABCD", "1": 1.00, "2": 1.02, "3": 1.01, "4": 50, "5": 30, "8": 1000}),
+        (1500, {"key": "ABCD", "3": 1.015, "8": 1200}),
+        (2000, {"key": "ABCD", "2": 1.025}),
+        (3000, {"key": "ABCD", "1": 1.01, "5": 60}),
+        (4000, {"key": "ABCD", "3": 1.07}),
+    ]
+    with (session / "ABCD.jsonl").open("w") as f:
+        for ts, raw in events:
+            f.write(json.dumps({
+                "kind": "market_event", "service": "LEVELONE_EQUITIES",
+                "symbol": "ABCD", "stream_ts_ms": ts, "raw": raw,
+            }) + "\n")
+
+    shared = ReplayEngine(recordings_root=tmp_path)
+    with TestClient(create_app(FakeRuntime(), replay_engine=shared)) as client:
+        req = {"session_id": session.name, "symbol": "abcd",
+               "start_ms": 1500, "end_ms": 3000}
+        first = client.post("/api/review/l1-window", json=req)
+        second = client.post("/api/review/l1-window", json=req)
+        assert first.status_code == 200
+        assert first.json() == second.json()
+        payload = first.json()
+        assert payload["window"]["future_data_included"] is False
+        assert [row["timestamp_ms"] for row in payload["frames"]] == [1500, 2000, 3000]
+        assert payload["frames"][0]["bid"] == 1.00
+        assert payload["frames"][0]["ask"] == 1.02
+        assert payload["frames"][1]["ask"] == 1.025
+        assert payload["frames"][2]["bid"] == 1.01
+        assert payload["frames"][2]["ask_size"] == 60
+        assert payload["frames"][-1]["last"] == 1.015
+        assert shared.snapshot()["replay"]["status"] == "EMPTY"
+
+        assert client.post("/api/review/l1-window", json={**req, "end_ms": 200000}).status_code == 400
+        assert client.post("/api/review/l1-window", json={**req, "start_ms": 4000, "end_ms": 1000}).status_code == 400
+        assert client.post("/api/review/l1-window", json={**req, "session_id": "../bad"}).status_code == 400
